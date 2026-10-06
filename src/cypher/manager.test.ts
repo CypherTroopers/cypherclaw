@@ -166,7 +166,7 @@ describe("Cypher node owner", () => {
             CYPHER_HEADLESS: "1",
             CYPHER_DATADIR: dataDir,
             CYPHER_IPC_PATH: ipcPath,
-            CYPHER_BROWSER_RELAY: "0",
+            CYPHER_BROWSER_RELAY: "1",
             CYPHER_RPC_ENABLED: "0",
             CYPHER_RPC_BIND: "127.0.0.1",
             CYPHER_WS_BIND: "127.0.0.1",
