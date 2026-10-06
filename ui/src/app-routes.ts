@@ -38,6 +38,7 @@ import { pages as configPages } from "./pages/config/route.ts";
 import { page as connectionPage } from "./pages/connection/route.ts";
 import { page as cronPage } from "./pages/cron/route.ts";
 import { page as custodianPage } from "./pages/custodian/route.ts";
+import { page as cypherPage } from "./pages/cypher/route.ts";
 import { page as dashboardsPage } from "./pages/dashboards/route.ts";
 import { page as debugPage } from "./pages/debug/route.ts";
 import {
@@ -111,6 +112,7 @@ const APP_ROUTE_TREE = [
   worktreesPage,
   sessionsPage,
   systemsPage,
+  cypherPage,
   secretsPage,
   searchPage,
   usagePage,

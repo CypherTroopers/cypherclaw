@@ -29,7 +29,11 @@
       "dist/entry.js",
       "dist/index.js",
       "dist/mac-node-worker.js",
-      "dist/native-hook-relay/entry.js"
+      "dist/native-hook-relay/entry.js",
+      "cypher/colossusX_linux.sh",
+      "cypher/colossusX_mac.sh",
+      "cypher/build/bin/cypher-linux-amd64",
+      "cypher/build/bin/cypher-darwin-arm64"
     ]
   },
   "directories": {
@@ -53,6 +57,20 @@
     "pnpm-workspace.yaml",
     "README.md",
     "THIRD_PARTY_NOTICES.md",
+    "cypher/colossusX_linux.sh",
+    "cypher/colossusX_mac.sh",
+    "cypher/colossusX_windows.ps1",
+    "cypher/genesis.json",
+    "cypher/static-nodes.toml",
+    "cypher/build/browser-relay.sh",
+    "cypher/build/bin/cypher-linux-amd64",
+    "cypher/build/bin/cypher-darwin-arm64",
+    "cypher/build/bin/cypher.exe",
+    "cypher/build/bin/libcrypto-3-x64.dll",
+    "cypher/build/bin/libgcc_s_seh-1.dll",
+    "cypher/build/bin/libgmp-10.dll",
+    "cypher/build/bin/libstdc++-6.dll",
+    "cypher/build/bin/libwinpthread-1.dll",
     "dist/",
     "!dist/worker/**",
     "dist/worker-artifacts/*.tar.gz",

@@ -20,6 +20,7 @@ export const CONTROL_UI_RESERVED_ROUTE_SEGMENTS: readonly string[] = Object.free
   "config",
   "cron",
   "custodian",
+  "cypher",
   "dashboard",
   "dashboards",
   "debug",

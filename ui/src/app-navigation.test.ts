@@ -456,6 +456,7 @@ describe("SIDEBAR_NAV_ROUTES", () => {
       "cron",
       "sessions",
       "systems",
+      "cypher",
       "activity",
       "meetings",
       "plugins",

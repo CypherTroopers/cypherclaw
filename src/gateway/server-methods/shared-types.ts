@@ -13,6 +13,7 @@ import type {
 import type { ModelCatalogEntry } from "../../agents/model-catalog.types.js";
 import type { CliDeps } from "../../cli/deps.types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { CypherNodeManager } from "../../cypher/manager.js";
 import type { AgentRunDelegatedAuthority } from "../../infra/agent-run-authority.types.js";
 import type { ExecApprovalRequest, ExecApprovalResolved } from "../../infra/exec-approvals.js";
 import type {
@@ -188,6 +189,8 @@ export type GatewaySystemAgentSession = {
 
 /** Kernel-owned services and state that can be constructed without binding sockets. */
 type GatewayKernelContext = {
+  /** Created on first Cypher request and retired with this Gateway instance. */
+  cypherNodeManager?: CypherNodeManager;
   deps: CliDeps;
   /** Host-bound plugin ingress; the transport owns its shared hook dispatch queue. */
   dispatchHookAgentTurn?: (

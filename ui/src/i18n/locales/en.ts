@@ -92,6 +92,7 @@ export const en: TranslationMap & {
   sessionsView: TranslationMap;
   skillWorkshop: TranslationMap;
   systems: TranslationMap;
+  cypher: TranslationMap;
   talkPage: TranslationMap;
   usage: TranslationMap & { overview: TranslationMap };
 } = {
@@ -1744,6 +1745,7 @@ export const en: TranslationMap & {
     connecting: "Connecting to desktop…",
   },
   systems: {},
+  cypher: {},
   routeTitles: {
     modelProviders: "Models",
     notifications: "Notifications",
@@ -1765,6 +1767,7 @@ export const en: TranslationMap & {
     connection: "Gateway",
     sessions: "Sessions",
     systems: "Systems",
+    cypher: "Cypher",
     usage: "Usage",
     cron: "Automations",
     skills: "Skills",
@@ -1813,6 +1816,7 @@ export const en: TranslationMap & {
     connection: "Gateway endpoint, credentials, and handshake status.",
     sessions: "Active sessions and defaults.",
     systems: "Machines and desktops.",
+    cypher: "Node, accounts, mining, and reward recipient.",
     usage: "API usage and costs.",
     cron: "Scheduled tasks and recurring agent runs.",
     skills: "Manage your agent skills",

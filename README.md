@@ -21,6 +21,46 @@ OpenClaw is an open-source AI assistant that runs on your own computer and meets
 
 [Website](https://openclaw.ai) · [Docs](https://docs.openclaw.ai) · [Getting started](https://docs.openclaw.ai/start/getting-started) · [Why OpenClaw](https://docs.openclaw.ai/start/why-openclaw) · [FAQ](https://docs.openclaw.ai/help/faq) · [Vision](VISION.md) · [DeepWiki](https://deepwiki.com/openclaw/openclaw)
 
+## Cypher node in this fork
+
+This fork adds Cypher directly to the Gateway and Control UI. Use this checkout to install these additions. The official installer URLs and published `openclaw` package in the upstream installation section below install upstream OpenClaw and do not contain this fork's Cypher integration. A separate distribution source must be configured before those installation methods can deliver this fork.
+
+Install Node 24.16+ (below 25) or Node 26.1+, and pnpm 12.5.1. From the root of **this fork's checkout**, run the following commands on Linux, macOS, or native Windows PowerShell:
+
+```sh
+pnpm install
+pnpm build
+pnpm ui:build
+pnpm openclaw onboard
+pnpm openclaw gateway run
+```
+
+Keep the Gateway running. In a second terminal, run `pnpm openclaw dashboard` to open the authenticated Control UI, then select **Cypher** in the sidebar. The included prebuilt Cypher binaries do not need a Go build:
+
+| Gateway host              | Binary                                 | Launcher                       | Requirements for the included binary               |
+| ------------------------- | -------------------------------------- | ------------------------------ | -------------------------------------------------- |
+| Linux amd64               | `cypher/build/bin/cypher-linux-amd64`  | `cypher/colossusX_linux.sh`    | glibc 2.38+ and libstdc++ providing GLIBCXX 3.4.32 |
+| Apple Silicon macOS arm64 | `cypher/build/bin/cypher-darwin-arm64` | `cypher/colossusX_mac.sh`      | macOS 15+                                          |
+| Native Windows x64        | `cypher/build/bin/cypher.exe`          | `cypher/colossusX_windows.ps1` | Keep the five included DLLs beside `cypher.exe`    |
+
+Cypher source and original command documentation are available in [Cypher FHS-D](https://github.com/CypherTroopers/cypher/tree/FHS-D) and its [IPC account and reward setup guide](https://github.com/CypherTroopers/cypher/blob/FHS-D/README.md#beginner-setup-common-rpc-node-and-rewards). Windows graceful node shutdown still requires verification on Windows.
+
+The node runs on the **Gateway host**, which may differ from the device displaying the browser. To use `cypher.exe`, run the Gateway on native Windows. A Gateway running in WSL uses the Linux binary. Intel Macs, Linux arm64, and Windows arm64 do not have a matching bundled binary.
+
+In the Cypher page, start the node, create or select a local account, unlock it with its password, and configure mining. The **signing account (A)** identifies the local node; the **reward address (B)** receives the configured Common RPC rewards. They are separate settings. Start and stop mining explicitly, and use **Stop node** to end the node process managed by this Gateway. Account creation, unlocking, reward changes, mining changes, and node lifecycle operations require a Gateway operator with admin permission.
+
+Managed launches use a separate data directory at `<Gateway state directory>/cypher/chaindbname`, omit the interactive console, and communicate through the local Cypher IPC socket or Windows named pipe. Existing `cypher/chaindbname` data is preserved. HTTP and WebSocket listeners are disabled for managed launches; node operations use local IPC. Browser relay is disabled for managed launches because this bundle does not include a relay configuration; Browser relay is not required for the Cypher UI.
+
+For manual launcher use, the original defaults remain: `cypher/chaindbname`, an interactive console, and Browser relay enabled. Disable relay with `CYPHER_BROWSER_RELAY=0` when its configuration is unavailable. The launchers additionally accept `CYPHER_DATADIR` to select a data directory, `CYPHER_HEADLESS=1` to omit the console, `CYPHER_IPC_PATH` to select the IPC endpoint, and `CYPHER_RPC_ENABLED=0` to disable HTTP and WebSocket listeners. Genesis initialization runs only when the selected chain-data directory does not exist; existing chain data and peer files are preserved.
+
+For a local source-package tarball, use the repository's supported packaging command, which prepares the bundled workspace runtime before packing:
+
+```sh
+node scripts/package-openclaw-for-docker.mjs --allow-unreleased-changelog
+```
+
+The command builds package artifacts and writes the tarball under `.artifacts/docker-e2e-package` by default. The package allowlist includes the three Cypher launchers, genesis and peer configuration, the Unix relay argument helper, the three target binaries, and the Windows DLLs. Chain data, keystores, and private relay configurations are outside that allowlist. A complete package build and native installation with these Cypher additions have not yet been verified. This local packaging command does not publish a package.
+
 ## Install
 
 The installer supports macOS, Linux, and Windows. It provisions a supported Node.js runtime when needed.

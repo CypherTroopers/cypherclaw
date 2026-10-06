@@ -16,6 +16,7 @@ import { registerChatProviderReviewEnglish } from "../../ui/src/i18n/locales/en-
 import { registerCodeBlocksEnglish } from "../../ui/src/i18n/locales/en-code-blocks.ts";
 import { registerCommandPaletteEnglish } from "../../ui/src/i18n/locales/en-command-palette.ts";
 import { registerCronEnglish } from "../../ui/src/i18n/locales/en-cron.ts";
+import { registerCypherEnglish } from "../../ui/src/i18n/locales/en-cypher.ts";
 import { registerDebugEnglish } from "../../ui/src/i18n/locales/en-debug.ts";
 import { registerDesktopEnglish } from "../../ui/src/i18n/locales/en-desktop.ts";
 import { registerDevicesEnglish } from "../../ui/src/i18n/locales/en-devices.ts";
@@ -191,6 +192,7 @@ export function loadControlUiSourceCatalog(): TranslationMap {
     registerChatProviderReviewEnglish.catalog,
     registerCodeBlocksEnglish.catalog,
     registerCronEnglish.catalog,
+    registerCypherEnglish.catalog,
     registerDevicesEnglish.catalog,
     registerDreamingEnglish.catalog,
     registerFilePreviewEnglish.catalog,
