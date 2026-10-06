@@ -253,3 +253,4 @@ extensions/discord/assets/embedded-app-sdk.mjs
 
 # Local node data created by manual launches
 /cypher/chaindbname/
+/cypher/browser-llm-lab/searxng/config/settings.yml
