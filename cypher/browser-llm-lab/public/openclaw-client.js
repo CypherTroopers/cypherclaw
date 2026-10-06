@@ -215,7 +215,7 @@ export class OpenClawClient {
       if (generation !== this.generation) return;
       if (hello?.type !== "hello-ok" || hello.protocol !== OPENCLAW_PROTOCOL ||
           hello.auth?.role !== "operator" || !Array.isArray(hello.auth?.scopes))
-        throw failure("PROTOCOL", "This interface requires an OpenClaw Gateway protocol 4 operator connection.");
+        throw failure("PROTOCOL", "This interface requires a CypherClaw Gateway protocol 4 operator connection.");
       if (!SCOPES.every(scope => hello.auth.scopes.includes(scope)))
         throw failure("SCOPE", "This interface requires operator.read and operator.write. Reconnect using credentials paired and approved for both scopes.");
       if (typeof hello.auth.deviceToken === "string") {

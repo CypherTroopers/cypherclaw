@@ -183,7 +183,7 @@ function friendlyError(error) {
   if (typeof error === "string") {
     return error;
   }
-  return error?.message || "OpenClaw could not complete the operation.";
+  return error?.message || "CypherClaw could not complete the operation.";
 }
 
 function gatewayHost(gateway) {
@@ -205,7 +205,7 @@ function renderGateways(gateways) {
   if (!gateways.length) {
     const empty = document.createElement("p");
     empty.className = "discovery-empty";
-    empty.textContent = "Looking for nearby OpenClaw gateways…";
+    empty.textContent = "Looking for nearby CypherClaw gateways…";
     elements.gatewayList.append(empty);
     return;
   }
@@ -288,7 +288,7 @@ async function connect() {
   render({
     activity: "Checking local services…",
     description: "Finding your gateway and preparing the Control UI.",
-    title: "Connecting to OpenClaw",
+    title: "Connecting to CypherClaw",
   });
   try {
     const snapshot = await invoke("bootstrap");
@@ -313,7 +313,7 @@ function renderWelcome() {
       "Your personal AI assistant, living wherever you choose. It answers questions, works with your files and apps, and can chat with you wherever you are.",
     dot: "idle",
     eyebrow: "WELCOME",
-    title: "Welcome to OpenClaw",
+    title: "Welcome to CypherClaw",
   });
   show(elements.discovery, false);
   show(elements.welcomeScreen, true);
@@ -603,7 +603,7 @@ async function install() {
       dot: "error",
       eyebrow: "SETUP ISSUE",
       showInstall: true,
-      title: "OpenClaw needs attention",
+      title: "CypherClaw needs attention",
     });
   } finally {
     elements.installButton.disabled = false;
@@ -614,7 +614,7 @@ async function install() {
 async function runGatewayAction(action) {
   render({
     activity: `${action === "restart" ? "Restarting" : "Starting"} gateway…`,
-    description: "OpenClaw is waiting for the local gateway to become healthy.",
+    description: "CypherClaw is waiting for the local gateway to become healthy.",
     eyebrow: "GATEWAY",
     title: "One moment",
   });
@@ -636,7 +636,7 @@ function renderRetry(message) {
       // A broken managed CLI can only be replaced by reinstalling; retry alone
       // must never be the sole exit from a connection failure.
       showInstall: true,
-      title: "OpenClaw needs attention",
+      title: "CypherClaw needs attention",
     },
     connect,
   );
@@ -699,7 +699,7 @@ await listen("install-progress", ({ payload }) => appendLog(payload.line));
 await listen("updater://not-available", () => {
   renderUpdate({
     message: "No update is available.",
-    title: "OpenClaw is up to date",
+    title: "CypherClaw is up to date",
   });
 });
 await listen("updater://available", ({ payload }) => {
@@ -780,13 +780,13 @@ if (mode === "connectionSettings") {
     dot: "idle",
     eyebrow: "CLI REQUIRED",
     showInstall: true,
-    title: "OpenClaw needs the CLI",
+    title: "CypherClaw needs the CLI",
   });
 } else if (mode === "reconnecting") {
   render({
     activity: "Retrying every few seconds…",
     description:
-      "The gateway connection dropped. OpenClaw will restore the dashboard automatically.",
+      "The gateway connection dropped. CypherClaw will restore the dashboard automatically.",
     eyebrow: "GATEWAY OFFLINE",
     title: "Reconnecting",
   });
@@ -798,7 +798,7 @@ if (mode === "connectionSettings") {
         "The gateway is stopped. The desktop companion will remain available in the tray.",
       dot: "idle",
       eyebrow: "GATEWAY STOPPED",
-      title: "OpenClaw is standing by",
+      title: "CypherClaw is standing by",
     },
     () => runGatewayAction("start"),
   );

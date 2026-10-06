@@ -18,15 +18,35 @@ struct CritterIconRendererTests {
         #expect(image.tiffRepresentation != nil)
     }
 
-    @Test func `make icon renders with badge`() {
-        let image = CritterIconRenderer.makeIcon(
-            blink: 0,
-            legWiggle: 0,
-            earWiggle: 0,
-            earScale: 1,
-            badge: .init(symbolName: "terminal.fill", prominence: .primary))
+    @Test func `make icon renders with badge without changing the logo pixels`() throws {
+        let plain = CritterIconRenderer.makeIcon(blink: 0)
+        let plainBitmap = try #require(plain.representations.first as? NSBitmapImageRep)
+        #expect(plainBitmap.pixelsWide == 36)
+        #expect(plainBitmap.pixelsHigh == 36)
+        // Confirm that the resource rendered, including when its exterior is transparent.
+        let centerColor = try #require(plainBitmap.colorAt(x: 18, y: 18))
+        #expect(centerColor.alphaComponent > 0.9)
 
-        #expect(image.tiffRepresentation != nil)
+        let prominences: [IconState.BadgeProminence] = [.primary, .secondary, .overridden]
+        for prominence in prominences {
+            let image = CritterIconRenderer.makeIcon(
+                blink: 0,
+                legWiggle: 0,
+                earWiggle: 0,
+                earScale: 1,
+                badge: .init(symbolName: "terminal.fill", prominence: prominence))
+            let bitmap = try #require(image.representations.first as? NSBitmapImageRep)
+
+            #expect(image.size == NSSize(width: 30, height: 18))
+            #expect(bitmap.pixelsWide == 60)
+            #expect(bitmap.pixelsHigh == 36)
+            #expect(!image.isTemplate)
+            for y in 0..<36 {
+                for x in 0..<36 {
+                    #expect(bitmap.colorAt(x: x, y: y) == plainBitmap.colorAt(x: x, y: y))
+                }
+            }
+        }
     }
 
     @Test func `make icon renders expressive states`() {
@@ -40,8 +60,17 @@ struct CritterIconRendererTests {
         #expect(celebrating.tiffRepresentation != nil)
     }
 
-    @Test func `icon motion keeps native frames fixed around the image center`() throws {
+    @Test(arguments: [false, true])
+    func `icon motion keeps native frames fixed around the image center`(withBadge: Bool) throws {
         let view = CritterMotionView()
+        let image = CritterIconRenderer.makeIcon(
+            blink: 0,
+            badge: withBadge ? .init(symbolName: "terminal.fill", prominence: .primary) : nil)
+        view.updateImage(image)
+        let expectedFrame = NSRect(origin: .zero, size: image.size)
+        #expect(view.intrinsicContentSize == image.size)
+        #expect(view.imageView.frame.size == image.size)
+        #expect(view.imageView.imageScaling == .scaleNone)
         let rotation = try #require(view.imageView.superview)
         let rotationLayer = try #require(rotation.layer)
         let translationLayer = try #require(view.layer)
@@ -54,15 +83,15 @@ struct CritterIconRendererTests {
 
         for (angle, offset) in [(CGFloat(4), CGFloat(0.5)), (-3, -0.4)] {
             view.updateMotion(rotation: .init(value: angle), translation: .init(value: offset), enabled: true)
-            #expect(view.frame == NSRect(x: 0, y: 0, width: 18, height: 18))
+            #expect(view.frame == expectedFrame)
             #expect(view.imageView.frame == imageFrame)
             #expect(rotation.frame == rotationFrame)
             // Detached AppKit backing layers are unlinked; combine their model transforms in view coordinates.
             let rotated = pivot.applying(CATransform3DGetAffineTransform(rotationLayer.sublayerTransform))
             let center = rotation.convert(rotated, to: view)
                 .applying(CATransform3DGetAffineTransform(translationLayer.sublayerTransform))
-            #expect(abs(center.x - (9 + offset)) < 0.001)
-            #expect(abs(center.y - 9) < 0.001)
+            #expect(abs(center.x - (image.size.width / 2 + offset)) < 0.001)
+            #expect(abs(center.y - image.size.height / 2) < 0.001)
         }
     }
 

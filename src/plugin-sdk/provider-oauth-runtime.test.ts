@@ -46,6 +46,13 @@ describe("provider OAuth runtime", () => {
       "signed in as &lt;user&gt;&amp;&quot;&#39;",
     );
     expect(oauthErrorHtml("failed <login>", `details &"'`)).toContain("details &amp;&quot;&#39;");
+    const logo = /<img src="data:image\/png;base64,([^"]+)"[^>]+alt="CypherClaw"/.exec(
+      oauthSuccessHtml("Signed in"),
+    );
+    expect(logo).not.toBeNull();
+    expect(Buffer.from(logo?.[1] ?? "", "base64").subarray(0, 8)).toEqual(
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    );
   });
 
   it("resolves safe OAuth token lifetimes and expiry timestamps", () => {

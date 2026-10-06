@@ -9,7 +9,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>OpenClaw</string>
+	<string>CypherClaw</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIconName</key>
@@ -51,35 +51,35 @@
 		<string>_openclaw-gw._tcp</string>
 	</array>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>OpenClaw uses your calendars to show events and scheduling context when you enable calendar access.</string>
+	<string>CypherClaw uses your calendars to show events and scheduling context when you enable calendar access.</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>OpenClaw uses your calendars to show events and scheduling context when you enable calendar access.</string>
+	<string>CypherClaw uses your calendars to show events and scheduling context when you enable calendar access.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
-	<string>OpenClaw uses your calendars to add events when you enable calendar access.</string>
+	<string>CypherClaw uses your calendars to add events when you enable calendar access.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>OpenClaw uses the camera when you scan a Gateway setup QR code or ask your paired Gateway or assistant to capture a photo or short video from this iPhone, for example to connect to your Gateway or show your assistant a document, device screen, or workspace.</string>
+	<string>CypherClaw uses the camera when you scan a Gateway setup QR code or ask your paired Gateway or assistant to capture a photo or short video from this iPhone, for example to connect to your Gateway or show your assistant a document, device screen, or workspace.</string>
 	<key>NSContactsUsageDescription</key>
-	<string>OpenClaw uses your contacts so you can search and reference people while using the assistant.</string>
+	<string>CypherClaw uses your contacts so you can search and reference people while using the assistant.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>OpenClaw reads your steps, sleep, resting heart rate, and workouts from the Apple Health app to create summaries you request and send them through your Gateway to your configured AI provider.</string>
+	<string>CypherClaw reads your steps, sleep, resting heart rate, and workouts from the Apple Health app to create summaries you request and send them through your Gateway to your configured AI provider.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>OpenClaw does not write to the Apple Health app. It uses read-only data to create summaries you request and send them through your Gateway to your configured AI provider.</string>
+	<string>CypherClaw does not write to the Apple Health app. It uses read-only data to create summaries you request and send them through your Gateway to your configured AI provider.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>OpenClaw discovers and connects to your OpenClaw gateway on the local network.</string>
+	<string>CypherClaw discovers and connects to your CypherClaw gateway on the local network.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>OpenClaw can share your location in the background when you enable Always.</string>
+	<string>CypherClaw can share your location in the background when you enable Always.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>OpenClaw uses your location when you allow location sharing.</string>
+	<string>CypherClaw uses your location when you allow location sharing.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>OpenClaw uses the microphone for realtime chat, voice wake, push-to-talk, and voice notes.</string>
+	<string>CypherClaw uses the microphone for realtime chat, voice wake, push-to-talk, and voice notes.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>OpenClaw may use motion data to support device-aware interactions and automations.</string>
+	<string>CypherClaw may use motion data to support device-aware interactions and automations.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>OpenClaw lets your assistant read photos you allow and lets you choose photos to share.</string>
+	<string>CypherClaw lets your assistant read photos you allow and lets you choose photos to share.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
-	<string>OpenClaw uses your reminders to list, add, and complete tasks when you enable reminders access.</string>
+	<string>CypherClaw uses your reminders to list, add, and complete tasks when you enable reminders access.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>OpenClaw uses on-device speech recognition for talk mode and voice wake.</string>
+	<string>CypherClaw uses on-device speech recognition for talk mode and voice wake.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>OpenClawAppGroupIdentifier</key>

@@ -784,7 +784,7 @@ private fun SessionRow(
               Text(text = subtitle, style = ClawTheme.type.caption, color = ClawTheme.colors.textMuted, maxLines = 1)
               Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 SessionMiniTag(text = nativeString("Workspace"))
-                SessionMiniTag(text = if (active) nativeString("Current") else nativeString("OpenClaw"))
+                SessionMiniTag(text = if (active) nativeString("Current") else nativeString("CypherClaw"))
               }
             }
           }

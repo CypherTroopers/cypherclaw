@@ -1619,3 +1619,21 @@ openclaw-lobster-pet[data-dex-complete]::after {
 .lobsterdex__tooltip span {
   color: var(--muted);
 }
+
+/* The default resident uses the supplied logo; animal visitors keep their artwork.
+   Preserve the entire image without palette filters, mirroring, or shape deformation. */
+.lobster-pet--cypherclaw .cypherclaw-resident-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.lobster-pet--cypherclaw.lobster-pet .lobster-pet__body {
+  animation: none;
+  transform: none;
+}
+
+.lobster-pet--cypherclaw {
+  height: calc(16px * var(--lob-scale, 2));
+}

@@ -9,6 +9,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -16,11 +17,11 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
+import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import java.security.MessageDigest
 
 internal class WearReplyNotifier(
   private val context: Context,
@@ -89,7 +90,8 @@ internal class WearReplyNotifier(
   ): NotificationCompat.Builder =
     NotificationCompat
       .Builder(context, CHANNEL_ID)
-      .setSmallIcon(R.drawable.ic_notification)
+      .setSmallIcon(android.R.drawable.stat_notify_chat)
+      .setLargeIcon(BitmapFactory.decodeResource(context.resources, R.drawable.cypherclaw_mascot))
       .setContentTitle(title)
       .setContentText(text)
       .setContentIntent(

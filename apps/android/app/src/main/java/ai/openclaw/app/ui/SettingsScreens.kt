@@ -636,7 +636,7 @@ private fun ProfileSettingsScreen(
   onBack: () -> Unit,
 ) {
   val displayName by viewModel.displayName.collectAsState()
-  var draft by remember(displayName) { mutableStateOf(displayName.ifBlank { "OpenClaw" }) }
+  var draft by remember(displayName) { mutableStateOf(displayName.ifBlank { "CypherClaw" }) }
 
   SettingsDetailFrame(title = nativeString("Profile"), subtitle = nativeString("How this phone appears to OpenClaw."), icon = SettingsRoute.Profile.icon, onBack = onBack) {
     ClawPanel(verticalArrangement = Arrangement.spacedBy(ClawTheme.spacing.xxs)) {
@@ -2363,7 +2363,7 @@ private fun AboutHeroPanel() {
     ) {
       OpenClawMascot(contentDescription = nativeString("OpenClaw logo"), modifier = Modifier.size(96.dp))
       Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(text = nativeString("OpenClaw"), style = ClawTheme.type.section, color = ClawTheme.colors.text)
+        Text(text = nativeString("CypherClaw"), style = ClawTheme.type.section, color = ClawTheme.colors.text)
         Text(text = nativeString("Personal AI on your devices"), style = ClawTheme.type.caption, color = ClawTheme.colors.textMuted)
       }
     }
@@ -2381,7 +2381,7 @@ private val aboutLinks =
   listOf(
     AboutLink("Website", "openclaw.ai", "https://openclaw.ai"),
     AboutLink("Docs", "docs.openclaw.ai", "https://docs.openclaw.ai"),
-    AboutLink("GitHub", "github.com/openclaw/openclaw", "https://github.com/openclaw/openclaw"),
+    AboutLink("GitHub", "github.com/CypherTroopers/cypherclaw", "https://github.com/CypherTroopers/cypherclaw"),
     AboutLink("Discord", "discord.gg/clawd", "https://discord.gg/clawd"),
   )
 

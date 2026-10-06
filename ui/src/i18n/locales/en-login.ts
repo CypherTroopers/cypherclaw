@@ -4,7 +4,7 @@ import { en } from "./en.ts";
 // Recovery copy follows the lazy login and plugin views; the loader label stays eager.
 const enLogin = {
   login: {
-    heading: "Connect to OpenClaw",
+    heading: "Connect to CypherClaw",
     lede: "Enter the Gateway URL and secret, or open the one-time link that openclaw dashboard prints on the Gateway host.",
     gatewayUrl: "Gateway URL",
     gatewaySettings: "Gateway settings",
@@ -33,10 +33,10 @@ const enLogin = {
       },
       profileUnavailable: {
         title: "Couldn't verify your account",
-        summary: "OpenClaw couldn't check your account right now. Please try again shortly.",
+        summary: "CypherClaw couldn't check your account right now. Please try again shortly.",
         stepRetry: "Retry shortly.",
         stepAdmin:
-          "If this continues, ask the person who manages OpenClaw to check account access.",
+          "If this continues, ask the person who manages CypherClaw to check account access.",
       },
       verifiedUserRequired: {
         title: "Verified identity required",
@@ -154,7 +154,7 @@ const enLogin = {
         stepDevUi:
           "If using pnpm ui:dev, rebuild or restart the dev UI against the current checkout.",
         stepRestart:
-          "Restart the Gateway after updating OpenClaw so it serves the current protocol.",
+          "Restart the Gateway after updating CypherClaw so it serves the current protocol.",
       },
       network: {
         title: "Gateway unreachable",

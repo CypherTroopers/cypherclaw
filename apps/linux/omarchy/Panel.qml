@@ -20,7 +20,7 @@ Panel {
   property string agentFilter: ""
   property string stateFilter: "all"
   property string selectedId: ""
-  readonly property string connectionError: service ? service.error : "Connecting to OpenClaw…"
+  readonly property string connectionError: service ? service.error : "Connecting to CypherClaw…"
   readonly property bool connected: !!service && service.ready && service.snapshot.ok === true
   property bool hidePreviews: false
   readonly property bool hasMore: !!service && service.snapshot.hasMore === true
@@ -118,7 +118,7 @@ Panel {
         if (result.id !== root.activationId) return
         root.activationId = ""
         if (result.ok) root.close()
-        else root.sendNotice = result.error || "Could not open OpenClaw."
+        else root.sendNotice = result.error || "Could not open CypherClaw."
         return
       }
       if (result.id !== root.sendId || result.op !== "send") return
@@ -144,7 +144,7 @@ Panel {
         working: root.connected && root.busyCount > 0
       }
     }
-    tooltipText: "OpenClaw · " + (root.connected
+    tooltipText: "CypherClaw · " + (root.connected
       ? root.agents.length + " agents · " + root.busyCount + " active · " + root.attentionCount + " need attention"
       : root.connectionError)
     onPressed: function(code) {
@@ -204,7 +204,7 @@ Panel {
             foreground: Color.foreground
             animated: false
           }
-          Copy { text: "OpenClaw"; font.pixelSize: Style.font.title; font.bold: true }
+          Copy { text: "CypherClaw"; font.pixelSize: Style.font.title; font.bold: true }
           Button { text: root.hidePreviews ? "Show previews" : "Hide previews"; focusable: true; onClicked: root.hidePreviews = !root.hidePreviews }
         }
         Copy {
@@ -344,7 +344,7 @@ Panel {
             width: parent.width - Style.space(16)
             horizontalAlignment: Text.AlignHCenter
             visible: root.visibleSessions.length === 0
-            text: root.connected ? "No matching sessions. Start one below." : "Connect OpenClaw to see your agents and sessions."
+            text: root.connected ? "No matching sessions. Start one below." : "Connect CypherClaw to see your agents and sessions."
             opacity: 0.6
           }
         }

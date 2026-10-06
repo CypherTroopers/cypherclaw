@@ -46,7 +46,7 @@ describe("formatCliBannerLine", () => {
       mode: "default",
     });
 
-    expect(line).toBe("🦞 OpenClaw 2026.3.7 (abc1234) — All your chats, one OpenClaw.");
+    expect(line).toBe("CypherClaw 2026.3.7 (abc1234) — All your chats, one CypherClaw.");
   });
 
   it("drops decorative emoji for generic Linux terminals", () => {
@@ -56,7 +56,7 @@ describe("formatCliBannerLine", () => {
       platform: "linux",
     });
 
-    expect(line).toBe("OpenClaw 2026.3.7 (abc1234)");
+    expect(line).toBe("CypherClaw 2026.3.7 (abc1234)");
   });
 });
 
@@ -82,11 +82,11 @@ describe("emitCliBanner", () => {
 
     emitCliBanner("2026.3.7", bannerOptions);
 
-    expect(writeSpy).toHaveBeenCalledWith("\n🦞 OpenClaw 2026.3.7 (abc1234)\n\n");
+    expect(writeSpy).toHaveBeenCalledWith("\nCypherClaw 2026.3.7 (abc1234)\n\n");
     expect(hasEmittedCliBanner()).toBe(true);
   });
 
-  it("adds the ASCII lobster on lobster days for rich random-mode terminals", async () => {
+  it("keeps rich random-mode terminal banners to the product name and tagline", async () => {
     const { emitCliBanner } = await importFreshBannerModule();
     setStdoutIsTty(true);
     const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -99,13 +99,15 @@ describe("emitCliBanner", () => {
     });
 
     const written = writeSpy.mock.calls.map(([chunk]) => String(chunk)).join("");
-    expect(written).toContain("( o.o )");
+    expect(written).toContain("CypherClaw 2026.3.7 (abc1234)");
+    expect(written).not.toContain("[ CT ]");
+    expect(written).not.toContain("( o.o )");
   });
 
   it.each([
     { label: "plain terminals", mode: "random" as const, richTty: false },
     { label: "pinned tagline modes", mode: "off" as const, richTty: true },
-  ])("keeps lobster day out of $label", async ({ mode, richTty }) => {
+  ])("keeps mascot art out of $label", async ({ mode, richTty }) => {
     const { emitCliBanner } = await importFreshBannerModule();
     setStdoutIsTty(true);
     const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -118,7 +120,7 @@ describe("emitCliBanner", () => {
     });
 
     const written = writeSpy.mock.calls.map(([chunk]) => String(chunk)).join("");
-    expect(written).not.toContain("( o.o )");
+    expect(written).not.toContain("[ CT ]");
   });
 
   it("emits only once per module instance", async () => {

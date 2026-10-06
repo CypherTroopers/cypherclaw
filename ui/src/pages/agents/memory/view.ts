@@ -3,10 +3,9 @@ import { parseDateStringTimestampMs } from "@openclaw/normalization-core/number-
 import { html, nothing } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { renderHubTabs } from "../../../components/hub-tabs.ts";
-import { lobsterPetSeed } from "../../../components/lobster-pet-contract.ts";
-import { createLobsterPetLook, renderLobsterSvg } from "../../../components/lobster-pet-look.ts";
 import { toSanitizedMarkdownHtml } from "../../../components/markdown.ts";
 import "../../../components/modal-dialog.ts";
+import "../../../components/openclaw-mascot.ts";
 import { i18n, t } from "../../../i18n/index.ts";
 import { registerDreamingEnglish } from "../../../i18n/locales/en-dreaming.ts";
 import { registerSettingsEnglish } from "../../../i18n/locales/en-settings.ts";
@@ -247,13 +246,12 @@ const STARS: {
   { top: 88, left: 18, size: 2, delay: 2.3, hue: "neutral" },
 ];
 
-// The dreams sleeper is the same seeded lobster that visits the sidebar for
-// this agent (eyes closed), so the pet identity carries across surfaces.
-function renderDreamsCameo(agentId: string) {
-  const look = createLobsterPetLook(lobsterPetSeed(agentId));
-  const style = `--lob-shell:${look.palette.shell};--lob-claw:${look.palette.claw}`;
+// Carry the same full mascot artwork across the sidebar and memory surfaces.
+function renderDreamsCameo() {
   return html`
-    <div class="dreams__lobster" style=${style}>${renderLobsterSvg(look, { sleeping: true })}</div>
+    <div class="dreams__lobster">
+      <openclaw-mascot mood="sleepy" .size=${160}></openclaw-mascot>
+    </div>
   `;
 }
 
@@ -378,7 +376,7 @@ function renderScene(props: DreamingProps, idle: boolean, dreamText: string) {
       }
 
       <div class="dreams__glow"></div>
-      ${renderDreamsCameo(props.selectedAgentId)}
+      ${renderDreamsCameo()}
       <span class="dreams__z">z</span>
       <span class="dreams__z">z</span>
       <span class="dreams__z">Z</span>

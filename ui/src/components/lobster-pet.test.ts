@@ -236,7 +236,7 @@ describe("lobster pet element", () => {
     await element.updateComplete;
     expect(spritePresent(element)).toBe(false);
     await arrive(element);
-    expect(element.querySelector(".lobster-pet__svg")).not.toBeNull();
+    expect(element.querySelector(".cypherclaw-resident-logo")).not.toBeNull();
     expect(spriteClasses(element)).toContain("lobster-pet--idle");
     expect(["top", "floor"]).toContain(element.getAttribute("data-spot"));
   });
@@ -720,14 +720,14 @@ describe("lobster pet element", () => {
     expect(getLobsterdexEntries().get(look.palette.id)?.name).toBe("Original");
   });
 
-  it("wears the sailor cap on lobster days, deferring to rolled headwear", async () => {
+  it("preserves the supplied resident logo on special days without adding headwear", async () => {
     vi.useFakeTimers();
-    // 2026-01-05 is a probed lobster day; seed 42 rolls the (face-worn)
-    // eyepatch that day, so the cap fits.
+    // A special visit retains its scheduling state, while the supplied artwork stays intact.
     vi.setSystemTime(new Date("2026-01-05T12:00:00"));
     const element = createPet(42);
     await arrive(element);
-    expect(element.querySelector(".lob-cap")).not.toBeNull();
+    expect(element.querySelector(".cypherclaw-resident-logo")).not.toBeNull();
+    expect(element.querySelector(".lob-cap")).toBeNull();
     element.remove();
 
     // Ordinary days stay capless.
@@ -828,7 +828,7 @@ describe("lobster pet element", () => {
     const element = createPet(42);
     await arrive(element);
 
-    expect(element.querySelector(".lobster-pet__svg")).not.toBeNull();
+    expect(element.querySelector(".cypherclaw-resident-logo")).not.toBeNull();
     // Tab switches re-enter through the visibilitychange resume path, which
     // must stay inert under reduced motion too. Mode flips must not startle.
     document.dispatchEvent(new Event("visibilitychange"));
@@ -947,14 +947,15 @@ describe("rare lobster loads", () => {
   // an old-friend return plus a balloon entrance; 4689 hatches a shiny variant;
   // 104 is a shy load that beaches a bottle at ~194s; 37 is a shy load with
   // a snail crossing at ~407s.
-  it("hosts the Elder: barnacled, renamed, and never molting", async () => {
+  it("hosts the Elder lore without adding decorations to the supplied image", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-09T12:00:00"));
     const element = createPet(644);
     await arrive(element);
 
     expect(spriteClasses(element)).toContain("lobster-pet--elder");
-    expect(element.querySelector(".lob-barnacles")).not.toBeNull();
+    expect(element.querySelector(".cypherclaw-resident-logo")).not.toBeNull();
+    expect(element.querySelector(".lob-barnacles")).toBeNull();
     expect(element.querySelector(".lobster-pet")?.getAttribute("title")).toBe(
       "Methuselah · old as the tides",
     );

@@ -337,7 +337,7 @@ import WatchKit
             sentAtMs: message.sentAtMs)
         guard deliveryKey != self.lastDeliveryKey else { return }
 
-        let normalizedTitle = message.title.isEmpty ? "OpenClaw" : message.title
+        let normalizedTitle = message.title.isEmpty ? "CypherClaw" : message.title
         self.title = normalizedTitle
         self.body = message.body
         self.transport = transport

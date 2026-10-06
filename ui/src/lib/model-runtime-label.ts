@@ -11,7 +11,7 @@ const AGENT_RUNTIME_LABELS: Readonly<Record<string, string>> = {
   codex: "Codex",
   "codex-cli": "Codex",
   "google-gemini-cli": "Gemini CLI",
-  openclaw: "OpenClaw",
+  openclaw: "CypherClaw",
 };
 
 function formatAgentRuntimeLabel(id: string): string {

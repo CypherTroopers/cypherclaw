@@ -225,7 +225,7 @@ describe("public session document", () => {
     const html = render([{ role: "user", content: `${"b".repeat(32_767)}😀 UNIQUE_TAIL_MARKER` }], {
       title,
     });
-    expect(html).toContain(`<title>${"a".repeat(199)} · OpenClaw</title>`);
+    expect(html).toContain(`<title>${"a".repeat(199)} · CypherClaw</title>`);
     expect(html).toContain(`property="og:title" content="${"a".repeat(199)}"`);
     expect(html).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u);
     expect(html).toContain("Message shortened for this public view.");

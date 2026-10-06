@@ -231,7 +231,7 @@ struct OnboardingIntroStep: View {
         OnboardingActivationCanvas {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeroHeader(
-                    title: "OpenClaw",
+                    title: "CypherClaw",
                     subtitle: "Your agent, in your pocket. Pair this iPhone with your gateway to get started.")
                     .padding(.top, 18)
 

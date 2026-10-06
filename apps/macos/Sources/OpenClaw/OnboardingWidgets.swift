@@ -1,9 +1,7 @@
 import OpenClawChatUI
 import SwiftUI
 
-/// Onboarding hero mascot with the openclaw.ai hero treatment: the animated
-/// mascot plus its coral silhouette glow (drop-shadow at ~10% of size).
-/// Interactive: it reacts to clicks and its eyes follow the pointer.
+/// Displays the original supplied CypherClaw image with uniform resizing.
 struct GlowingOpenClawIcon: View {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -12,16 +10,14 @@ struct GlowingOpenClawIcon: View {
     var accessory: OpenClawMascotAccessory = .none
 
     var body: some View {
-        // The large vector hero is decorative; 30 fps burns a core while setup sits idle.
+        // Compatibility mood and interaction parameters preserve call sites.
         OpenClawMascotView(
             mood: self.mood,
             accessory: self.accessory,
             interactive: true,
             minimumFrameInterval: 1.0 / 12.0)
             .frame(width: self.size, height: self.size)
-            .shadow(
-                color: OpenClawMascotView.heroGlowColor(for: self.colorScheme),
-                radius: self.size * 0.1)
+
     }
 }
 

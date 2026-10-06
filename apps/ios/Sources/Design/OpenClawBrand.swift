@@ -230,11 +230,7 @@ struct OpenClawActivationGlyph: View {
     var body: some View {
         OpenClawMascotView(floats: false, mood: self.mood, interactive: self.interactive)
             .frame(width: self.size, height: self.size)
-            .shadow(
-                color: OpenClawBrand.activationGlow.opacity(0.18),
-                radius: self.size * 0.12,
-                x: 0,
-                y: self.size * 0.05)
+
             .accessibilityHidden(true)
     }
 }

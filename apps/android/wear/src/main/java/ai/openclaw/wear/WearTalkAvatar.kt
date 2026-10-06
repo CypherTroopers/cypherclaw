@@ -23,15 +23,14 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.res.imageResource
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -43,36 +42,6 @@ import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.sin
-
-// Canonical 120x120 mascot geometry from ui/public/favicon.svg. Parts stay
-// separate so the original silhouette can react without substituting artwork.
-private val BodyPath by lazy {
-  PathParser()
-    .parsePathString(
-      "M60 10 C30 10 15 35 15 55 C15 75 30 95 45 100 L45 110 L55 110 L55 100 " +
-        "C55 100 60 102 65 100 L65 110 L75 110 L75 100 C90 95 105 75 105 55 C105 35 90 10 60 10Z",
-    ).toPath()
-}
-private val LeftClawPath by lazy {
-  PathParser().parsePathString("M20 45 C5 40 0 50 5 60 C10 70 20 65 25 55 C28 48 25 45 20 45Z").toPath()
-}
-private val RightClawPath by lazy {
-  PathParser().parsePathString("M100 45 C115 40 120 50 115 60 C110 70 100 65 95 55 C92 48 95 45 100 45Z").toPath()
-}
-private val LeftAntennaPath by lazy { PathParser().parsePathString("M45 15 Q35 5 30 8").toPath() }
-private val RightAntennaPath by lazy { PathParser().parsePathString("M75 15 Q85 5 90 8").toPath() }
-
-private val CoralBright = Color(0xFFFF4D4D)
-private val CoralDark = Color(0xFF991B1B)
-private val EyeDark = Color(0xFF050810)
-private val EyeGlow = Color(0xFF00E5CC)
-private val Tongue = Color(0xFFFF9EAE)
-private val LeftClawPivot = Offset(26f, 53f)
-private val RightClawPivot = Offset(94f, 53f)
-private val LeftAntennaPivot = Offset(37.5f, 11f)
-private val RightAntennaPivot = Offset(82.5f, 11f)
-private val LeftEyeCenter = Offset(45f, 35f)
-private val RightEyeCenter = Offset(75f, 35f)
 
 internal data class WearAvatarPose(
   val floatOffset: Float,
@@ -101,6 +70,7 @@ internal fun WearTalkAvatar(
   frameClock: WearAvatarFrameClock = ComposeWearAvatarFrameClock,
   onAnimationStateChanged: ((WearAvatarAnimationState) -> Unit)? = null,
 ) {
+  val artwork = ImageBitmap.imageResource(R.drawable.cypherclaw_mascot)
   val animationScale = rememberAnimatorDurationScale(animatorScaleSource, motionDurationScale)
   val animationsEnabled = animationScale > 0f
   val latestState by rememberUpdatedState(state)
@@ -170,7 +140,7 @@ internal fun WearTalkAvatar(
     val artTop = center.y - ((CANONICAL_ART_SIZE * artScale) / 2f) + (unit * 0.025f)
     withTransform({ translate(left = artLeft, top = artTop) }) {
       withTransform({ scale(artScale, artScale, pivot = Offset.Zero) }) {
-        drawCanonicalAvatar(pose, state, motionInputs.animationSeconds)
+        drawCanonicalAvatar(pose, artwork)
       }
     }
   }
@@ -341,126 +311,14 @@ internal fun avatarMotionInputs(
 
 private fun DrawScope.drawCanonicalAvatar(
   pose: WearAvatarPose,
-  state: RealtimeVoiceButtonState,
-  animationSeconds: Float,
+  artwork: ImageBitmap,
 ) {
-  val stretchX = (1f + ((1f - pose.bodyStretch) * 0.5f)).coerceIn(0.96f, 1.04f)
-  withTransform({ translate(top = pose.floatOffset) }) {
-    withTransform({
-      scale(stretchX, pose.bodyStretch, pivot = Offset(60f, 110f))
-      rotate(pose.bodyTilt, pivot = Offset(60f, 60f))
-    }) {
-      drawPath(
-        path = BodyPath,
-        brush =
-          Brush.linearGradient(
-            colors = listOf(CoralBright, CoralDark),
-            start = Offset(15f, 10f),
-            end = Offset(105f, 110f),
-          ),
-      )
-      withTransform({ rotate(pose.leftClawDegrees, pivot = LeftClawPivot) }) {
-        drawPath(
-          path = LeftClawPath,
-          brush =
-            Brush.linearGradient(
-              colors = listOf(CoralBright, CoralDark),
-              start = Offset(3.125f, 43.67f),
-              end = Offset(26.197f, 65.451f),
-            ),
-        )
-      }
-      withTransform({ rotate(pose.rightClawDegrees, pivot = RightClawPivot) }) {
-        drawPath(
-          path = RightClawPath,
-          brush =
-            Brush.linearGradient(
-              colors = listOf(CoralBright, CoralDark),
-              start = Offset(93.803f, 43.67f),
-              end = Offset(116.875f, 65.451f),
-            ),
-        )
-      }
-
-      val antennaStroke = Stroke(width = 2f, cap = StrokeCap.Round)
-      val wiggle = pose.antennaDegrees * (1f - pose.antennaDroop)
-      withTransform({ rotate((-pose.antennaDroop * 40f), pivot = Offset(45f, 15f)) }) {
-        withTransform({ rotate(wiggle, pivot = LeftAntennaPivot) }) {
-          drawPath(LeftAntennaPath, CoralBright, style = antennaStroke)
-        }
-      }
-      withTransform({ rotate((pose.antennaDroop * 40f), pivot = Offset(75f, 15f)) }) {
-        withTransform({ rotate(wiggle, pivot = RightAntennaPivot) }) {
-          drawPath(RightAntennaPath, CoralBright, style = antennaStroke)
-        }
-      }
-
-      drawCanonicalEye(LeftEyeCenter, pose.eyeOpenness, pose.gaze)
-      drawCanonicalEye(RightEyeCenter, pose.eyeOpenness, pose.gaze)
-      drawCanonicalMouth(state, pose.mouthLevel, animationSeconds)
-    }
-  }
-}
-
-private fun DrawScope.drawCanonicalEye(
-  center: Offset,
-  openness: Float,
-  gaze: Offset,
-) {
-  val eyeHeight = max(1.2f, 12f * openness)
-  val eyeCenterY = center.y - 6f + ((12f - eyeHeight) * 0.65f) + (eyeHeight / 2f)
-  drawOval(
-    color = EyeDark,
-    topLeft = Offset(center.x - 6f, eyeCenterY - (eyeHeight / 2f)),
-    size = Size(12f, eyeHeight),
+  // The voice halo carries state; the logo itself is only resized uniformly.
+  drawImage(
+    image = artwork,
+    dstSize = IntSize(120, 120),
+    filterQuality = FilterQuality.High,
   )
-  if (openness <= 0.16f) return
-
-  val pupil =
-    Offset(
-      x = center.x + (gaze.x * 2.7f),
-      y = center.y - 1f + (gaze.y * 2.1f),
-    )
-  drawCircle(
-    color = EyeGlow,
-    radius = 2.1f,
-    center = pupil,
-    alpha = ((openness - 0.16f) / 0.84f).coerceIn(0f, 1f),
-  )
-}
-
-private fun DrawScope.drawCanonicalMouth(
-  state: RealtimeVoiceButtonState,
-  mouthLevel: Float,
-  animationSeconds: Float,
-) {
-  if (state == RealtimeVoiceButtonState.ERROR) {
-    val frown =
-      Path().apply {
-        moveTo(52.5f, 54f)
-        quadraticTo(60f, 47f, 67.5f, 54f)
-      }
-    drawPath(frown, EyeDark, style = Stroke(width = 2.2f, cap = StrokeCap.Round))
-    return
-  }
-  if (state != RealtimeVoiceButtonState.SPEAKING || mouthLevel <= 0.025f) return
-
-  val vowelShape = 0.5f + (0.5f * sin(animationSeconds * 2f * PI.toFloat() / 0.31f))
-  val radiusX = 2.2f + (mouthLevel * (4.7f + (1.6f * vowelShape)))
-  val radiusY = 1.1f + (mouthLevel * (6.5f - (1.3f * vowelShape)))
-  drawOval(
-    color = EyeDark,
-    topLeft = Offset(60f - radiusX, 52f - radiusY),
-    size = Size(radiusX * 2f, radiusY * 2f),
-  )
-  if (mouthLevel > 0.48f) {
-    drawOval(
-      color = Tongue,
-      topLeft = Offset(60f - (radiusX * 0.55f), 52f + (radiusY * 0.24f)),
-      size = Size(radiusX * 1.1f, radiusY * 0.42f),
-      alpha = ((mouthLevel - 0.48f) / 0.52f).coerceIn(0f, 0.82f),
-    )
-  }
 }
 
 internal fun avatarPoseAt(

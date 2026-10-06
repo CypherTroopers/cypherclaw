@@ -7,7 +7,7 @@ import ai.openclaw.app.systemagent.SystemAgentChatMessage
 import ai.openclaw.app.systemagent.SystemAgentChatQuestion
 import ai.openclaw.app.systemagent.SystemAgentChatQuestionOption
 import ai.openclaw.app.systemagent.SystemAgentChatState
-import ai.openclaw.app.ui.design.ClawIcons
+import ai.openclaw.app.ui.design.OpenClawMascot
 import ai.openclaw.app.ui.design.ClawPanel
 import ai.openclaw.app.ui.design.ClawPlainIconButton
 import ai.openclaw.app.ui.design.ClawPrimaryButton
@@ -86,17 +86,12 @@ internal fun SystemAgentSettingsScreen(
           onClick = onBack,
         )
         Text(
-          text = nativeString("OpenClaw"),
+          text = nativeString("CypherClaw"),
           style = ClawTheme.type.display,
           color = ClawTheme.colors.text,
           modifier = Modifier.weight(1f),
         )
-        Icon(
-          imageVector = ClawIcons.OpenClaw,
-          contentDescription = null,
-          tint = ClawTheme.colors.primary,
-          modifier = Modifier.size(24.dp),
-        )
+        OpenClawMascot(modifier = Modifier.size(24.dp))
       }
 
       when (state.access) {
@@ -146,12 +141,16 @@ private fun SystemAgentAccessGate(state: SystemAgentChatState) {
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-      Icon(
-        imageVector = if (state.access == SystemAgentChatAccess.Disconnected) Icons.Default.Lock else ClawIcons.OpenClaw,
-        contentDescription = null,
-        tint = ClawTheme.colors.warning,
-        modifier = Modifier.size(42.dp),
-      )
+      if (state.access == SystemAgentChatAccess.Disconnected) {
+        Icon(
+          imageVector = Icons.Default.Lock,
+          contentDescription = null,
+          tint = ClawTheme.colors.warning,
+          modifier = Modifier.size(42.dp),
+        )
+      } else {
+        OpenClawMascot(modifier = Modifier.size(42.dp))
+      }
       Text(text = title, style = ClawTheme.type.title, color = ClawTheme.colors.text)
       Text(
         text = detail,

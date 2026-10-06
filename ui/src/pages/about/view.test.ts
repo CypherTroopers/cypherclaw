@@ -38,18 +38,18 @@ describe("renderAbout", () => {
     await i18n.setLocale("en");
   });
 
-  it("renders the hero with Clawd, identity, community links, and license", () => {
+  it("renders the hero with CypherTrooper, identity, community links, and license", () => {
     const onPokeClawd = vi.fn();
     const container = document.createElement("div");
     render(renderAbout(createProps({ onPokeClawd })), container);
 
     const hero = container.querySelector(".about-hero");
-    expect(hero?.querySelector(".about-hero__name")?.textContent).toBe("OpenClaw");
+    expect(hero?.querySelector(".about-hero__name")?.textContent).toBe("CypherClaw");
     expect(hero?.querySelector(".about-hero__version")?.textContent).toBe("v2026.7.10");
-    expect(hero?.querySelector(".about-hero__clawd svg")).not.toBeNull();
+    expect(hero?.querySelector(".about-hero__clawd img")).not.toBeNull();
 
     const clawd = hero?.querySelector<HTMLButtonElement>(".about-hero__clawd");
-    expect(clawd?.getAttribute("aria-label")).toBe("Wave hello to Clawd");
+    expect(clawd?.getAttribute("aria-label")).toBe("Wave hello to CypherTrooper");
     clawd?.click();
     expect(onPokeClawd).toHaveBeenCalledOnce();
 
@@ -57,6 +57,7 @@ describe("renderAbout", () => {
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "https://openclaw.ai",
       "https://docs.openclaw.ai",
+      "https://github.com/CypherTroopers/cypherclaw",
       "https://github.com/openclaw/openclaw",
       "https://discord.gg/clawd",
       "https://x.com/openclaw",
@@ -68,7 +69,13 @@ describe("renderAbout", () => {
       expect(link.getAttribute("rel")).toContain("noreferrer");
     }
 
-    expect(container.querySelector(".about-footer")?.textContent).toContain("MIT License");
+    expect(container.querySelector(".about-footer")?.textContent).toContain(
+      "© 2026 OpenClaw Foundation — MIT License.",
+    );
+    expect(hero?.textContent).toContain("CypherClaw is an independent fork of OpenClaw");
+    expect(
+      links.find((link) => link.href === "https://github.com/openclaw/openclaw")?.textContent,
+    ).toContain("upstream");
   });
 
   it("marks the hero as waving only while a poke is active", () => {

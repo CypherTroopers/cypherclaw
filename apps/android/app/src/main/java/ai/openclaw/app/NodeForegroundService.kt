@@ -11,6 +11,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -226,7 +227,8 @@ class NodeForegroundService : Service() {
 
     return NotificationCompat
       .Builder(this, CHANNEL_ID)
-      .setSmallIcon(R.mipmap.ic_launcher)
+      .setSmallIcon(android.R.drawable.stat_notify_sync)
+      .setLargeIcon(BitmapFactory.decodeResource(resources, R.drawable.cypherclaw_mascot))
       .setContentTitle(title)
       .setContentText(visibleText)
       .setContentIntent(launchPending)

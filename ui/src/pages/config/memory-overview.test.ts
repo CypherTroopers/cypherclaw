@@ -1,26 +1,8 @@
 /* @vitest-environment jsdom */
 
-import { expectDefined } from "@openclaw/normalization-core";
 import { render } from "lit";
 import { describe, expect, it, vi } from "vitest";
 import type { DoctorMemoryStatusPayload } from "../../../../src/gateway/server-methods/doctor.ts";
-
-// The hero derives its lobster from lobsterPetSeed, which mixes in a random
-// per-load salt, so the palette (and with it sprite geometry like the sleeping
-// eye peek) varies per test process. Pin a canonical look so pose assertions
-// stay deterministic.
-vi.mock("../../components/lobster-pet-look.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../components/lobster-pet-look.ts")>();
-  const { LOBSTER_PET_PALETTES } = await import("../../components/lobster-pet-palettes.ts");
-  return {
-    ...actual,
-    createLobsterPetLook: () =>
-      actual.canonicalLobsterLook(
-        expectDefined(LOBSTER_PET_PALETTES[0], "canonical lobster palette"),
-      ),
-  };
-});
-
 import { renderMemoryOverview, type MemoryOverviewStatus } from "./memory-overview.ts";
 
 type MemoryOverviewProps = Parameters<typeof renderMemoryOverview>[0];
@@ -111,12 +93,13 @@ function renderOverview(
 }
 
 describe("renderMemoryOverview", () => {
-  it("renders the awake reading hero and status cards from one payload", () => {
+  it("renders the awake mascot and status cards from one payload", () => {
     const container = renderOverview({ kind: "ready", payload: fixturePayload() });
 
     expect(container.textContent).toContain("Memory is awake");
     expect(container.textContent).toContain("memory-core · hybrid search");
-    expect(container.querySelector(".lob-reading-book")).not.toBeNull();
+    expect(container.querySelector("openclaw-mascot")?.getAttribute("mood")).toBe("attentive");
+    expect(container.querySelector(".lobster-pet__svg")).toBeNull();
     expect(container.textContent).toContain("Sleep schedule");
     expect(container.textContent).toContain("Europe/Vienna");
     expect(container.textContent).toContain("Promoted today");
@@ -125,22 +108,24 @@ describe("renderMemoryOverview", () => {
     expect(container.textContent).toContain("metrics=ready");
   });
 
-  it("renders a grumpy error hero with retry and no book", () => {
+  it("renders the error mascot with retry and no added accessories", () => {
     const container = renderOverview({ kind: "error", message: "gateway request failed" });
 
     expect(container.textContent).toContain("Memory needs attention");
     expect(container.textContent).toContain("gateway request failed");
     expect(container.textContent).toContain("Retry");
+    expect(container.querySelector("openclaw-mascot")?.getAttribute("mood")).toBe("sad");
     expect(container.querySelector(".lob-reading-book")).toBeNull();
   });
 
-  it("renders the dimmed sleeping hero when the engine is off", () => {
+  it("renders the sleeping mascot when the engine is off", () => {
     const container = renderOverview({ kind: "idle" }, { kind: "off" });
 
     expect(container.textContent).toContain("Memory is hibernating");
     expect(container.textContent).toContain("Open Settings");
     expect(container.querySelector(".memory-overview__hero--sleeping")).not.toBeNull();
-    expect(container.querySelector(".lobster-pet__svg")).not.toBeNull();
+    expect(container.querySelector("openclaw-mascot")?.getAttribute("mood")).toBe("sleepy");
+    expect(container.querySelector(".memory-overview__lobster")?.hasAttribute("style")).toBe(false);
     expect(container.querySelector(".lob-reading-book")).toBeNull();
   });
 
@@ -154,6 +139,7 @@ describe("renderMemoryOverview", () => {
     expect(container.textContent).toContain("Memory is hibernating");
     expect(container.textContent).toContain("selected memory engine is disabled");
     expect(container.textContent).toContain("Open Settings");
+    expect(container.querySelector("openclaw-mascot")?.getAttribute("mood")).toBe("sleepy");
     expect(container.querySelector(".lob-reading-book")).toBeNull();
     expect(container.textContent).not.toContain("Engine health");
     expect(container.textContent).not.toContain("Sleep schedule");

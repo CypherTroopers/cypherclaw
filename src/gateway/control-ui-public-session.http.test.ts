@@ -199,7 +199,7 @@ describe("anonymous public session HTTP boundary", () => {
 
       const preview = await send(server, { path: "/share/dashboard/example/private-name" });
       expect(preview.res.statusCode).toBe(200);
-      expect(preview.getBody()).toContain("OpenClaw dashboard");
+      expect(preview.getBody()).toContain("CypherClaw dashboard");
       expect(reader).not.toHaveBeenCalled();
     } finally {
       suspension?.release();
@@ -465,7 +465,7 @@ describe("anonymous public session HTTP boundary", () => {
     const response = await send(server);
     expect(response.res.statusCode).toBe(200);
     const html = response.getBody();
-    expect(html).toContain(`<title>${"a".repeat(199)} · OpenClaw</title>`);
+    expect(html).toContain(`<title>${"a".repeat(199)} · CypherClaw</title>`);
     expect(html).toContain(`property="og:title" content="${"a".repeat(199)}"`);
     expect(html).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u);
     expect(html).toContain("Message shortened for this public view.");

@@ -217,7 +217,9 @@ describe("favicon presentation ownership", () => {
       await expectDot("rgb(20, 100, 180)");
       applyControlUiPresentation({ environment: { label: "Preview", color: "blue" } });
       await vi.waitFor(() =>
-        expect(svgDocument().querySelector('path[fill="rgb(40, 100, 180)"]')).not.toBeNull(),
+        expect(
+          svgDocument().querySelector('rect[data-environment-ring][stroke="rgb(40, 100, 180)"]'),
+        ).not.toBeNull(),
       );
       await expectDot("rgb(20, 100, 180)");
       await changePresentation(() => {
@@ -228,7 +230,9 @@ describe("favicon presentation ownership", () => {
       expect(svgDocument().querySelector("path")?.getAttribute("stroke")).toBe(
         "rgb(250, 250, 250)",
       );
-      expect(svgDocument().querySelector('path[fill="rgb(40, 100, 180)"]')).toBeNull();
+      expect(
+        svgDocument().querySelector('rect[data-environment-ring][stroke="rgb(40, 100, 180)"]'),
+      ).toBeNull();
       expect(svgDocument().documentElement.lastElementChild?.getAttribute("fill")).toBe(
         "rgb(20, 100, 180)",
       );
@@ -247,11 +251,13 @@ describe("favicon presentation ownership", () => {
         setCurrentThemeBranding({ mascot: "claw", critters: [] });
         document.documentElement.dataset.themeMascot = "claw";
       });
-      expect(svgDocument().querySelector('path[fill="rgb(40, 100, 180)"]')).not.toBeNull();
+      expect(
+        svgDocument().querySelector('rect[data-environment-ring][stroke="rgb(40, 100, 180)"]'),
+      ).not.toBeNull();
       applyControlUiPresentation({ environment: null });
       await vi.waitFor(() =>
-        expect(svgDocument().querySelectorAll("animate, animateTransform").length).toBeGreaterThan(
-          0,
+        expect(svgDocument().querySelector("image")?.getAttribute("href")).toMatch(
+          /^data:image\/png;base64,/u,
         ),
       );
       await expectDot("rgb(20, 100, 180)");
@@ -303,7 +309,12 @@ describe("favicon presentation ownership", () => {
       );
     const original = new DOMParser().parseFromString(faviconSvg, "image/svg+xml");
     expect(animations(svgDocument())).toEqual(animations(original));
-    expect(animations(original).length).toBeGreaterThan(0);
+    expect(original.querySelector("image")?.getAttribute("href")).toMatch(
+      /^data:image\/png;base64,/u,
+    );
+    expect(svgDocument().querySelector("image")?.getAttribute("href")).toBe(
+      original.querySelector("image")?.getAttribute("href"),
+    );
     expect(document.title).toBe(previousTitle);
     applyControlUiFaviconStatus("idle");
     expectOriginals();
@@ -322,6 +333,9 @@ describe("favicon presentation ownership", () => {
   it("preserves each active presentation when the environment or status is independently removed", async () => {
     const environment = { label: "Preview", color: "blue" } as const;
     applyControlUiPresentation({ environment });
+    await vi.waitFor(() =>
+      expect(svgDocument().querySelector("[data-environment-ring]")).not.toBeNull(),
+    );
     const environmentHref = svgIcon.href;
     applyControlUiFaviconStatus("attention");
     await vi.waitFor(() => {
@@ -334,7 +348,9 @@ describe("favicon presentation ownership", () => {
     applyControlUiPresentation({ environment: null });
     await vi.waitFor(() => {
       expect(svgIcon.href).not.toBe(environmentWithStatus);
-      expect(svgDocument().querySelectorAll("animate, animateTransform").length).toBeGreaterThan(0);
+      expect(svgDocument().querySelector("image")?.getAttribute("href")).toMatch(
+        /^data:image\/png;base64,/u,
+      );
       expect(svgDocument().documentElement.lastElementChild?.getAttribute("fill")).toBe(
         "rgb(210, 150, 60)",
       );
@@ -342,8 +358,10 @@ describe("favicon presentation ownership", () => {
     });
     applyControlUiPresentation({ environment });
     applyControlUiFaviconStatus("idle");
-    expect(svgIcon.href).toBe(environmentHref);
-    expect(pngIcon.href).toBe(environmentHref);
+    await vi.waitFor(() => {
+      expect(svgIcon.href).toBe(environmentHref);
+      expect(pngIcon.href).toBe(environmentHref);
+    });
     expect(svgIcon.hasAttribute("data-openclaw-original-favicon")).toBe(true);
     applyControlUiPresentation({ environment: null });
     expectOriginals();

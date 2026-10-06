@@ -280,6 +280,10 @@ try {
   assert.match(await page.locator("#cardModelName").innerText(), /not loaded/i);
   assert.match(await page.locator("#cardSpeed").innerText(), /not measured|—/i);
   assert.match(await page.locator("#systemGateway").innerText(), /not connected|disconnected/i);
+  await page.waitForFunction(() => [...document.querySelectorAll("img.cypherclaw-brand-icon, img.claw-sigil")].every(image => image.complete && image.naturalWidth > 0));
+  assert.equal(await page.locator("#agentCard .claw-sigil").getAttribute("src"), "/assets/cypherclaw-logo.png");
+  assert.equal(await page.locator("#navAgent img").getAttribute("src"), "/assets/cypherclaw-mark.png");
+  assert.equal(await page.locator('a[href="https://openclaw.ai"] .quick-icon use').getAttribute("href"), "#i-claw");
   await page.screenshot({ path: "/tmp/browser-llm-cypher-home-desktop.png" });
   pass("Initial desktop page selects local chat without loading weights or downloading OpenClaw");
 
@@ -380,13 +384,13 @@ try {
   await page.locator("#prompt").fill("Complete a fixture task"); await page.locator("#send").click();
   await page.waitForFunction(() => document.querySelector("#chat").textContent.includes("Fixture agent partial reply"));
   assert(await page.locator("#stop").isVisible());
-  await waitStatus(page, "OpenClaw task complete");
+  await waitStatus(page, "CypherClaw task complete");
   assert.match(await page.locator("#chat").innerText(), /Fixture agent complete \[redacted\] \[redacted\]/);
   assert.equal(state.requests.find(request => request.method === "chat.send").params.agentId, "main");
   pass("Real browser Ed25519 proof authenticates the simulated protocol 4 Gateway and streams an agent reply");
   await page.locator("#prompt").fill("Keep working"); await page.locator("#send").click();
   await page.waitForFunction(() => !document.querySelector("#stop").hidden && !document.querySelector("#stop").disabled);
-  await page.locator("#stop").click(); await waitStatus(page, "Stopped by OpenClaw");
+  await page.locator("#stop").click(); await waitStatus(page, "Stopped by CypherClaw");
   assert.equal(state.requests.filter(request => request.method === "chat.abort").length, 1);
   await page.locator("#sessionList .session-item").filter({ hasText: "Saved fixture session" }).click();
   await waitStatus(page, "Gateway history loaded"); assert.match(await page.locator("#chat").innerText(), /Saved fixture answer/);
@@ -394,11 +398,11 @@ try {
   pass("Stop targets the accepted run and session selection loads the selected Gateway history");
   await page.locator("#prompt").fill("Finish before Stop responds"); await page.locator("#send").click();
   await page.waitForFunction(() => !document.querySelector("#stop").hidden && !document.querySelector("#stop").disabled);
-  await page.locator("#stop").click(); await waitStatus(page, "OpenClaw task complete");
+  await page.locator("#stop").click(); await waitStatus(page, "CypherClaw task complete");
   await page.locator("#prompt").fill("Keep working"); await page.locator("#send").click();
   await waitStatus(page, "fixtureAfterAbort");
   assert(await page.locator("#send").isDisabled()); assert(!(await page.locator("#stop").isDisabled()));
-  await page.locator("#stop").click(); await waitStatus(page, "Stopped by OpenClaw");
+  await page.locator("#stop").click(); await waitStatus(page, "Stopped by CypherClaw");
   pass("A late Stop response for a finished task cannot cancel the next active task");
   await openSetup(page); await page.locator("#disconnectGateway").click();
   state.busyHistory = true;
@@ -505,7 +509,7 @@ try {
   assert(await agentPage.locator("#start").isDisabled());
   await connect(agentPage); assert(!(await agentPage.locator("#send").isDisabled()));
   await agentPage.locator("#prompt").fill("Complete without GPU"); await agentPage.locator("#send").click();
-  await waitStatus(agentPage, "OpenClaw task complete"); assert.equal(count("load"), 1);
+  await waitStatus(agentPage, "CypherClaw task complete"); assert.equal(count("load"), 1);
   pass("Gateway agent chat works when browser WebGPU inference is unavailable");
   state.noGPU = false;
 

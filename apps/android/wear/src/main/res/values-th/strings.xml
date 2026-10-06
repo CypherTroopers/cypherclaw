@@ -1,5 +1,5 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw"</string>
+    <string name="app_name" translatable="false">"CypherClaw"</string>
     <string name="chat" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"แชท"</string>
     <string name="session" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เซสชัน"</string>
     <string name="model" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"โมเดล"</string>
@@ -40,7 +40,7 @@
     <string name="agent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เอเจนต์"</string>
     <string name="system" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ตามระบบ"</string>
     <string name="start_conversation" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เริ่มการสนทนา"</string>
-    <string name="start_conversation_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"พูดหรือพิมพ์บนนาฬิกาของคุณ โทรศัพท์ที่จับคู่ไว้จะส่งข้อความผ่านเซสชัน OpenClaw ที่ผ่านการยืนยันตัวตนแล้ว"</string>
+    <string name="start_conversation_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"พูดหรือพิมพ์บนนาฬิกาของคุณ โทรศัพท์ที่จับคู่ไว้จะส่งข้อความผ่านเซสชัน CypherClaw ที่ผ่านการยืนยันตัวตนแล้ว"</string>
     <string name="current_session" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เซสชันปัจจุบัน"</string>
     <string name="context_label_value" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"%1$s: %2$s"</string>
     <string name="close" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"ปิด"</string>
@@ -73,30 +73,30 @@
     <string name="phone_ready" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"โทรศัพท์พร้อมใช้งาน"</string>
     <string name="gateway_connected" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เชื่อมต่อ Gateway แล้ว"</string>
     <string name="gateway_offline" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway ออฟไลน์"</string>
-    <string name="gateway_offline_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เชื่อมต่อ Gateway อีกครั้งใน OpenClaw บนโทรศัพท์ที่จับคู่ไว้"</string>
-    <string name="open_phone_app" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เปิด OpenClaw บนโทรศัพท์"</string>
+    <string name="gateway_offline_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เชื่อมต่อ Gateway อีกครั้งใน CypherClaw บนโทรศัพท์ที่จับคู่ไว้"</string>
+    <string name="open_phone_app" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เปิด CypherClaw บนโทรศัพท์"</string>
     <string name="phone_not_ready_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"นาฬิกาจะไม่เริ่มการทำงานหรือยืนยันตัวตนกับ Gateway ด้วยตัวเอง"</string>
     <string name="phone_unavailable" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ไม่สามารถเชื่อมต่อกับโทรศัพท์ได้"</string>
-    <string name="phone_unavailable_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"วางโทรศัพท์ที่จับคู่ไว้ใกล้ ๆ และติดตั้งแอป OpenClaw รุ่นที่เข้ากันได้"</string>
+    <string name="phone_unavailable_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"วางโทรศัพท์ที่จับคู่ไว้ใกล้ ๆ และติดตั้งแอป CypherClaw รุ่นที่เข้ากันได้"</string>
     <string name="selection_not_found" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"รายการที่เลือกไม่พร้อมใช้งานแล้ว"</string>
     <string name="message_not_sent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"การดำเนินการไม่ได้รับการยอมรับ"</string>
     <string name="something_went_wrong" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เกิดข้อผิดพลาด"</string>
     <string name="refresh_and_try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"รีเฟรชรายการแล้วลองอีกครั้ง"</string>
     <string name="model_catalog_refresh_failed" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"ไม่สามารถรีเฟรชโมเดลบางรายการได้ โมเดลที่แสดงอยู่ยังคงใช้งานได้"</string>
-    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"อัปเดต OpenClaw บนโทรศัพท์ของคุณและอัปเดต Gateway เพื่อเลือกโมเดลสำหรับแชตนี้"</string>
+    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"อัปเดต CypherClaw บนโทรศัพท์ของคุณและอัปเดต Gateway เพื่อเลือกโมเดลสำหรับแชตนี้"</string>
     <string name="try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ลองอีกครั้งจากนาฬิกา"</string>
     <string name="update_required" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"จำเป็นต้องอัปเดต"</string>
-    <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"อัปเดต OpenClaw ทั้งบนโทรศัพท์และนาฬิกา"</string>
+    <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"อัปเดต CypherClaw ทั้งบนโทรศัพท์และนาฬิกา"</string>
     <string name="refresh" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"รีเฟรช"</string>
     <string name="retry" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ลองอีกครั้ง"</string>
-    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"การตอบกลับจาก OpenClaw"</string>
+    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"การตอบกลับจาก CypherClaw"</string>
     <string name="notification_reply" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ตอบกลับ"</string>
-    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"คำตอบจาก OpenClaw"</string>
+    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"คำตอบจาก CypherClaw"</string>
     <string name="notification_reply_failed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ส่งข้อความตอบกลับไม่สำเร็จ"</string>
     <string name="notification_reply_failed_text" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"โทรศัพท์ไม่พร้อมใช้งาน แตะตอบกลับเพื่อลองอีกครั้ง"</string>
-    <string name="notification_phone_changed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เปิด OpenClaw เพื่อตอบกลับ"</string>
+    <string name="notification_phone_changed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เปิด CypherClaw เพื่อตอบกลับ"</string>
     <string name="notification_phone_changed_text" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"โทรศัพท์ที่คุณตั้งเป็นเครื่องหลักเปลี่ยนไปแล้ว เปิดแอปเพื่อโหลดเซสชันใหม่ก่อนตอบกลับ"</string>
-    <string name="tile_label" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw"</string>
+    <string name="tile_label" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw"</string>
     <string name="tile_description" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เปิดเซสชันและตอบกลับผ่านโทรศัพท์ที่จับคู่ไว้"</string>
     <string name="tile_open" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เปิด"</string>
     <string name="tile_phone_proxy" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"พร็อกซีโทรศัพท์"</string>

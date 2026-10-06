@@ -16,7 +16,7 @@ struct PairingApprovalPanelView: View {
                         .accessibilityHidden(true)
                 }
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("OpenClaw")
+                    Text("CypherClaw")
                         .font(.system(size: 13, weight: .semibold))
                     Text(verbatim: PairingCardPresentation.headerTitle(for: cards))
                         .font(.system(size: 23, weight: .semibold))

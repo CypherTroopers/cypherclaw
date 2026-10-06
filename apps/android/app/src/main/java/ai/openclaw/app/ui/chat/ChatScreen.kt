@@ -2219,7 +2219,7 @@ internal fun ChatBubble(
     when {
       isUser -> peerSenderLabel ?: nativeString("You")
       normalizedRole == "system" -> nativeString("System")
-      else -> nativeString("OpenClaw")
+      else -> nativeString("CypherClaw")
     }
   val caption =
     when {

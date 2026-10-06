@@ -56,6 +56,8 @@ STATIC = {
     "/assets/earth-land.json": ("assets/earth-land.json", "application/json"),
     "/assets/earth-land.LICENSE.txt": ("assets/earth-land.LICENSE.txt", "text/plain; charset=utf-8"),
     "/assets/cypher-horizon.png": ("assets/cypher-horizon.png", "image/png"),
+    "/assets/cypherclaw-logo.png": ("assets/cypherclaw-logo.png", "image/png"),
+    "/assets/cypherclaw-mark.png": ("assets/cypherclaw-mark.png", "image/png"),
 }
 # Aggregate limits for this single server process, not per-user limits.
 SEARCHES_PER_MINUTE = 20

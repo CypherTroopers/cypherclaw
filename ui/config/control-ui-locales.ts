@@ -9,6 +9,7 @@ import {
 import { CONTROL_UI_LOCALE_ENTRIES } from "../../scripts/lib/control-ui-i18n-config.ts";
 import { flattenTranslations } from "../../scripts/lib/control-ui-i18n-sync-plan.ts";
 import type { TranslationMap } from "../../scripts/lib/control-ui-i18n-sync-plan.ts";
+import { rebrandControlUiTranslationMemory } from "./control-ui-branding.ts";
 
 const localeModulePrefix = "virtual:openclaw-control-ui-locale/";
 const localeConfigHintsModulePrefix = "virtual:openclaw-control-ui-locale-config-hints/";
@@ -67,7 +68,10 @@ async function loadControlUiLocaleCatalogPartition(
     throw new Error(`Control UI ${locale} translation memory is missing or empty`);
   }
   return partitionControlUiLocaleCatalog(
-    materializeControlUiLocaleCatalog(flattenTranslations(sourceCatalog), memory),
+    materializeControlUiLocaleCatalog(
+      flattenTranslations(sourceCatalog),
+      rebrandControlUiTranslationMemory(flattenTranslations(sourceCatalog), memory),
+    ),
   );
 }
 

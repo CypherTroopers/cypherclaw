@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "openclaw.desktop",
-  "name": "OpenClaw",
+  "name": "CypherClaw",
   "version": "1.0.0",
   "author": "OpenClaw",
-  "description": "OpenClaw agents, sessions, activity, attention indicators, and quick prompts",
+  "description": "CypherClaw agents, sessions, activity, attention indicators, and quick prompts",
   "kinds": [
     "service",
     "bar-widget"
@@ -14,7 +14,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "OpenClaw",
+    "displayName": "CypherClaw",
     "category": "AI",
     "allowMultiple": false,
     "defaultSection": "right"

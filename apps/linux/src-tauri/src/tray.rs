@@ -276,9 +276,7 @@ pub fn build(
         .text(QUIT_ID, "Quit OpenClaw")
         .build()?;
 
-    // macOS draws menu bar icons from the alpha channel alone (see
-    // icon_as_template below), so it needs the knocked-out silhouette; the
-    // rounded-tile 32x32.png is opaque edge to edge and renders as a solid blob.
+    // Full-color original artwork preserves the fork's supplied logo.
     #[cfg(target_os = "macos")]
     let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))?;
     #[cfg(not(target_os = "macos"))]
@@ -312,7 +310,7 @@ pub fn build(
             }
         });
     #[cfg(target_os = "macos")]
-    let tray_builder = tray_builder.icon_as_template(true);
+    let tray_builder = tray_builder.icon_as_template(false);
     let tray = tray_builder.build(app)?;
     let quickchat_preference = quickchat::load_shortcut_preference(app);
     let quickchat_state = app.state::<quickchat::QuickChatState>();

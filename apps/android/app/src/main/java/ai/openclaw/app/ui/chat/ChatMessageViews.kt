@@ -320,7 +320,7 @@ fun ChatTypingIndicatorBubble(
   val tokens = outputTokens?.let { localizedChatOutputTokens(it) }
   ChatBubbleContainer(
     user = false,
-    speaker = nativeString("OpenClaw"),
+    speaker = nativeString("CypherClaw"),
   ) {
     Row(
       modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = nativeString("Working") },

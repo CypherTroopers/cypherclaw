@@ -1,29 +1,23 @@
-# OpenClaw 🦞 — Your assistant, on your devices, in your chats
+# CypherClaw — Your AI assistant with Cypher node controls
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-banner-light.png">
-    <img src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-banner-dark.png" alt="OpenClaw — EXFOLIATE! EXFOLIATE! Your AI assistant, running on your own devices.">
-  </picture>
+  <img src="docs/assets/cypherclaw-logo.png" width="200" height="200" alt="CypherClaw CypherTrooper logo">
 </p>
 
 <p align="center">
-  <a href="https://github.com/openclaw/openclaw/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/openclaw/openclaw/ci.yml?branch=main&style=flat-square&label=ci" alt="CI status"></a>
-  <a href="https://www.npmjs.com/package/openclaw"><img src="https://img.shields.io/npm/v/openclaw?style=flat-square&label=npm" alt="npm version"></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/node/v/openclaw?style=flat-square" alt="Node.js version"></a>
+  <a href="https://github.com/CypherTroopers/cypherclaw"><img src="https://img.shields.io/badge/project-CypherClaw-22c55e?style=flat-square" alt="CypherClaw source"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License: MIT"></a>
-  <a href="https://discord.gg/clawd"><img src="https://img.shields.io/discord/1456350064065904867?label=discord&logo=discord&logoColor=white&color=5865F2&style=flat-square" alt="Discord"></a>
 </p>
 
-OpenClaw is an open-source AI assistant that runs on your own computer and meets you in the channels you already use: Discord, iMessage, Slack, Teams, Telegram, WhatsApp, and 20+ more, plus native apps for macOS, iOS, Android, Windows, and Linux. One Gateway runs it as a personal assistant on a laptop or as a shared [team deployment](https://docs.openclaw.ai/start/teams); configuration is the only difference.
+CypherClaw is an independent fork of [OpenClaw](https://github.com/openclaw/openclaw), maintained in [CypherTroopers/cypherclaw](https://github.com/CypherTroopers/cypherclaw). It combines a local AI assistant with Gateway and UI controls for a Cypher node. The original messaging integrations, model providers, and device clients remain available in the source tree.
 
-**Yours, with no catch.** State, memory, and credentials live on your hardware. Models and agent harnesses (Claude, Codex, local models) are plugins you can swap without changing anything else. Your prompts go to the model provider and chat platforms you configure, plus any diagnostics export you enable yourself; by default OpenClaw itself phones home for nothing but a daily version check, anonymous feature statistics are opt-in, and `update.checkOnStart: false` disables both ([what OpenClaw sends](https://docs.openclaw.ai/gateway/telemetry)). OpenClaw is stewarded by the [OpenClaw Foundation](https://openclaw.org), an independent 501(c)(3), and has no paid tier, hosted service, or token. The architecture case — trusted gateway, untrusted execution, deterministic policy — is in [Why OpenClaw](https://docs.openclaw.ai/start/why-openclaw).
+The original OpenClaw code is Copyright (c) 2026 OpenClaw Foundation and licensed under the [MIT License](LICENSE). CypherClaw is not affiliated with or endorsed by the OpenClaw Foundation. Original copyright and third-party notices are retained in [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-[Website](https://openclaw.ai) · [Docs](https://docs.openclaw.ai) · [Getting started](https://docs.openclaw.ai/start/getting-started) · [Why OpenClaw](https://docs.openclaw.ai/start/why-openclaw) · [FAQ](https://docs.openclaw.ai/help/faq) · [Vision](VISION.md) · [DeepWiki](https://deepwiki.com/openclaw/openclaw)
+[CypherClaw source](https://github.com/CypherTroopers/cypherclaw) · [CypherClaw issues](https://github.com/CypherTroopers/cypherclaw/issues) · [Upstream OpenClaw documentation](https://docs.openclaw.ai) · [Upstream architecture](https://docs.openclaw.ai/start/why-openclaw)
 
-## Cypher node in this fork
+## Install CypherClaw and use the Cypher node
 
-This fork adds Cypher directly to the Gateway and Control UI. Use this checkout to install these additions. The official installer URLs and published `openclaw` package in the upstream installation section below install upstream OpenClaw and do not contain this fork's Cypher integration. A separate distribution source must be configured before those installation methods can deliver this fork.
+CypherClaw adds Cypher directly to the Gateway and Control UI. Install from this checkout to obtain these additions. The `openclaw` CLI command, package name, configuration paths, and environment variable names are retained for compatibility; the displayed product name is CypherClaw. The official installer URLs and published `openclaw` package in the upstream installation section below install upstream OpenClaw and do not contain CypherClaw's Cypher integration. A separate distribution source must be configured before those installation methods can deliver this fork.
 
 Install Node 24.16+ (below 25) or Node 26.1+, and pnpm 12.5.1. From the root of **this fork's checkout**, run the following commands on Linux, macOS, or native Windows PowerShell:
 
@@ -61,7 +55,9 @@ node scripts/package-openclaw-for-docker.mjs --allow-unreleased-changelog
 
 The command builds package artifacts and writes the tarball under `.artifacts/docker-e2e-package` by default. The package allowlist includes the three Cypher launchers, genesis and peer configuration, the Unix relay argument helper, the three target binaries, and the Windows DLLs. Chain data, keystores, and private relay configurations are outside that allowlist. A complete package build and native installation with these Cypher additions have not yet been verified. This local packaging command does not publish a package.
 
-## Install
+## Upstream OpenClaw installation reference
+
+The following installers and npm package are published by upstream OpenClaw. Use the source installation above for CypherClaw.
 
 The installer supports macOS, Linux, and Windows. It provisions a supported Node.js runtime when needed.
 
@@ -112,7 +108,7 @@ Onboarding verifies model access, creates the workspace, and configures the Gate
 - [Channels](https://docs.openclaw.ai/channels) bring the assistant to WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, iMessage, and other messaging services.
 - [Companion apps and nodes](https://docs.openclaw.ai/platforms) add voice, Canvas, camera, screen, and device-local actions on supported platforms.
 
-OpenClaw works with hosted and local [model providers](https://docs.openclaw.ai/concepts/model-providers). Its [tools](https://docs.openclaw.ai/tools), [skills](https://docs.openclaw.ai/tools/skills), and [plugins](https://docs.openclaw.ai/plugins) extend what an assistant can do.
+CypherClaw works with the upstream hosted and local [model providers](https://docs.openclaw.ai/concepts/model-providers). Its [tools](https://docs.openclaw.ai/tools), [skills](https://docs.openclaw.ai/tools/skills), and [plugins](https://docs.openclaw.ai/plugins) extend what an assistant can do.
 
 ## Security
 
@@ -136,8 +132,8 @@ Tools run on the host for the main session unless you configure sandboxing. Read
 The repository is a pnpm workspace. Plain `npm install` at the repository root is not supported.
 
 ```bash
-git clone https://github.com/openclaw/openclaw.git
-cd openclaw
+git clone https://github.com/CypherTroopers/cypherclaw.git
+cd cypherclaw
 pnpm install
 pnpm build
 pnpm ui:build
@@ -145,21 +141,25 @@ pnpm ui:build
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and the [source setup guide](https://docs.openclaw.ai/start/setup) for the development loop.
 
-## Governance
+## Upstream provenance
+
+CypherClaw is developed independently by CypherTroopers. The following governance and acknowledgments describe the upstream OpenClaw project.
 
 OpenClaw is developed in the open by the [OpenClaw Foundation](https://openclaw.org), an independent 501(c)(3). The Foundation employs the core team and signs releases. Donors and infrastructure sponsors support the Foundation; none of them own or direct the project. OpenAI is a donor, not an owner.
 
-## Community
+## CypherClaw development and upstream community
+
+Report CypherClaw bugs and feature requests in [this fork's issue tracker](https://github.com/CypherTroopers/cypherclaw/issues). The upstream resources and acknowledgments below are retained for provenance.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for maintainers and contribution guidelines; AI-assisted PRs are welcome.
 
-Use the [issue chooser](https://github.com/openclaw/openclaw/issues/new/choose) for bugs and feature requests, ask setup questions in [Discord](https://discord.gg/clawd), and report vulnerabilities through [SECURITY.md](SECURITY.md). New capabilities usually belong in plugins built on the [plugin SDK](https://docs.openclaw.ai/plugins/building-plugins) and shared through [ClawHub](https://clawhub.ai).
+The upstream [Discord](https://discord.gg/clawd) and [plugin SDK documentation](https://docs.openclaw.ai/plugins/building-plugins) describe OpenClaw. Report issues specific to this fork in the CypherClaw issue tracker rather than the upstream project.
 
 OpenClaw was built for **Molty**, a space lobster AI assistant, by Peter Steinberger and the community. Explore the [project lore](https://docs.openclaw.ai/start/lore), [soul.md](https://soul.md), [Peter's site](https://steipete.me), [Star History](https://www.star-history.com/#openclaw/openclaw&type=date&legend=top-left), and [@openclaw](https://x.com/openclaw).
 
 Special thanks to [Mario Zechner](https://mariozechner.at/) for his support and for [pi](https://github.com/earendil-works/pi), and to Adam Doppelt for the lobster.bot domain.
 
-## Donors and sponsors
+## Upstream donors and sponsors
 
 The Foundation is funded by donors including Amazon, Lobster Computer Company, Offline Holdings, OpenAI, Red Hat, and the University of Michigan, with infrastructure support from Blacksmith, Convex, GitHub, NVIDIA, and Vercel.
 
@@ -369,3 +369,5 @@ clawtributors:hidden:end -->
 ## License
 
 [MIT](LICENSE) © OpenClaw Foundation. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for incorporated or adapted code.
+
+The OpenClaw-derived agent and UI retain their MIT license. The separately launched Cypher node and its build tooling have their own upstream licenses; the MIT license above does not relicense those components. Verify the corresponding Cypher source, build provenance, and required license texts before redistributing node binaries.

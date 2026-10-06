@@ -1,5 +1,5 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw"</string>
+    <string name="app_name" translatable="false">"CypherClaw"</string>
     <string name="chat" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Chat"</string>
     <string name="session" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Sitzung"</string>
     <string name="model" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Modell"</string>
@@ -40,7 +40,7 @@
     <string name="agent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Agent"</string>
     <string name="system" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"System"</string>
     <string name="start_conversation" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Unterhaltung starten"</string>
-    <string name="start_conversation_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Sprechen oder tippen Sie auf Ihrer Uhr. Das gekoppelte Smartphone sendet die Nachricht über seine authentifizierte OpenClaw-Sitzung."</string>
+    <string name="start_conversation_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Sprechen oder tippen Sie auf Ihrer Uhr. Das gekoppelte Smartphone sendet die Nachricht über seine authentifizierte CypherClaw-Sitzung."</string>
     <string name="current_session" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Aktuelle Sitzung"</string>
     <string name="context_label_value" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"%1$s: %2$s"</string>
     <string name="close" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"Schließen"</string>
@@ -73,30 +73,30 @@
     <string name="phone_ready" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Telefon bereit"</string>
     <string name="gateway_connected" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway verbunden"</string>
     <string name="gateway_offline" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway offline"</string>
-    <string name="gateway_offline_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Den Gateway in OpenClaw auf dem gekoppelten Telefon erneut verbinden."</string>
-    <string name="open_phone_app" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw auf dem Smartphone öffnen"</string>
+    <string name="gateway_offline_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Den Gateway in CypherClaw auf dem gekoppelten Telefon erneut verbinden."</string>
+    <string name="open_phone_app" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw auf dem Smartphone öffnen"</string>
     <string name="phone_not_ready_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Die Uhr startet oder authentifiziert den Gateway niemals selbst."</string>
     <string name="phone_unavailable" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Telefon nicht erreichbar"</string>
-    <string name="phone_unavailable_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Halten Sie das gekoppelte Telefon in der Nähe und installieren Sie die passende OpenClaw-App."</string>
+    <string name="phone_unavailable_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Halten Sie das gekoppelte Telefon in der Nähe und installieren Sie die passende CypherClaw-App."</string>
     <string name="selection_not_found" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Auswahl nicht mehr verfügbar"</string>
     <string name="message_not_sent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Aktion nicht akzeptiert"</string>
     <string name="something_went_wrong" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Etwas ist schiefgelaufen"</string>
     <string name="refresh_and_try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Die Listen aktualisieren und erneut versuchen."</string>
     <string name="model_catalog_refresh_failed" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"Einige Modelle konnten nicht aktualisiert werden. Die aufgeführten Modelle sind weiterhin verfügbar."</string>
-    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"Aktualisieren Sie OpenClaw auf Ihrem Smartphone und das Gateway, um Modelle für diesen Chat auszuwählen."</string>
+    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"Aktualisieren Sie CypherClaw auf Ihrem Smartphone und das Gateway, um Modelle für diesen Chat auszuwählen."</string>
     <string name="try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Versuchen Sie es erneut über die Uhr."</string>
     <string name="update_required" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Aktualisierung erforderlich"</string>
-    <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Aktualisieren Sie OpenClaw auf dem Smartphone und der Uhr."</string>
+    <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Aktualisieren Sie CypherClaw auf dem Smartphone und der Uhr."</string>
     <string name="refresh" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Aktualisieren"</string>
     <string name="retry" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Erneut versuchen"</string>
-    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw-Antworten"</string>
+    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw-Antworten"</string>
     <string name="notification_reply" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Antworten"</string>
-    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw-Antwort"</string>
+    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw-Antwort"</string>
     <string name="notification_reply_failed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Antwort nicht gesendet"</string>
     <string name="notification_reply_failed_text" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Telefon nicht verfügbar. Tippen Sie auf Antworten, um es erneut zu versuchen."</string>
-    <string name="notification_phone_changed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw zum Antworten öffnen"</string>
+    <string name="notification_phone_changed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw zum Antworten öffnen"</string>
     <string name="notification_phone_changed_text" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Ihr bevorzugtes Telefon hat sich geändert. Öffnen Sie die App, um die Sitzung vor dem Antworten neu zu laden."</string>
-    <string name="tile_label" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw"</string>
+    <string name="tile_label" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw"</string>
     <string name="tile_description" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Sitzungen öffnen und über Ihr gekoppeltes Telefon antworten"</string>
     <string name="tile_open" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ÖFFNEN"</string>
     <string name="tile_phone_proxy" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"TELEFON-PROXY"</string>

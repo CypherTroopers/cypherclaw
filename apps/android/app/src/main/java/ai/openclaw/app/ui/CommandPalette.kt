@@ -14,6 +14,7 @@ import ai.openclaw.app.i18n.verbatimText
 import ai.openclaw.app.ui.design.ClawAvatarMark
 import ai.openclaw.app.ui.design.ClawEmptyState
 import ai.openclaw.app.ui.design.ClawIcons
+import ai.openclaw.app.ui.design.OpenClawMascot
 import ai.openclaw.app.ui.design.ClawListItem
 import ai.openclaw.app.ui.design.ClawPanel
 import ai.openclaw.app.ui.design.ClawPlainIconButton
@@ -324,7 +325,11 @@ private fun CommandRowIcon(icon: ImageVector) {
     border = BorderStroke(1.dp, ClawTheme.colors.borderStrong),
   ) {
     Box(contentAlignment = Alignment.Center) {
-      Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(15.dp), tint = ClawTheme.colors.text)
+      if (icon === ClawIcons.OpenClaw) {
+        OpenClawMascot(modifier = Modifier.size(15.dp))
+      } else {
+        Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(15.dp), tint = ClawTheme.colors.text)
+      }
     }
   }
 }

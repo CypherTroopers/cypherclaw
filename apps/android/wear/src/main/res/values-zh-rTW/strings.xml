@@ -1,5 +1,5 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw"</string>
+    <string name="app_name" translatable="false">"CypherClaw"</string>
     <string name="chat" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"聊天"</string>
     <string name="session" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"工作階段"</string>
     <string name="model" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"模型"</string>
@@ -40,7 +40,7 @@
     <string name="agent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"代理程式"</string>
     <string name="system" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"系統"</string>
     <string name="start_conversation" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"開始對話"</string>
-    <string name="start_conversation_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"在手錶上說話或輸入文字。已配對的手機會透過其已驗證的 OpenClaw 工作階段傳送訊息。"</string>
+    <string name="start_conversation_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"在手錶上說話或輸入文字。已配對的手機會透過其已驗證的 CypherClaw 工作階段傳送訊息。"</string>
     <string name="current_session" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"目前工作階段"</string>
     <string name="context_label_value" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"%1$s：%2$s"</string>
     <string name="close" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"關閉"</string>
@@ -73,30 +73,30 @@
     <string name="phone_ready" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"手機已就緒"</string>
     <string name="gateway_connected" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway 已連線"</string>
     <string name="gateway_offline" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway 已離線"</string>
-    <string name="gateway_offline_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"請在已配對的手機上，於 OpenClaw 中重新連線 Gateway。"</string>
-    <string name="open_phone_app" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"在手機上開啟 OpenClaw"</string>
+    <string name="gateway_offline_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"請在已配對的手機上，於 CypherClaw 中重新連線 Gateway。"</string>
+    <string name="open_phone_app" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"在手機上開啟 CypherClaw"</string>
     <string name="phone_not_ready_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"手錶本身絕不會啟動 Gateway 或對其進行驗證。"</string>
     <string name="phone_unavailable" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"無法連線至手機"</string>
-    <string name="phone_unavailable_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"請將已配對的手機放在附近，並安裝相符的 OpenClaw 應用程式。"</string>
+    <string name="phone_unavailable_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"請將已配對的手機放在附近，並安裝相符的 CypherClaw 應用程式。"</string>
     <string name="selection_not_found" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"選取項目已無法使用"</string>
     <string name="message_not_sent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"動作未被接受"</string>
     <string name="something_went_wrong" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"發生錯誤"</string>
     <string name="refresh_and_try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"請重新整理清單，然後再試一次。"</string>
     <string name="model_catalog_refresh_failed" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"部分模型無法重新整理。清單中的模型仍可使用。"</string>
-    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"請更新手機上的 OpenClaw 和 Gateway，以便為此對話選擇模型。"</string>
+    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"請更新手機上的 CypherClaw 和 Gateway，以便為此對話選擇模型。"</string>
     <string name="try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"請從手錶再試一次。"</string>
     <string name="update_required" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"需要更新"</string>
-    <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"請更新手機和手錶上的 OpenClaw。"</string>
+    <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"請更新手機和手錶上的 CypherClaw。"</string>
     <string name="refresh" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"重新整理"</string>
     <string name="retry" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"重試"</string>
-    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw 回覆"</string>
+    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw 回覆"</string>
     <string name="notification_reply" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"回覆"</string>
-    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw 回覆"</string>
+    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw 回覆"</string>
     <string name="notification_reply_failed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"回覆未傳送"</string>
     <string name="notification_reply_failed_text" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"手機無法使用。請點選「回覆」再試一次。"</string>
-    <string name="notification_phone_changed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"開啟 OpenClaw 以回覆"</string>
+    <string name="notification_phone_changed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"開啟 CypherClaw 以回覆"</string>
     <string name="notification_phone_changed_text" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"你的偏好手機已變更。請先開啟應用程式以重新載入工作階段，再進行回覆。"</string>
-    <string name="tile_label" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw"</string>
+    <string name="tile_label" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw"</string>
     <string name="tile_description" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"開啟工作階段，並透過已配對的手機回覆"</string>
     <string name="tile_open" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"開啟"</string>
     <string name="tile_phone_proxy" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"手機代理伺服器"</string>

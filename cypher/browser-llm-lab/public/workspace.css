@@ -5,6 +5,7 @@
 html,body { width:100%; height:100%; }
 body { margin:0; overflow:hidden; background:var(--canvas); color:var(--text); font-size:13px; }
 .icon-definitions { position:absolute; width:0; height:0; overflow:hidden; }
+.cypherclaw-brand-icon { object-fit:contain; }
 .icon { display:block; width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.55; stroke-linecap:round; stroke-linejoin:round; flex:0 0 auto; }
 button,input,select,textarea { font:inherit; }
 button,a,summary,input,select,textarea { -webkit-tap-highlight-color:transparent; }
@@ -133,7 +134,7 @@ button.mobile-menu { display:none; }
 .state-pill.ready,.state-pill.online,.state-pill.connected { border-color:#2a806a; color:#8feaca; background:#07332973; }
 .state-pill.ready::before,.state-pill.online::before,.state-pill.connected::before { background:#30e8a8; box-shadow:0 0 6px #20e69b70; }
 .claw-visual { position:relative; flex:1 0 115px; min-height:115px; margin:3px -5px; overflow:hidden; background:radial-gradient(ellipse at 50% 55%,#0a88cf24,transparent 68%); }
-.claw-sigil { position:absolute; top:50%; left:50%; width:78px; height:78px; fill:#07354b; stroke:#2adcf6; stroke-width:1.2; transform:translate(-50%,-50%); filter:drop-shadow(0 0 13px #009af9bb); }
+.claw-sigil { position:absolute; top:50%; left:50%; width:112px; height:112px; object-fit:contain; transform:translate(-50%,-50%); }
 .orbital { position:absolute; top:50%; left:50%; width:145px; height:79px; border:1px solid #119bd780; border-radius:50%; transform:translate(-50%,-50%) rotate(-35deg); box-shadow:0 0 9px #007dec18; }
 .orbit-two { width:128px; height:72px; transform:translate(-50%,-50%) rotate(44deg); border-color:#147ab949; }
 .orbital-dot { position:absolute; width:4px; height:4px; top:27%; left:28%; border-radius:50%; background:#74f2ff; box-shadow:0 0 10px #06d9ff; }
@@ -437,7 +438,7 @@ body.assistant-collapsed #chatPanel { display:none; }
   .feature-card > p { font-size:12px; }
   .state-pill { font-size:10px; }
   .claw-visual { min-height:120px; margin-top:8px; }
-  .claw-sigil { width:89px; height:89px; }
+  .claw-sigil { width:120px; height:120px; }
   .orbital { width:175px; height:91px; }
   .orbit-two { width:143px; height:81px; }
   .compute-visual { height:68px; margin-top:14px; }
@@ -517,7 +518,7 @@ body.assistant-collapsed #chatPanel { display:none; }
   .feature-card > p { font-size:9px; }
   .state-pill { margin-top:8px; font-size:7px; padding:3px 7px; }
   .claw-visual { flex-basis:91px; min-height:91px; }
-  .claw-sigil { width:68px; height:68px; }
+  .claw-sigil { width:90px; height:90px; }
   .compute-visual { height:45px; margin-top:4px; margin-bottom:4px; }
   .processor-icon { width:31px; height:31px; }
   .runtime-stats { gap:3px; padding:7px 8px; }
@@ -596,3 +597,10 @@ body.assistant-collapsed #chatPanel { display:none; }
   .chat-context select,#memoryText { font-size:16px; }
   .memory-item button,.memory-actions button,#clearMemory { min-height:44px; }
 }
+
+/* Keep the supplied logo's complete image and colors unchanged at every size. */
+.cypherclaw-brand-icon,
+.assistant-title > .cypherclaw-brand-icon,
+.assistant-orb .cypherclaw-brand-icon,
+.claw-sigil { object-fit:contain; border-radius:0; filter:none; }
+.feature-icon:has(> .cypherclaw-brand-icon) { filter:none; }

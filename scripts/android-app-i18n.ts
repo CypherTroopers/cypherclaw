@@ -463,6 +463,8 @@ const ALLOWED_UI_LITERALS = new Map<string, ReadonlySet<string>>([
     new Set([
       "0 = exact",
       "Cron expression, e.g. 0 9 * * *",
+      "CYPHERCLAW",
+      "CypherClaw",
       "D",
       "Google Chat",
       "ID",
@@ -1050,7 +1052,9 @@ function localizeManualStrings(
   return [...base.values()].map((entry) => {
     const source = decodeAndroidResourceValue(entry.rawValue);
     const translatable = !/\btranslatable\s*=\s*"false"/u.test(entry.attrs);
-    const inventoryEntry = inventoryBySource.get(source);
+    const inventoryEntry =
+      inventoryBySource.get(source) ??
+      inventoryBySource.get(source.replaceAll("CypherClaw", "OpenClaw"));
     if (translatable && !inventoryEntry) {
       throw new Error(
         `${surface} string is missing from native inventory: ${JSON.stringify(source)}`,
@@ -1060,8 +1064,8 @@ function localizeManualStrings(
     return {
       attrs: translatable ? withGeneratedTranslationLintIgnores(entry.attrs) : entry.attrs,
       key: entry.key,
-      rawValue: `"${escapeAndroidResourceValue(value)}"`,
-      value,
+      rawValue: `"${escapeAndroidResourceValue(nativeProductDisplayValue(source, value))}"`,
+      value: nativeProductDisplayValue(source, value),
     };
   });
 }
@@ -1096,7 +1100,24 @@ function renderGeneratedString(key: string, entry: { source: string; value: stri
   const formatted =
     (readKotlinInterpolations(entry.source)?.length ?? 0) > 0 ? "" : ' formatted="false"';
   // Translation-memory text preserves technical tokens and source punctuation.
-  return `    <string name="${key}"${withGeneratedTranslationLintIgnores(formatted)}>"${renderAndroidResourceValue(entry.source, entry.value)}"</string>`;
+  return `    <string name="${key}"${withGeneratedTranslationLintIgnores(formatted)}>"${renderAndroidResourceValue(entry.source, nativeProductDisplayValue(entry.source, entry.value))}"</string>`;
+}
+
+function nativeProductDisplayValue(source: string, value: string): string {
+  if (
+    source.includes("OpenClaw Foundation") ||
+    source.includes("OpenClaw Hosted Push Relay") ||
+    source.includes("OpenClaw's hosted push relay") ||
+    source.includes("OpenClaw reference")
+  ) {
+    return value;
+  }
+  // Keep English lookup keys, module names, paths, URLs, and format arguments intact.
+  return value
+    .replace(/(?<![A-Za-z0-9_.:/])OpenClaw(?![A-Za-z0-9_]|[.:/][A-Za-z0-9_/])/gu, "CypherClaw")
+    .replace(/\ban CypherClaw/gu, "a CypherClaw")
+    .replace(/\bd[’']CypherClaw/gu, "de CypherClaw")
+    .replace(/\bqu[’']CypherClaw/gu, "que CypherClaw");
 }
 
 function renderAssistantXml(items: readonly string[]): string {

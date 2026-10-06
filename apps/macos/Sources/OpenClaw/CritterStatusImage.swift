@@ -41,7 +41,7 @@ struct CritterStatusImage: NSViewRepresentable {
     }
 
     func updateNSView(_ view: CritterMotionView, context: Context) {
-        view.imageView.image = self.image
+        view.updateImage(self.image)
         view.updateMotion(rotation: self.rotation, translation: self.translation, enabled: self.motionEnabled)
     }
 
@@ -50,7 +50,7 @@ struct CritterStatusImage: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: CritterMotionView, context: Context) -> CGSize? {
-        CGSize(width: 18, height: 18)
+        self.image.size
     }
 }
 
@@ -78,6 +78,23 @@ final class CritterMotionView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        self.imageView.image?.size ?? NSSize(width: 18, height: 18)
+    }
+
+    func updateImage(_ image: NSImage) {
+        let size = image.size
+        self.setFrameSize(size)
+        self.rotationView.frame = NSRect(x: size.width / 2, y: size.height / 2, width: 0, height: 0)
+        self.imageView.frame = NSRect(
+            x: -size.width / 2,
+            y: -size.height / 2,
+            width: size.width,
+            height: size.height)
+        self.imageView.image = image
+        self.invalidateIntrinsicContentSize()
     }
 
     func updateMotion(rotation: CritterMotionTarget, translation: CritterMotionTarget, enabled: Bool) {

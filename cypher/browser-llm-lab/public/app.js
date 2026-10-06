@@ -65,10 +65,10 @@ function updateChatContext() {
   $("memoryEnabled").checked = memoryEnabled;
   $("openMemory").textContent = (memoryError || preferenceError) ? "Memory needs attention" : memoryEnabled ? "Memory on" : "Memory off";
   const mode = taskMode();
-  $("conversationMode").textContent = mode === "agent" ? `OpenClaw · ${selectedSession}`
+  $("conversationMode").textContent = mode === "agent" ? `CypherClaw · ${selectedSession}`
     : mode === "web" ? "Web research · answers generated on this device"
       : `Chat · local answers · Web ${searchPolicy}`;
-  $("modeHint").textContent = mode === "agent" ? "Tasks and tool permissions use your OpenClaw configuration. Its model may be local or hosted."
+  $("modeHint").textContent = mode === "agent" ? "Tasks and tool permissions use your CypherClaw configuration. Its model may be local or hosted."
     : mode === "web" ? "Research sends search terms to this server and external search engines."
       : searchPolicy === "off" ? "Web is off. Questions and saved context stay on this device. Current facts cannot be verified."
         : `Web ${searchPolicy === "auto" ? "Auto looks up time-sensitive questions" : "Always looks up questions"}. Search terms go to this server and search engines. Answers use this device.`;
@@ -289,7 +289,7 @@ function updateNavigation() {
     $(id).classList.toggle("active", id === active);
     $(id).setAttribute("aria-current", id === active ? "page" : "false");
   }
-  $("viewTitle").textContent = !conversation ? "Home" : taskMode() === "agent" ? "Cypher Claw" : taskMode() === "web" ? "Web research" : "Chat";
+  $("viewTitle").textContent = !conversation ? "Home" : taskMode() === "agent" ? "CypherClaw" : taskMode() === "web" ? "Web research" : "Chat";
 }
 
 function updatePanelAccess() {
@@ -328,7 +328,7 @@ function openConversation(focus = false) {
 function updateHeroHint() {
   const mode = $("heroMode").value;
   $("heroHint").textContent = mode === "web" ? "Web research sends your search terms to search providers."
-    : mode === "agent" ? "Agent tasks use the model and tools on your OpenClaw Gateway."
+    : mode === "agent" ? "Agent tasks use the model and tools on your CypherClaw Gateway."
       : searchPolicy === "off" ? "Web is off. Chat stays on your device." : `Local answers. Web ${searchPolicy === "auto" ? "Auto looks up current information" : "Always searches first"}.`;
 }
 
@@ -339,7 +339,7 @@ function homeNotice(text) {
 }
 
 async function enterConversation(mode, text = "", focus = false, send = false) {
-  if (busy || memoryAction) { homeNotice("A task is in progress. You can follow it in Cypher Claw."); openConversation(focus); return; }
+  if (busy || memoryAction) { homeNotice("A task is in progress. You can follow it in CypherClaw."); openConversation(focus); return; }
   if (text.length > 400 || bytes(text) > 1200) return homeNotice("Use at most 400 characters / 1,200 UTF-8 bytes to start a conversation.");
   homeNotice("");
   $("taskMode").value = mode;
@@ -353,7 +353,7 @@ async function enterConversation(mode, text = "", focus = false, send = false) {
   const available = mode === "agent" ? gateway.connected : ready;
   if (!available) {
     showSetup(true, mode === "agent" ? "gatewayPanel" : "modelPanel");
-    status(text ? "Your question is ready. Finish setup, then send it from Cypher Claw." : mode === "agent" ? "Connect your OpenClaw Gateway to use agent mode." : "Prepare a browser model to start chatting.");
+    status(text ? "Your question is ready. Finish setup, then send it from CypherClaw." : mode === "agent" ? "Connect your CypherClaw Gateway to use agent mode." : "Prepare a browser model to start chatting.");
   } else if (send && text && !$("send").disabled) {
     $("form").requestSubmit($("send"));
   } else if (!$("prompt").disabled) $("prompt").focus();
@@ -413,7 +413,7 @@ async function changeTaskMode() {
   updateEmptyState();
   if (mode === "agent") {
     if (gateway.connected) await loadGatewayHistory();
-    else { status("Connect your OpenClaw Gateway to use agent mode."); showSetup(true, "gatewayPanel"); }
+    else { status("Connect your CypherClaw Gateway to use agent mode."); showSetup(true, "gatewayPanel"); }
   } else status(ready ? mode === "web" ? "Ready to research with web sources." : "Ready. Answers use this device; Web search follows your Chat setting." : "Prepare a browser model to start chatting.");
 }
 
@@ -440,7 +440,7 @@ function updateInstaller() {
     $("installOS").disabled = true;
     $("installArch").disabled = true;
     $("installStepTitle").textContent = "Connect from your phone";
-    $("installStepDescription").textContent = "The phone app is a companion. Run OpenClaw Gateway on your own PC, then connect over WSS.";
+    $("installStepDescription").textContent = "The phone app is a companion. Run CypherClaw Gateway on your own PC, then connect over WSS.";
     $("browserModelNote").textContent = "Browser chat requires WebGPU support and enough device memory. The phone companion connects to a Gateway running elsewhere.";
     if ($("gatewayUrl").value === "ws://127.0.0.1:18789") $("gatewayUrl").value = "";
     $("gatewayUrl").placeholder = "wss://your-pc-gateway.example";
@@ -457,7 +457,7 @@ function requestInstallerDownload() {
   if (!$("includeOpenClaw").checked || !installer?.supported || !isOfficialOpenClawDownload(installer.downloadUrl)) return;
   const frame = document.createElement("iframe");
   frame.hidden = true;
-  frame.title = "Official OpenClaw installer download";
+  frame.title = "Official OpenClaw installer download (upstream)";
   frame.src = installer.downloadUrl;
   document.body.append(frame);
   setTimeout(() => frame.remove(), 60000);
@@ -806,12 +806,12 @@ function gatewayState({ state, error }) {
   $("disconnectGateway").disabled = state !== "connecting" && state !== "connected";
   $("refreshSessions").disabled = state !== "connected";
   $("gatewayBadge").classList.toggle("connected", state === "connected");
-  $("gatewayBadge").textContent = `OpenClaw ${state}`;
+  $("gatewayBadge").textContent = `CypherClaw ${state}`;
   if (state === "connected") $("gatewayStatus").textContent = "Connected and authenticated. Agent tasks use your Gateway's model and tool permissions.";
   else if (state === "connecting") $("gatewayStatus").textContent = "Connecting and authenticating this browser...";
   else if (error) {
     let detail = `[${error.code}] ${error.message}`;
-    if (error.details?.requestId) detail += ` Pairing request: ${error.details.requestId}. Approve this browser in OpenClaw, then reconnect.`;
+    if (error.details?.requestId) detail += ` Pairing request: ${error.details.requestId}. Approve this browser in CypherClaw, then reconnect.`;
     $("gatewayStatus").textContent = detail;
     log(`Gateway: ${detail}`);
   } else $("gatewayStatus").textContent = "Disconnected. Reconnect to retrieve the latest Gateway history.";
@@ -829,22 +829,22 @@ function gatewayEvent(frame) {
     if (typeof frame.text === "string" && (frame.text || payload.state === "delta")) run.output.textContent = frame.text;
     scrollChat();
     if (payload.state === "final") {
-      if (!run.output.textContent.trim() || /^(Sending task|OpenClaw is working)/.test(run.output.textContent)) run.output.textContent = "Task finished. Check the OpenClaw dashboard for artifacts and tool details.";
+      if (!run.output.textContent.trim() || /^(Sending task|CypherClaw is working)/.test(run.output.textContent)) run.output.textContent = "Task finished. Check the CypherClaw dashboard for artifacts and tool details.";
       finishGatewayRun();
-    } else if (payload.state === "aborted") finishGatewayRun(Object.assign(new Error("Stopped by OpenClaw. Completed tool actions may remain in effect."), { code: "STOPPED" }));
-    else if (payload.state === "error") finishGatewayRun(new Error(payload.errorMessage || "OpenClaw reported a task failure."));
+    } else if (payload.state === "aborted") finishGatewayRun(Object.assign(new Error("Stopped by CypherClaw. Completed tool actions may remain in effect."), { code: "STOPPED" }));
+    else if (payload.state === "error") finishGatewayRun(new Error(payload.errorMessage || "CypherClaw reported a task failure."));
   } else if (frame.event === "agent" && activeRun && payload.runId === activeRun.runId) {
     if (payload.stream === "tool") {
       const name = typeof payload.data?.name === "string" ? clip(payload.data.name, 100) : "tool";
       const phase = typeof payload.data?.phase === "string" ? clip(payload.data.phase, 40) : "update";
-      status(`OpenClaw: ${name} · ${phase}`);
+      status(`CypherClaw: ${name} · ${phase}`);
       log(`Agent tool: ${name} · ${phase}`);
     }
   } else if (frame.event === "exec.approval.requested" && activeRun) {
-    status("OpenClaw requests execution approval. Review it in the OpenClaw dashboard.");
+    status("CypherClaw requests execution approval. Review it in the CypherClaw dashboard.");
     const notice = document.createElement("p");
     notice.className = "notice";
-    notice.textContent = "Execution approval is pending. Open your OpenClaw dashboard to review the requested action.";
+    notice.textContent = "Execution approval is pending. Open your CypherClaw dashboard to review the requested action.";
     activeRun.parent.append(notice);
   }
 }
@@ -901,7 +901,7 @@ async function loadGatewayHistory() {
     if (version !== historyVersion || taskMode() !== "agent") return;
     if (typeof subscription?.key === "string") selectedSession = session = subscription.key;
     if (typeof subscription?.agentId === "string") selectedAgentId = agentId = subscription.agentId;
-    $("conversationMode").textContent = `OpenClaw · ${selectedSession}`;
+    $("conversationMode").textContent = `CypherClaw · ${selectedSession}`;
     const result = await gateway.history(session, agentId || undefined);
     if (version !== historyVersion || taskMode() !== "agent" || session !== selectedSession || agentId !== selectedAgentId) return;
     if (!Array.isArray(result?.messages)) throw new Error("Gateway returned invalid conversation history.");
@@ -914,7 +914,7 @@ async function loadGatewayHistory() {
     updateEmptyState();
     gatewaySessionBusy = Boolean(result.inFlightRun || result.sessionInfo?.hasActiveRun);
     if (typeof result.inFlightRun?.text === "string" && result.inFlightRun.text) bubble("assistant", result.inFlightRun.text);
-    status(gatewaySessionBusy ? "A task is already running in this Gateway session. Review or stop it in OpenClaw, then refresh history before sending another task." : "Gateway history loaded. Ready to send an agent task.");
+    status(gatewaySessionBusy ? "A task is already running in this Gateway session. Review or stop it in CypherClaw, then refresh history before sending another task." : "Gateway history loaded. Ready to send an agent task.");
     scrollChat(true);
   } catch (error) { if (version === historyVersion) { gatewaySessionBusy = true; status(`Gateway history failed: ${error.message}. Refresh history before sending a task.`); } }
   finally { if (version === historyVersion) { historyLoading = false; controls(busy); } }
@@ -924,7 +924,7 @@ async function sendAgent(text) {
   showChat();
   bubble("user", text);
   const parent = bubble("assistant", ""), output = document.createElement("div");
-  output.textContent = "Sending task to OpenClaw...";
+  output.textContent = "Sending task to CypherClaw...";
   parent.append(output);
   parent.setAttribute("aria-busy", "true");
   const sessionKey = selectedSession, agentId = selectedAgentId || undefined;
@@ -941,8 +941,8 @@ async function sendAgent(text) {
     if (activeRun) {
       activeRun.runId = accepted.runId;
       controls(true);
-      output.textContent = "OpenClaw is working...";
-      status("OpenClaw is running your task...");
+      output.textContent = "CypherClaw is working...";
+      status("CypherClaw is running your task...");
       $("prompt").value = "";
       scheduleChatLayout();
       const queued = activeRun.queued;
@@ -950,12 +950,12 @@ async function sendAgent(text) {
       for (const frame of queued) gatewayEvent(frame);
     }
     await completion;
-    status("OpenClaw task complete. Review its result and any changes it made.");
+    status("CypherClaw task complete. Review its result and any changes it made.");
     await refreshGatewaySessions();
   } catch (error) {
     finishGatewayRun(error);
     gatewaySessionBusy = error.code !== "STOPPED";
-    if (/^(Sending task|OpenClaw is working)/.test(output.textContent)) output.textContent = "";
+    if (/^(Sending task|CypherClaw is working)/.test(output.textContent)) output.textContent = "";
     output.textContent += `\n[${error.code || "Error"}] ${error.message}`;
     status(error.code === "STOPPED" ? error.message : `Agent task interrupted: ${error.message} Check Gateway history before repeating the task.`);
     log(`Agent: ${error.message}`);
@@ -1252,7 +1252,7 @@ async function probe() {
   } catch (error) {
     client?.close();
     $("device").textContent = error.message;
-    if (taskMode() !== "agent" && !busy) status("Browser inference is unavailable on this device. You can still connect an OpenClaw Gateway for agent tasks.");
+    if (taskMode() !== "agent" && !busy) status("Browser inference is unavailable on this device. You can still connect a CypherClaw Gateway for agent tasks.");
   }
   probeComplete = true;
   controls(busy);
@@ -1377,7 +1377,7 @@ $("connectGateway").onclick = async () => {
     if (selectedSession === sessionAtStart && selectedAgentId === agentAtStart) {
       selectedSession = hello.snapshot?.sessionDefaults?.mainSessionKey || selectedSession;
       selectedAgentId = hello.snapshot?.sessionDefaults?.defaultAgentId || null;
-      if (taskMode() === "agent") $("conversationMode").textContent = `OpenClaw · ${selectedSession}`;
+      if (taskMode() === "agent") $("conversationMode").textContent = `CypherClaw · ${selectedSession}`;
     }
     await refreshGatewaySessions();
     if (!busy && gateway.connected && revision === conversationRevision) {
@@ -1387,7 +1387,7 @@ $("connectGateway").onclick = async () => {
       await changing;
       if (gateway.connected && nextRevision === conversationRevision && taskMode() === "agent") showChat();
     }
-  } catch (error) { $("gatewayStatus").textContent = `[${error.code || "CONNECTION"}] ${error.message}` + (error.details?.requestId ? ` Pairing request: ${error.details.requestId}. Approve this browser in OpenClaw and reconnect.` : ""); }
+  } catch (error) { $("gatewayStatus").textContent = `[${error.code || "CONNECTION"}] ${error.message}` + (error.details?.requestId ? ` Pairing request: ${error.details.requestId}. Approve this browser in CypherClaw and reconnect.` : ""); }
 };
 $("disconnectGateway").onclick = () => gateway.disconnect();
 $("refreshSessions").onclick = async () => { await refreshGatewaySessions(); if (taskMode() === "agent") await loadGatewayHistory(); };
@@ -1398,7 +1398,7 @@ $("stop").onclick = async () => {
     try {
       const result = await gateway.abort({ sessionKey: run.sessionKey, agentId: run.agentId, runId: run.runId });
       if (activeRun !== run) return;
-      if (result?.aborted) finishGatewayRun(Object.assign(new Error("Stopped by OpenClaw. Completed tool actions may remain in effect."), { code: "STOPPED" }));
+      if (result?.aborted) finishGatewayRun(Object.assign(new Error("Stopped by CypherClaw. Completed tool actions may remain in effect."), { code: "STOPPED" }));
       else status("Gateway did not confirm cancellation. The task may have finished; refresh history when it settles.");
     } catch (error) { if (activeRun === run) status(`Stop failed: ${error.message}`); }
     finally { if (activeRun === run || !activeRun) $("stop").disabled = false; }

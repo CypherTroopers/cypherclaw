@@ -71,6 +71,7 @@ let package = Package(
             path: "Sources/OpenClawChatUI",
             resources: [
                 .copy("Resources/Mermaid"),
+                .copy("Resources/CypherClawLogo.png"),
             ],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),

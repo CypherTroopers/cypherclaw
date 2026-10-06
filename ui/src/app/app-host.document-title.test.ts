@@ -80,7 +80,7 @@ async function createConnectedSessionShell() {
   return { ...harness, shell, context, active, background, deletion, replace };
 }
 
-describe("OpenClaw shell document title", () => {
+describe("CypherClaw shell document title", () => {
   function createShell(context?: ApplicationContext): ShellDocumentTitleState {
     const shell = document.createElement(
       "openclaw-app-shell",
@@ -129,18 +129,18 @@ describe("OpenClaw shell document title", () => {
 
     shell.syncDocumentTitle();
 
-    expect(document.title).toBe("Chat — OpenClaw");
+    expect(document.title).toBe("Chat — CypherClaw");
   });
 
   it("appends the configured environment to route and custodian titles", () => {
     const shell = createShell(createContext({ environment: { label: "edge", color: "amber" } }));
     shell.routeState = { routeId: "usage" };
     shell.syncDocumentTitle();
-    expect(document.title).toBe("Usage — OpenClaw · edge");
+    expect(document.title).toBe("Usage — CypherClaw · edge");
 
     shell.routeState = { routeId: "custodian" };
     shell.syncDocumentTitle();
-    expect(document.title).toBe("Ask OpenClaw · edge");
+    expect(document.title).toBe("Ask CypherClaw · edge");
   });
 
   it("uses the active session's derived title for a non-main chat", () => {
@@ -156,7 +156,7 @@ describe("OpenClaw shell document title", () => {
 
     shell.syncDocumentTitle();
 
-    expect(document.title).toBe("Quarterly launch plan — OpenClaw");
+    expect(document.title).toBe("Quarterly launch plan — CypherClaw");
   });
 
   it("updates the active title without rendering the shell for session publications", async () => {
@@ -175,7 +175,7 @@ describe("OpenClaw shell document title", () => {
       await settleLitElement(shell);
     }
 
-    expect(document.title).toBe("Revised launch plan — OpenClaw");
+    expect(document.title).toBe("Revised launch plan — CypherClaw");
     expect(renderShell).not.toHaveBeenCalled();
   });
 
@@ -205,7 +205,7 @@ describe("OpenClaw shell document title", () => {
     replacement.sessions.patchRowLocal(background.key, { derivedTitle: "Replacement title" });
     await vi.advanceTimersByTimeAsync(20);
     await settleLitElement(shell);
-    expect(document.title).toBe("Replacement title — OpenClaw");
+    expect(document.title).toBe("Replacement title — CypherClaw");
 
     shell.remove();
     await settleLitElement(shell);
@@ -227,7 +227,7 @@ describe("OpenClaw shell document title", () => {
 
     shell.syncDocumentTitle();
 
-    expect(document.title).toBe("Molty — OpenClaw");
+    expect(document.title).toBe("Molty — CypherClaw");
   });
 
   it("falls back to the session display name when the main agent is missing", () => {
@@ -245,7 +245,7 @@ describe("OpenClaw shell document title", () => {
 
     shell.syncDocumentTitle();
 
-    expect(document.title).toBe("Fallback thread — OpenClaw");
+    expect(document.title).toBe("Fallback thread — CypherClaw");
   });
 
   it("prefixes the pending approval count", () => {
@@ -254,7 +254,7 @@ describe("OpenClaw shell document title", () => {
 
     shell.syncDocumentTitle();
 
-    expect(document.title).toBe("(2) Usage — OpenClaw");
+    expect(document.title).toBe("(2) Usage — CypherClaw");
   });
 
   it("shows disconnected instead of a stale approval count", () => {
@@ -263,6 +263,6 @@ describe("OpenClaw shell document title", () => {
 
     shell.syncDocumentTitle();
 
-    expect(document.title).toBe("(Disconnected) Usage — OpenClaw");
+    expect(document.title).toBe("(Disconnected) Usage — CypherClaw");
   });
 });

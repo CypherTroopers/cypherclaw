@@ -55,7 +55,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         }
         self.renderer = renderer
 
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.statusItem = item
         self.installButton(in: item)
         self.installWindowCallbacks()
@@ -161,15 +161,20 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private func installButton(in item: NSStatusItem) {
         guard let button = item.button else { return }
-        let host = NSHostingView(rootView: StatusMenuIconView(state: self.state))
-        // The constraints below own sizing; animation must not remeasure the status item.
-        host.sizingOptions = []
+        let content = StatusMenuIconView(state: self.state)
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.size.width
+            } action: { [weak item] width in
+                // Retain the full photo plus external status columns at native size.
+                item?.length = width + 6
+            }
+        let host = NSHostingView(rootView: content)
+        host.sizingOptions = [.intrinsicContentSize]
         host.translatesAutoresizingMaskIntoConstraints = false
         button.addSubview(host)
         NSLayoutConstraint.activate([
             host.centerXAnchor.constraint(equalTo: button.centerXAnchor),
             host.centerYAnchor.constraint(equalTo: button.centerYAnchor),
-            host.widthAnchor.constraint(equalToConstant: 18),
             host.heightAnchor.constraint(equalToConstant: 18),
         ])
         button.target = self
@@ -323,7 +328,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         button.appearsDisabled = false
         button.toolTip = self.state.voiceWakeMeterActive
             ? String(localized: "OpenClaw - Voice Wake live meter active")
-            : String(localized: "OpenClaw")
+            : String(localized: "CypherClaw")
     }
 
     private func scheduleDebugMenuOpen() {

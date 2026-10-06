@@ -1,15 +1,15 @@
 {
   "fill": {
-    "solid": "extended-srgb:0.98039,0.95686,0.90980,1.00000"
+    "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
   },
   "groups": [
     {
       "layers": [
         {
-          "image-name": "molty.svg",
-          "name": "Heritage",
+          "image-name": "cypherclaw.png",
+          "name": "CypherClaw",
           "position": {
-            "scale": 0.98,
+            "scale": 1,
             "translation-in-points": [
               0,
               0
@@ -19,7 +19,7 @@
       ],
       "shadow": {
         "kind": "neutral",
-        "opacity": 0.18
+        "opacity": 0
       },
       "translucency": {
         "enabled": false,

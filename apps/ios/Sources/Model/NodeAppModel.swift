@@ -2517,7 +2517,7 @@ final class NodeAppModel {
         if notificationsAllowed {
             let addResult = await NotificationOperationRunner.run(timeoutSeconds: 2.0) { [notificationCenter] in
                 let content = UNMutableNotificationContent()
-                content.title = "OpenClaw"
+                content.title = "CypherClaw"
                 content.body = text
                 content.sound = .default
                 content.userInfo = ["messageId": messageId]

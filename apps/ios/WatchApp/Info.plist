@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>OpenClaw</string>
+	<string>CypherClaw</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -21,9 +21,9 @@
 	<key>CFBundleVersion</key>
 	<string>$(OPENCLAW_BUILD_VERSION)</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>OpenClaw connects this Apple Watch directly to your Gateway on trusted local networks.</string>
+	<string>CypherClaw connects this Apple Watch directly to your Gateway on trusted local networks.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>OpenClaw uses the microphone for voice conversations you start on Apple Watch.</string>
+	<string>CypherClaw uses the microphone for voice conversations you start on Apple Watch.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>RedHatDisplay[wght].ttf</string>

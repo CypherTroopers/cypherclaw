@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "OpenClaw",
+  "productName": "CypherClaw",
   "version": "0.1.0",
   "identifier": "ai.openclaw.linux",
   "build": {
@@ -40,7 +40,7 @@
       {
         "label": "main",
         "create": false,
-        "title": "OpenClaw",
+        "title": "CypherClaw",
         "url": "index.html",
         "width": 1080,
         "height": 720,
@@ -122,7 +122,7 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "category": "Utility",
-    "shortDescription": "OpenClaw Linux companion",
+    "shortDescription": "CypherClaw desktop companion",
     "longDescription": "Installs OpenClaw, manages the local Gateway service, and hosts the Control UI.",
     "icon": [
       "icons/32x32.png",

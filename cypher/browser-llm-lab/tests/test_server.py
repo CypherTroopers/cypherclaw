@@ -75,6 +75,8 @@ class ServerRoutes(unittest.TestCase):
             ("/relay.css", "text/css", b"relay-panel"),
             ("/assets/earth-land.json", "application/json", b"Natural Earth"),
             ("/assets/cypher-horizon.png", "image/png", b"\x89PNG\r\n\x1a\n"),
+            ("/assets/cypherclaw-logo.png", "image/png", b"\x89PNG\r\n\x1a\n"),
+            ("/assets/cypherclaw-mark.png", "image/png", b"\x89PNG\r\n\x1a\n"),
         ]:
             with self.subTest(path=path):
                 status, headers, body = self.request(path)

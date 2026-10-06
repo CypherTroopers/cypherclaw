@@ -8,17 +8,17 @@
       "agent": 24
     }
   },
-  "description": "Multi-channel AI gateway with extensible messaging integrations",
+  "description": "CypherClaw AI gateway with Cypher node controls and messaging integrations",
   "keywords": [],
-  "homepage": "https://github.com/openclaw/openclaw#readme",
+  "homepage": "https://github.com/CypherTroopers/cypherclaw#readme",
   "bugs": {
-    "url": "https://github.com/openclaw/openclaw/issues"
+    "url": "https://github.com/CypherTroopers/cypherclaw/issues"
   },
   "license": "MIT",
   "author": "OpenClaw Foundation (https://openclaw.org)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openclaw/openclaw.git"
+    "url": "git+https://github.com/CypherTroopers/cypherclaw.git"
   },
   "bin": {
     "openclaw": "openclaw.mjs"

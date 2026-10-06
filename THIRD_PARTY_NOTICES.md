@@ -1,5 +1,17 @@
 # Third-party notices
 
+## CypherClaw fork attribution
+
+CypherClaw is an independent fork of OpenClaw. The original OpenClaw code is
+Copyright (c) 2026 OpenClaw Foundation and licensed under the MIT License in
+`LICENSE`. CypherClaw is not affiliated with or endorsed by the OpenClaw
+Foundation. The original notices below are retained.
+
+The separately launched Cypher node and its build tooling retain their own
+upstream licenses. This file's MIT notices do not relicense those components;
+binary redistribution requires verification of the corresponding Cypher
+source, build provenance, and applicable license texts.
+
 This file records third-party notices for code or substantial implementation
 portions incorporated into OpenClaw source, beyond normal package-manager
 dependency metadata.
@@ -65,3 +77,15 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## CypherClaw logo artwork
+
+The CypherTrooper artwork used for this fork's logo was supplied by the project
+owner for use in CypherClaw. The original uploaded JPEG is retained unchanged;
+opaque application icons and README images use its complete photo with only
+uniform resizing and format conversion. The owner also authorized exterior
+background extraction for transparent UI and tray images. That built-in tool
+operation, its prompt, and the source and derived assets are recorded in
+`assets/branding/README.md`. This is separate artwork provenance; the original
+OpenClaw Foundation copyright and code license do not establish ownership of
+this artwork or automatically apply the MIT license to it.

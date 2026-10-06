@@ -794,8 +794,8 @@ describe("renderModelProviders", () => {
       "Runs through Claude CLI using its own login.",
     ],
     [
-      { id: "openclaw", kind: "api", label: "OpenClaw Default" },
-      "API · OpenClaw",
+      { id: "openclaw", kind: "api", label: "CypherClaw Default" },
+      "API · CypherClaw",
       "Uses the provider's API connection",
     ],
   ] as const)(
