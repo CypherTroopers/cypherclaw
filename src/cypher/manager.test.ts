@@ -119,35 +119,37 @@ describe("Cypher node owner", () => {
       "linux",
       "x64",
       "/bundled/cypher",
-      "/state/chaindbname",
+      "/bundled/cypher/chaindbname",
       "cypher-linux-amd64",
       "colossusX_linux.sh",
-      "/state/chaindbname/cypher.ipc",
+      "/bundled/cypher/chaindbname/cypher.ipc",
     ],
     [
       "darwin",
       "arm64",
       "/bundled/cypher",
-      "/state/chaindbname",
+      "/bundled/cypher/chaindbname",
       "cypher-darwin-arm64",
       "colossusX_mac.sh",
-      "/state/chaindbname/cypher.ipc",
+      "/bundled/cypher/chaindbname/cypher.ipc",
     ],
     [
       "win32",
       "x64",
       "C:\\bundled\\cypher",
-      "C:\\state\\chaindbname",
+      "C:\\bundled\\cypher\\chaindbname",
       "cypher.exe",
       "colossusX_windows.ps1",
       "\\\\.\\pipe\\cypher.ipc",
     ],
   ])(
-    "launches the supplied %s/%s target with private state and headless settings",
+    "launches the supplied %s/%s target with the default data directory and headless settings",
     async (platform, arch, rootDir, dataDir, binary, script, ipcPath) => {
+      vi.stubEnv("CYPHER_DATADIR", undefined);
+      vi.stubEnv("CYPHER_IPC_PATH", undefined);
       vi.stubEnv("CYPHER_BROWSER_RELAY", "1");
-      vi.stubEnv("CYPHER_RPC_BIND", "0.0.0.0");
-      const { manager, launch, rpc } = fixture({ platform, arch, rootDir, dataDir });
+      vi.stubEnv("CYPHER_RPC_BIND", "127.0.0.1");
+      const { manager, launch, rpc } = fixture({ platform, arch, rootDir, dataDir: undefined });
       const state = await manager.start(authority);
       expect(state).toMatchObject({
         state: "starting",
@@ -167,9 +169,9 @@ describe("Cypher node owner", () => {
             CYPHER_DATADIR: dataDir,
             CYPHER_IPC_PATH: ipcPath,
             CYPHER_BROWSER_RELAY: "1",
-            CYPHER_RPC_ENABLED: "0",
-            CYPHER_RPC_BIND: "127.0.0.1",
-            CYPHER_WS_BIND: "127.0.0.1",
+            CYPHER_RPC_ENABLED: "1",
+            CYPHER_RPC_BIND: "0.0.0.0",
+            CYPHER_WS_BIND: "0.0.0.0",
           }),
         }),
       );

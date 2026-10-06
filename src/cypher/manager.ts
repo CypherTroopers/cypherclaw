@@ -175,8 +175,7 @@ export class CypherNodeManager {
       }
       let dataDir = this.#options.dataDir ?? process.env.CYPHER_DATADIR;
       if (!dataDir) {
-        const { resolveStateDir } = await import("../config/state-dir.js");
-        dataDir = pathApi.join(resolveStateDir(), "cypher", "chaindbname");
+        dataDir = pathApi.join(packageRoot, "chaindbname");
       }
       return {
         rootDir: pathApi.resolve(packageRoot),
@@ -399,9 +398,9 @@ export class CypherNodeManager {
         CYPHER_DATADIR: paths.dataDir,
         CYPHER_IPC_PATH: paths.ipcPath,
         CYPHER_BROWSER_RELAY: "1",
-        CYPHER_RPC_ENABLED: "0",
-        CYPHER_RPC_BIND: "127.0.0.1",
-        CYPHER_WS_BIND: "127.0.0.1",
+        CYPHER_RPC_ENABLED: "1",
+        CYPHER_RPC_BIND: "0.0.0.0",
+        CYPHER_WS_BIND: "0.0.0.0",
       });
       this.#logs = [];
       this.#error = null;
