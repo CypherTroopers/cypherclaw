@@ -1,6 +1,52 @@
 import { randomUUID } from "node:crypto";
 import { Socket } from "node:net";
+import { homedir } from "node:os";
+import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { resolveEnvironmentValue } from "../infra/process-env.js";
+
+function expandNativePath(value: string, env: Record<string, string>, platform: NodeJS.Platform) {
+  // Cypher's DirectoryFlag expands HOME/environment, then uses POSIX cleaning on every OS.
+  const withHome = /^~[/\\]/.test(value)
+    ? (resolveEnvironmentValue(env, "HOME", platform) || homedir()) + value.slice(1)
+    : value;
+  const expanded = withHome.replace(
+    /\$(?:\{([^}]*)\}|([*#$@!?0-9-]|[A-Za-z_][A-Za-z0-9_]*)|(\{))/g,
+    (_match, braced: string | undefined, plain: string | undefined) =>
+      resolveEnvironmentValue(env, braced ?? plain ?? "", platform) ?? "",
+  );
+  return path.posix.normalize(expanded).replace(/(.)\/$/, "$1");
+}
+
+/** Infer native paths from the resolved launcher directory and its inherited environment. */
+export function resolveCypherIpcPaths(
+  rootDir: string,
+  env: Record<string, string>,
+  platform: NodeJS.Platform,
+) {
+  const pathApi = platform === "win32" ? path.win32 : path;
+  const envValue = (name: string) => resolveEnvironmentValue(env, name, platform);
+  // Bash and the Unix launchers set these before Cypher expands its path flags.
+  const nativeEnv = platform === "win32" ? env : { ...env, PWD: rootDir, OLDPWD: rootDir };
+  let dataDir = envValue("CYPHER_DATADIR") || "chaindbname";
+  let ipcPath = envValue("CYPHER_IPC_PATH") || "cypher.ipc";
+  if (platform === "win32") {
+    dataDir = dataDir.trim() ? dataDir : "chaindbname";
+    if (!pathApi.parse(dataDir).root) {
+      dataDir = pathApi.join(rootDir, dataDir);
+    }
+    ipcPath = ipcPath.trim() ? ipcPath : "cypher.ipc";
+  }
+  dataDir = pathApi.resolve(rootDir, expandNativePath(dataDir, nativeEnv, platform));
+  ipcPath = expandNativePath(ipcPath, nativeEnv, platform);
+  ipcPath =
+    platform === "win32"
+      ? ipcPath.startsWith("\\\\.\\pipe\\")
+        ? ipcPath
+        : "\\\\.\\pipe\\" + ipcPath
+      : pathApi.resolve(pathApi.basename(ipcPath) === ipcPath ? dataDir : rootDir, ipcPath);
+  return { rootDir, dataDir, ipcPath };
+}
 
 export type CypherRpcParams = {
   web3_clientVersion: [];

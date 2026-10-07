@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { callCypherIpc, CypherIpcError, type CypherRpcMethod } from "./ipc.js";
 import { CypherNodeManager, type CypherAuthority, type CypherProcess } from "./manager.js";
@@ -86,7 +88,6 @@ describe("Cypher node owner", () => {
       platform: "linux",
       arch: "x64",
       rootDir: "/bundled/cypher",
-      dataDir: "/state/chaindbname",
       rpc,
       launch,
       preflight,
@@ -100,18 +101,28 @@ describe("Cypher node owner", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.stubEnv("CYPHER_DATADIR", "/state/chaindbname");
   });
   afterEach(async () => {
-    for (const fixture of fixtures.splice(0)) {
-      if (!fixture.process.exited) {
-        fixture.process.exit(0);
+    for (const entry of fixtures.splice(0)) {
+      if (!entry.process.exited) {
+        entry.process.exit(0);
       }
-      await fixture.manager.close().catch(() => {});
+      await entry.manager.close().catch(() => {});
     }
     vi.restoreAllMocks();
     childProcessMock.spawn.mockReset();
     vi.unstubAllEnvs();
     vi.useRealTimers();
+  });
+
+  it("preserves node log lines while removing terminal and binary controls", async () => {
+    const { manager, process } = fixture();
+    await manager.start(authority);
+    process.dataListener(
+      "\u001b[31mfirst\u001b[0m\tline\r\n\u001b]0;title\u0007second\u0000\u0085\n",
+    );
+    await expect(manager.status()).resolves.toMatchObject({ logs: ["first\tline", "second"] });
   });
 
   it.each([
@@ -143,13 +154,16 @@ describe("Cypher node owner", () => {
       "\\\\.\\pipe\\cypher.ipc",
     ],
   ])(
-    "launches the supplied %s/%s target with the default data directory and headless settings",
+    "launches the supplied %s/%s script without replacing inherited node settings",
     async (platform, arch, rootDir, dataDir, binary, script, ipcPath) => {
       vi.stubEnv("CYPHER_DATADIR", undefined);
       vi.stubEnv("CYPHER_IPC_PATH", undefined);
-      vi.stubEnv("CYPHER_BROWSER_RELAY", "1");
+      vi.stubEnv("CYPHER_HEADLESS", "0");
+      vi.stubEnv("CYPHER_BROWSER_RELAY", "0");
+      vi.stubEnv("CYPHER_RPC_ENABLED", "0");
       vi.stubEnv("CYPHER_RPC_BIND", "127.0.0.1");
-      const { manager, launch, rpc } = fixture({ platform, arch, rootDir, dataDir: undefined });
+      vi.stubEnv("CYPHER_WS_BIND", "127.0.0.2");
+      const { manager, launch, rpc } = fixture({ platform, arch, rootDir });
       const state = await manager.start(authority);
       expect(state).toMatchObject({
         state: "starting",
@@ -165,16 +179,16 @@ describe("Cypher node owner", () => {
           rootDir,
           script: expect.stringContaining(script),
           env: expect.objectContaining({
-            CYPHER_HEADLESS: "1",
-            CYPHER_DATADIR: dataDir,
-            CYPHER_IPC_PATH: ipcPath,
-            CYPHER_BROWSER_RELAY: "1",
-            CYPHER_RPC_ENABLED: "1",
-            CYPHER_RPC_BIND: "0.0.0.0",
-            CYPHER_WS_BIND: "0.0.0.0",
+            CYPHER_HEADLESS: "0",
+            CYPHER_BROWSER_RELAY: "0",
+            CYPHER_RPC_ENABLED: "0",
+            CYPHER_RPC_BIND: "127.0.0.1",
+            CYPHER_WS_BIND: "127.0.0.2",
           }),
         }),
       );
+      expect(launch.mock.calls[0]?.[0].env).not.toHaveProperty("CYPHER_DATADIR");
+      expect(launch.mock.calls[0]?.[0].env).not.toHaveProperty("CYPHER_IPC_PATH");
       expect(rpc).not.toHaveBeenCalled();
     },
   );
@@ -196,22 +210,125 @@ describe("Cypher node owner", () => {
     expect(launch).not.toHaveBeenCalled();
   });
 
-  it("uses the configured user data directory and IPC path", async () => {
-    vi.stubEnv("CYPHER_DATADIR", "/user/private/cypher");
-    vi.stubEnv("CYPHER_IPC_PATH", "/user/private/cypher/custom.ipc");
-    const { manager, launch } = fixture({ dataDir: undefined });
-    await manager.start(authority);
-    expect(launch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        env: expect.objectContaining({
-          CYPHER_DATADIR: "/user/private/cypher",
-          CYPHER_IPC_PATH: "/user/private/cypher/custom.ipc",
-        }),
-      }),
-    );
-  });
+  it.each([
+    [
+      "linux",
+      "/bundled/cypher",
+      "/user/private/cypher",
+      "/user/private/cypher/custom.ipc",
+      "/user/private/cypher",
+      "/user/private/cypher/custom.ipc",
+    ],
+    [
+      "linux",
+      "/bundled/cypher",
+      "custom-chain",
+      "custom.ipc",
+      "/bundled/cypher/custom-chain",
+      "/bundled/cypher/custom-chain/custom.ipc",
+    ],
+    [
+      "darwin",
+      "/bundled/cypher",
+      "custom-chain",
+      "./custom.ipc",
+      "/bundled/cypher/custom-chain",
+      "/bundled/cypher/custom-chain/custom.ipc",
+    ],
+    [
+      "linux",
+      "/bundled/cypher",
+      "custom-chain",
+      "run/custom.ipc",
+      "/bundled/cypher/custom-chain",
+      "/bundled/cypher/run/custom.ipc",
+    ],
+    [
+      "linux",
+      "/bundled/cypher",
+      "custom-chain",
+      "${CYPHER_DATADIR}/custom.ipc",
+      "/bundled/cypher/custom-chain",
+      "/bundled/cypher/custom-chain/custom.ipc",
+    ],
+    [
+      "linux",
+      "/bundled/cypher",
+      "custom-chain",
+      "${PWD}/custom.ipc",
+      "/bundled/cypher/custom-chain",
+      "/bundled/cypher/custom.ipc",
+    ],
+    [
+      "win32",
+      "C:\\bundled\\cypher",
+      "custom-chain",
+      "custom.ipc",
+      "C:\\bundled\\cypher\\custom-chain",
+      "\\\\.\\pipe\\custom.ipc",
+    ],
+    [
+      "win32",
+      "C:\\bundled\\cypher",
+      "custom-chain",
+      "\\\\.\\pipe\\custom.ipc",
+      "C:\\bundled\\cypher\\custom-chain",
+      "\\\\.\\pipe\\custom.ipc",
+    ],
+  ])(
+    "connects to the %s launcher's IPC endpoint for datadir %s/%s and IPC %s",
+    async (platform, rootDir, dataDir, ipcPath, expectedDataDir, expectedIpcPath) => {
+      vi.stubEnv("CYPHER_DATADIR", dataDir);
+      vi.stubEnv("CYPHER_IPC_PATH", ipcPath);
+      const { manager, launch, rpc } = fixture({
+        platform,
+        arch: platform === "darwin" ? "arm64" : "x64",
+        rootDir,
+      });
+      await expect(manager.start(authority)).resolves.toMatchObject({
+        dataDir: expectedDataDir,
+        ipcPath: expectedIpcPath,
+      });
+      expect(launch.mock.calls[0]?.[0].env).toMatchObject({
+        CYPHER_DATADIR: dataDir,
+        CYPHER_IPC_PATH: ipcPath,
+      });
+      await manager.connect(authority);
+      expect(rpc).toHaveBeenCalledWith(
+        expectedIpcPath,
+        "web3_clientVersion",
+        [],
+        expect.any(Object),
+      );
+    },
+  );
 
-  it("checks the missing Unix endpoint once and creates private writable state before launch", async () => {
+  it.skipIf(process.platform === "win32")(
+    "resolves Unix relative paths beside the physical launcher",
+    async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "cypher-script-root-"));
+      try {
+        const physicalBase = await fs.realpath(tempDir);
+        const rootDir = path.join(physicalBase, "releases", "cypher");
+        const alias = path.join(physicalBase, "current");
+        await fs.mkdir(rootDir, { recursive: true });
+        await fs.symlink(rootDir, alias, "dir");
+        vi.stubEnv("CYPHER_DATADIR", "../chain");
+        vi.stubEnv("CYPHER_IPC_PATH", "${PWD}/custom.ipc");
+        const { manager } = fixture({ rootDir: alias });
+        await expect(manager.start(authority)).resolves.toMatchObject({
+          rootDir,
+          dataDir: path.join(physicalBase, "releases", "chain"),
+          ipcPath: path.join(rootDir, "custom.ipc"),
+        });
+        await manager.close();
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("checks the missing Unix endpoint without creating the launcher's data directory", async () => {
     const lstat = vi
       .spyOn(fs, "lstat")
       .mockRejectedValue(Object.assign(new Error("absent"), { code: "ENOENT" }));
@@ -221,7 +338,7 @@ describe("Cypher node owner", () => {
     await manager.start(authority);
     expect(lstat).toHaveBeenCalledOnce();
     expect(access).toHaveBeenCalledTimes(3);
-    expect(mkdir).toHaveBeenCalledWith("/state/chaindbname", { recursive: true, mode: 0o700 });
+    expect(mkdir).not.toHaveBeenCalled();
     expect(launch).toHaveBeenCalledOnce();
   });
 
@@ -343,7 +460,7 @@ describe("Cypher node owner", () => {
       expect(childProcessMock.spawn).toHaveBeenCalledWith(
         "bash",
         ["/bundled/cypher/colossusX_linux.sh"],
-        expect.objectContaining({ detached: true, stdio: ["ignore", "pipe", "pipe"] }),
+        expect.objectContaining({ detached: true, stdio: ["pipe", "pipe", "pipe"] }),
       );
       let finished = false;
       const stopped = manager.stop(authority).then((status) => {

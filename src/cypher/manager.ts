@@ -2,9 +2,13 @@ import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { stripVTControlCharacters } from "node:util";
+import { hasErrnoCode } from "../infra/errno.js";
+import { mergeProcessEnv, resolveEnvironmentValue } from "../infra/process-env.js";
 import {
   callCypherIpc,
   CypherIpcError,
+  resolveCypherIpcPaths,
   type CypherRpcMethod,
   type CypherRpcParams,
 } from "./ipc.js";
@@ -38,8 +42,6 @@ type ManagerOptions = {
   platform?: string;
   arch?: string;
   rootDir?: string;
-  dataDir?: string;
-  ipcPath?: string;
   rpc?: typeof callCypherIpc;
   launch?: (options: LaunchOptions) => Promise<CypherProcess>;
   preflight?: () => Promise<void>;
@@ -104,7 +106,8 @@ async function launchProcess(options: LaunchOptions): Promise<CypherProcess> {
     cwd: options.rootDir,
     env: options.env,
     detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    // Keep stdin open: the launchers' default console closes the node on EOF.
+    stdio: ["pipe", "pipe", "pipe"],
   });
   await new Promise<void>((resolve, reject) => {
     child.once("spawn", resolve);
@@ -131,6 +134,7 @@ async function launchProcess(options: LaunchOptions): Promise<CypherProcess> {
 /** One process/endpoint owner for one Gateway lifetime. No startup or IPC dialing at construction. */
 export class CypherNodeManager {
   readonly #options: ManagerOptions;
+  readonly #env: Record<string, string>;
   readonly #rpc: typeof callCypherIpc;
   #paths: Promise<{ rootDir: string; dataDir: string; ipcPath: string }> | undefined;
   #queue: Promise<unknown> = Promise.resolve();
@@ -150,6 +154,7 @@ export class CypherNodeManager {
 
   constructor(options: ManagerOptions = {}) {
     this.#options = options;
+    this.#env = mergeProcessEnv([process.env], this.#platform === "win32" ? "win32" : "linux");
     this.#rpc = options.rpc ?? callCypherIpc;
   }
   get #platform() {
@@ -163,8 +168,9 @@ export class CypherNodeManager {
   }
   async #resolvePaths() {
     return await (this.#paths ??= (async () => {
-      const pathApi = this.#platform === "win32" ? path.win32 : path;
-      let packageRoot = this.#options.rootDir ?? process.env.CYPHER_ROOT;
+      const platform = this.#platform === "win32" ? "win32" : "linux";
+      let packageRoot =
+        this.#options.rootDir ?? resolveEnvironmentValue(this.#env, "CYPHER_ROOT", platform);
       if (!packageRoot) {
         const { resolveOpenClawPackageRoot } = await import("../infra/openclaw-root.js");
         const root = await resolveOpenClawPackageRoot({ moduleUrl: import.meta.url });
@@ -173,20 +179,17 @@ export class CypherNodeManager {
         }
         packageRoot = path.join(root, "cypher");
       }
-      let dataDir = this.#options.dataDir ?? process.env.CYPHER_DATADIR;
-      if (!dataDir) {
-        dataDir = pathApi.join(packageRoot, "chaindbname");
+      const pathApi = platform === "win32" ? path.win32 : path;
+      let rootDir = pathApi.resolve(packageRoot);
+      if (platform !== "win32") {
+        rootDir = await fs.realpath(rootDir).catch((error: unknown) => {
+          if (hasErrnoCode(error, "ENOENT")) {
+            return rootDir;
+          }
+          throw new CypherOperationError("The Cypher package directory could not be resolved.");
+        });
       }
-      return {
-        rootDir: pathApi.resolve(packageRoot),
-        dataDir: pathApi.resolve(dataDir),
-        ipcPath:
-          this.#options.ipcPath ??
-          process.env.CYPHER_IPC_PATH ??
-          (this.#platform === "win32"
-            ? "\\\\.\\pipe\\cypher.ipc"
-            : pathApi.join(pathApi.resolve(dataDir), "cypher.ipc")),
-      };
+      return resolveCypherIpcPaths(rootDir, this.#env, platform);
     })());
   }
   #serialize<T>(task: () => Promise<T>): Promise<T> {
@@ -353,8 +356,8 @@ export class CypherNodeManager {
         if (
           await fs.lstat(paths.ipcPath).then(
             () => true,
-            (error: NodeJS.ErrnoException) => {
-              if (error.code === "ENOENT") {
+            (error: unknown) => {
+              if (hasErrnoCode(error, "ENOENT")) {
                 return false;
               }
               throw new CypherOperationError("The Cypher IPC endpoint could not be inspected.");
@@ -383,25 +386,8 @@ export class CypherNodeManager {
             "Cypher binaries or launch files are missing or not executable. Install this fork with its bundled Cypher files.",
           );
         }
-        this.#assert(authority);
-        await fs.mkdir(paths.dataDir, { recursive: true, mode: 0o700 });
       }
       this.#assert(authority);
-      const env: Record<string, string> = {};
-      for (const [key, value] of Object.entries(process.env)) {
-        if (value !== undefined) {
-          env[key] = value;
-        }
-      }
-      Object.assign(env, {
-        CYPHER_HEADLESS: "1",
-        CYPHER_DATADIR: paths.dataDir,
-        CYPHER_IPC_PATH: paths.ipcPath,
-        CYPHER_BROWSER_RELAY: "1",
-        CYPHER_RPC_ENABLED: "1",
-        CYPHER_RPC_BIND: "0.0.0.0",
-        CYPHER_WS_BIND: "0.0.0.0",
-      });
       this.#logs = [];
       this.#error = null;
       this.#state = "starting";
@@ -412,16 +398,16 @@ export class CypherNodeManager {
           platform: this.#platform,
           script,
           rootDir: paths.rootDir,
-          env,
+          env: { ...this.#env },
           assertCurrent: () => this.#assert(authority),
         });
         this.#process = owned;
         this.#processExited = false;
         owned.onData((data) => {
           // Passwords are IPC-only. Strip terminal controls; retain a bounded local node log.
-          const clean = data
-            .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
-            .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+          const clean = stripVTControlCharacters(data).replace(/\p{Cc}/gu, (control) =>
+            control === "\n" || control === "\t" ? control : "",
+          );
           for (const line of clean.split(/\r?\n/)) {
             if (line) {
               this.#logs.push(line.slice(0, 1024));
@@ -429,7 +415,7 @@ export class CypherNodeManager {
           }
           this.#logs = this.#logs.slice(-200);
         });
-        this.#exit = new Promise<void>((resolve) =>
+        this.#exit = new Promise<void>((resolve) => {
           owned.onExit((code) => {
             if (this.#process === owned) {
               this.#processExited = true;
@@ -457,8 +443,8 @@ export class CypherNodeManager {
                 : "The Cypher process exited. Check its node logs and binary dependencies.";
             }
             resolve();
-          }),
-        );
+          });
+        });
         return await this.#status(false);
       } catch (error) {
         this.#state = "error";
