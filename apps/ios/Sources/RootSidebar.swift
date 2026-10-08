@@ -93,7 +93,7 @@ struct RootSidebar: View {
                 // The shell keeps a hidden sidebar mounted; an unpaused mascot would redraw unseen.
                 OpenClawProMark(size: 26, shadowRadius: 2, paused: !self.isDismissButtonEnabled)
                     .accessibilityHidden(true)
-                Text(String(localized: "OpenClaw"))
+                Text(String(localized: "CypherClaw"))
                     .font(OpenClawType.headline)
                     .foregroundStyle(OpenClawSidebarPalette.textStrong)
                     .lineLimit(1)

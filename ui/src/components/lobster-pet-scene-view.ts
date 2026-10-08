@@ -3,6 +3,7 @@ import {
   isThemeCritterId,
   type ThemeArtwork,
 } from "../../../packages/gateway-protocol/src/theme.ts";
+import { inferControlUiPublicAssetPath } from "../app/public-assets.ts";
 import { lobsterHonorific } from "./lobster-dex.ts";
 import type {
   LobsterPasserKind,
@@ -124,6 +125,7 @@ export function renderLobsterPetScene(args: {
         : args.look;
     const classes = [
       "lobster-pet",
+      "lobster-pet--cypherclaw",
       `lobster-pet--${args.mode}`,
       `lobster-pet--palette-${args.look.palette.id}`,
       twin ? "lobster-pet--twin" : "",
@@ -183,11 +185,14 @@ export function renderLobsterPetScene(args: {
           @contextmenu=${args.onContextMenu}
         >
           <div class="lobster-pet__body">
-            ${renderLobsterSvg(dressed, {
-              grumpy: args.grumpy,
-              bindle,
-              sailorCap: args.sailorDay,
-            })}
+            <img
+              class="cypherclaw-resident-logo"
+              src=${inferControlUiPublicAssetPath("cypherclaw-mascot.png")}
+              alt=""
+              width="512"
+              height="512"
+              draggable="false"
+            />
             ${args.entering && args.entrance === "balloon" ? BALLOON : nothing}
             ${
               args.entering && args.entrance === "bubble"

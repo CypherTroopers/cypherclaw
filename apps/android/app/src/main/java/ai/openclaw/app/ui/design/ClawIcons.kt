@@ -1,7 +1,6 @@
 package ai.openclaw.app.ui.design
 
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -103,37 +102,7 @@ internal object ClawIcons {
   }
 
   val OpenClaw: ImageVector by lazy {
-    ImageVector
-      .Builder("OpenClaw", 24.dp, 24.dp, 120f, 120f)
-      .apply {
-        // Eye cutouts preserve the canonical mascot's face under a single tint.
-        addPath(
-          pathData =
-            PathParser()
-              .parsePathString(
-                "M60 10C30 10 15 35 15 55C15 75 30 95 45 100L45 110L55 110L55 100C55 100 60 102 65 100L65 110L75 110L75 100C90 95 105 75 105 55C105 35 90 10 60 10Z " +
-                  "M51 35a6 6 0 1 0-12 0a6 6 0 1 0 12 0Z M81 35a6 6 0 1 0-12 0a6 6 0 1 0 12 0Z",
-              ).toNodes(),
-          fill = SolidColor(Color.Black),
-          pathFillType = PathFillType.EvenOdd,
-        )
-        addPath(
-          pathData =
-            PathParser()
-              .parsePathString(
-                "M20 45C5 40 0 50 5 60C10 70 20 65 25 55C28 48 25 45 20 45Z " +
-                  "M100 45C115 40 120 50 115 60C110 70 100 65 95 55C92 48 95 45 100 45Z " +
-                  "M48.5 34a2.5 2.5 0 1 0-5 0a2.5 2.5 0 1 0 5 0Z M78.5 34a2.5 2.5 0 1 0-5 0a2.5 2.5 0 1 0 5 0Z",
-              ).toNodes(),
-          fill = SolidColor(Color.Black),
-        )
-        addPath(
-          pathData = PathParser().parsePathString("M45 15Q35 5 30 8M75 15Q85 5 90 8").toNodes(),
-          stroke = SolidColor(Color.Black),
-          strokeLineWidth = 3f,
-          strokeLineCap = StrokeCap.Round,
-        )
-      }.build()
+    ImageVector.Builder("CypherClawLogo", 24.dp, 24.dp, 24f, 24f).build()
   }
 
   val Devices: ImageVector by lazy {

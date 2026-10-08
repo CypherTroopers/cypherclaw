@@ -1,0 +1,319 @@
+.cypher-plugin,
+.cypher-plugin-wallet {
+  display: block;
+  min-width: 0;
+}
+
+.cypher-plugin {
+  box-sizing: border-box;
+  width: 100%;
+  color: var(--text, CanvasText);
+  font-family: var(--font-body, system-ui);
+  line-height: 1.5;
+}
+
+.cypher-plugin *,
+.cypher-plugin *::before,
+.cypher-plugin *::after {
+  box-sizing: border-box;
+}
+
+.cypher-plugin .content-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-4, 16px);
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto var(--space-5, 20px);
+  padding: var(--space-4, 16px);
+}
+
+.cypher-plugin .page-title {
+  margin: 0;
+  color: var(--text-strong, CanvasText);
+  font-size: var(--control-ui-text-2xl, 24px);
+  font-weight: 600;
+}
+
+.cypher-plugin .page-subtitle {
+  margin: var(--space-1, 4px) 0 0;
+  color: var(--muted, GrayText);
+  font-size: var(--control-ui-text-sm, 12px);
+}
+
+.cypher-plugin .settings-page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--space-3, 12px) var(--space-4, 16px) var(--space-8, 32px);
+  gap: var(--space-8, 32px);
+}
+
+.cypher-plugin .settings-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--space-3, 12px);
+}
+
+.cypher-plugin .settings-section__copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--space-1, 4px);
+}
+
+.cypher-plugin .settings-section__heading {
+  margin: 0;
+  color: var(--muted-strong, CanvasText);
+  font-size: var(--control-ui-text-xs, 11px);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cypher-plugin .settings-section__desc,
+.cypher-plugin .settings-row__desc {
+  margin: 0;
+  color: var(--muted, GrayText);
+  font-size: var(--control-ui-text-sm, 12px);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.cypher-plugin .settings-group {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border, ButtonBorder);
+  border-radius: var(--radius-lg, 14px);
+  background: var(--card, Canvas);
+}
+
+.cypher-plugin .settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  gap: var(--space-4, 16px);
+}
+
+.cypher-plugin .settings-row + .settings-row {
+  border-top: 1px solid color-mix(in srgb, var(--border, ButtonBorder) 60%, transparent);
+}
+
+.cypher-plugin .settings-row__text {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cypher-plugin .settings-row__title {
+  color: var(--text-strong, CanvasText);
+  font-size: var(--control-ui-text-md, 14px);
+  font-weight: 500;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.cypher-plugin .settings-row__control {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 60%;
+  gap: var(--space-2, 8px);
+}
+
+.cypher-plugin .settings-row__value {
+  color: var(--muted, GrayText);
+  font-size: var(--control-ui-text-sm, 12px);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.cypher-plugin .settings-row__value--mono,
+.cypher-plugin .mono,
+.cypher-plugin code,
+.cypher-plugin pre {
+  font-family: var(--mono, monospace);
+}
+
+.cypher-plugin .settings-row__value--mono {
+  font-size: var(--control-ui-text-xs, 11px);
+}
+
+.cypher-plugin .settings-row--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2, 8px);
+}
+
+.cypher-plugin .settings-row--stacked .settings-row__control {
+  max-width: none;
+  justify-content: flex-start;
+}
+
+.cypher-plugin .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--border, ButtonBorder);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-elevated, ButtonFace);
+  color: inherit;
+  font: 500 13px var(--font-body, system-ui);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.cypher-plugin .btn:disabled,
+.cypher-plugin input:disabled,
+.cypher-plugin select:disabled {
+  opacity: 0.5;
+}
+
+.cypher-plugin .btn:hover:not(:disabled) {
+  background: var(--bg-hover, ButtonFace);
+  border-color: var(--border-strong, ButtonBorder);
+}
+
+.cypher-plugin .btn.primary {
+  border-color: transparent;
+  background: var(--primary, Highlight);
+  color: var(--primary-foreground, HighlightText);
+}
+
+.cypher-plugin .btn:focus-visible,
+.cypher-plugin input:focus-visible,
+.cypher-plugin select:focus-visible {
+  outline: 2px solid var(--accent, Highlight);
+  outline-offset: 2px;
+}
+
+.cypher-plugin .field {
+  display: grid;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+  color: var(--muted, GrayText);
+  font-size: var(--control-ui-text-sm, 12px);
+}
+
+.cypher-plugin .settings-input,
+.cypher-plugin .settings-select {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border, ButtonBorder);
+  border-radius: var(--radius-md, 8px);
+  background-color: var(--bg-elevated, Canvas);
+  color: var(--text, CanvasText);
+  font: inherit;
+  font-size: var(--control-ui-text-md, 14px);
+}
+
+.cypher-plugin .settings-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted, GrayText);
+  font-size: var(--control-ui-text-sm, 12px);
+  white-space: nowrap;
+}
+
+.cypher-plugin .settings-status__dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--muted, GrayText);
+}
+
+.cypher-plugin .settings-status--ok .settings-status__dot {
+  background: var(--ok, Highlight);
+}
+
+.cypher-plugin .settings-status--danger .settings-status__dot {
+  background: var(--danger, Mark);
+}
+
+.cypher-plugin .cypher-form,
+.cypher-plugin .wallet-generator-result {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: var(--space-3, 12px);
+}
+
+.cypher-plugin .cypher-form--columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cypher-plugin .cypher-actions,
+.cypher-plugin .wallet-generator-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 8px);
+  grid-column: 1 / -1;
+}
+
+.cypher-plugin .cypher-paths {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2, 8px) var(--space-3, 12px);
+  margin: 0;
+  font-size: var(--control-ui-text-sm, 12px);
+}
+
+.cypher-plugin .cypher-paths dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cypher-plugin .cypher-logs {
+  width: 100%;
+  max-height: 20rem;
+  overflow: auto;
+  margin: var(--space-3, 12px) 0;
+  padding: var(--space-3, 12px);
+  border: 1px solid var(--border, ButtonBorder);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-elevated, Canvas);
+  font-size: var(--control-ui-text-sm, 12px);
+}
+
+.cypher-plugin .wallet-generator-command {
+  width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.cypher-plugin .wallet-generator-result code {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .cypher-plugin .cypher-form--columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cypher-plugin .settings-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cypher-plugin .settings-row__control {
+    width: 100%;
+    max-width: none;
+    flex-wrap: wrap;
+  }
+}

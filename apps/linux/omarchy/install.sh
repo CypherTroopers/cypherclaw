@@ -25,7 +25,7 @@ backup() {
   fi
   cp -a -- "$1" "$backup_dir/$2"
 }
-files=(manifest.json Panel.qml Service.qml CritterIcon.qml bridge.py README.md)
+files=(manifest.json Panel.qml Service.qml CritterIcon.qml cypherclaw-logo.png bridge.py README.md)
 for file in "${files[@]}"; do
   [[ -f $source_dir/$file ]] || { echo "Missing plugin source: $source_dir/$file" >&2; exit 1; }
 done
@@ -43,5 +43,5 @@ fi
 [[ ! -f $config_dir/shell.json ]] || backup "$config_dir/shell.json" shell.json
 omarchy-shell shell rescanPlugins >/dev/null
 omarchy plugin enable "$plugin_id"
-echo "Enabled OpenClaw. Open its monochrome icon in the Omarchy bar."
+echo "Enabled CypherClaw. Open its icon in the Omarchy bar."
 [[ -z $backup_dir ]] || echo "Previous files: $backup_dir"

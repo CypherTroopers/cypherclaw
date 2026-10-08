@@ -1,0 +1,233 @@
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { BufferedCommandOptions, BufferedCommandResult } from "../process/exec.js";
+import { createDeferredCore } from "../shared/deferred.js";
+import { WalletGeneratorManager } from "./manager.js";
+
+const mocks = vi.hoisted(() => ({
+  access: vi.fn(),
+  readFile: vi.fn(),
+  root: vi.fn(),
+  run: vi.fn(),
+}));
+
+vi.mock("node:fs/promises", () => ({
+  default: { access: mocks.access, readFile: mocks.readFile },
+}));
+// mock-isolation: Keep installed-package discovery and its process-wide plugin cache outside this fixture.
+vi.mock("../infra/openclaw-root.js", () => ({ resolveOpenClawPackageRoot: mocks.root }));
+// mock-isolation: Keep native subprocess execution and broker lifecycle outside the wallet owner's fixture.
+vi.mock("../process/exec.js", () => ({ runCommandBuffered: mocks.run }));
+vi.mock("./artifacts.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./artifacts.js")>()),
+  WALLET_GENERATOR_SOURCE_COMMIT: "fixture-source",
+  // SHA-256's published abc vector, independent of the implementation under test.
+  WALLET_GENERATOR_SHA256: Object.fromEntries(
+    ["linux", "darwin", "windows"].flatMap((os) =>
+      ["amd64", "arm64"].map((arch) => [
+        `${os}-${arch}`,
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      ]),
+    ),
+  ),
+}));
+
+// Public Ethereum scalar-one vector; never a funded or user-owned wallet.
+const wallet = {
+  address: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+  privateKey: "0x" + "0".repeat(63) + "1",
+};
+const validOutput = `COLD WALLET GENERATOR
+
+Use only on a trusted, offline computer.
+This program does not check your network connection.
+The private key below is NOT encrypted.
+
+Address:
+${wallet.address}
+
+Private Key:
+${wallet.privateKey}
+
+Never share, photograph, cloud-sync, or commit your private key.
+Securely back up and verify it BEFORE sending assets to the address.
+Importing this key into an online wallet makes it a hot-wallet key.
+Rotating afterward does not protect funds during a compromised import.
+`;
+const authority = { assertCurrent: () => {} };
+const managers: WalletGeneratorManager[] = [];
+
+function manager(signal?: AbortSignal) {
+  const owner = new WalletGeneratorManager(signal);
+  managers.push(owner);
+  return owner;
+}
+
+function commandResult(stdout = validOutput): BufferedCommandResult {
+  return {
+    stdout: Buffer.from(stdout),
+    stderr: Buffer.alloc(0),
+    code: 0,
+    signal: null,
+    killed: false,
+    termination: "exit",
+  };
+}
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.root.mockResolvedValue(path.resolve("fixture-package"));
+  mocks.access.mockResolvedValue(undefined);
+  mocks.readFile.mockResolvedValue(Buffer.from("abc"));
+  mocks.run.mockImplementation(async () => commandResult());
+});
+
+afterEach(async () => {
+  await Promise.all(managers.splice(0).map((owner) => owner.close()));
+});
+
+describe("wallet generator execution owner", () => {
+  it("generates from the installed pinned binary and keeps status free of results", async () => {
+    const owner = manager();
+    const before = await owner.status();
+    const output = commandResult();
+    mocks.run.mockResolvedValueOnce(output);
+    await expect(owner.generate(authority)).resolves.toEqual(wallet);
+    const [argv, options] = mocks.run.mock.calls[0] as [string[], BufferedCommandOptions];
+    expect(argv).toEqual([before.binaryPath]);
+    expect(argv[0]).toContain(path.join("fixture-package", "wallet-generator", "bin"));
+    expect(options).toMatchObject({
+      timeoutMs: 30_000,
+      maxOutputBytes: { stdout: 4096, stderr: 4096 },
+      maxCombinedOutputBytes: 8192,
+      baseEnv: {},
+      input: "",
+    });
+    expect(output.stdout.every((byte) => byte === 0)).toBe(true);
+    expect(await owner.status()).toEqual(before);
+    expect(JSON.stringify(before)).not.toContain(wallet.privateKey);
+  });
+
+  it.each([
+    [
+      "missing executable",
+      () => mocks.access.mockRejectedValue(new Error("fixture private path")),
+      "missing",
+    ],
+    [
+      "modified executable",
+      () => mocks.readFile.mockResolvedValue(Buffer.from("changed bytes")),
+      "integrity",
+    ],
+  ])("refuses a %s before launching", async (_name, prepare, code) => {
+    prepare();
+    const owner = manager();
+    await expect(owner.generate(authority)).rejects.toMatchObject({ code });
+    expect(mocks.run).not.toHaveBeenCalled();
+    const status = await owner.status();
+    expect(status.available).toBe(false);
+    expect(status.error).not.toContain("fixture private path");
+  });
+
+  it("rechecks the executable when generation follows an earlier successful status", async () => {
+    const owner = manager();
+    expect((await owner.status()).available).toBe(true);
+    mocks.readFile.mockResolvedValue(Buffer.from("modified after status"));
+    await expect(owner.generate(authority)).rejects.toMatchObject({ code: "integrity" });
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it("rejects revoked authority after file preparation and before spawn", async () => {
+    let current = true;
+    mocks.readFile.mockImplementationOnce(async () => {
+      current = false;
+      return Buffer.from("abc");
+    });
+    await expect(
+      manager().generate({
+        assertCurrent() {
+          if (!current) {
+            throw new Error("Authority revoked");
+          }
+        },
+      }),
+    ).rejects.toThrow("Authority revoked");
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing key", `Address:\n${wallet.address}\n`],
+    ["duplicate result", validOutput + validOutput],
+    ["truncated key", validOutput.replace(wallet.privateKey, wallet.privateKey.slice(0, -1))],
+    ["invalid address", validOutput.replace(wallet.address, "0xBAD")],
+    [
+      "key with trailing text",
+      validOutput.replace(wallet.privateKey, wallet.privateKey + " extra"),
+    ],
+  ])("rejects %s without exposing the captured output", async (_name, stdout) => {
+    const result = commandResult(stdout);
+    result.stderr = Buffer.from(wallet.privateKey);
+    mocks.run.mockResolvedValueOnce(result);
+    const failure = await manager()
+      .generate(authority)
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: "output" });
+    expect(String(failure)).not.toContain(wallet.privateKey);
+    expect(result.stdout.every((byte) => byte === 0)).toBe(true);
+    expect(result.stderr.every((byte) => byte === 0)).toBe(true);
+  });
+
+  it.each([
+    ["timeout", "timeout"],
+    ["output-limit", "failed"],
+    ["error", "failed"],
+  ] as const)("never returns partial keys after %s", async (termination, code) => {
+    const output = commandResult();
+    mocks.run.mockResolvedValueOnce({ ...output, termination, code: null });
+    await expect(manager().generate(authority)).rejects.toMatchObject({ code });
+    expect(output.stdout.every((byte) => byte === 0)).toBe(true);
+  });
+
+  it("rejects a nonzero exit even when the output contains a complete wallet", async () => {
+    mocks.run.mockResolvedValueOnce({ ...commandResult(), code: 1 });
+    await expect(manager().generate(authority)).rejects.toMatchObject({ code: "failed" });
+  });
+
+  it.each(["caller", "gateway", "owner"] as const)(
+    "cancels active generation with its %s and refuses concurrent generation",
+    async (source) => {
+      const entered = createDeferredCore();
+      const release = createDeferredCore();
+      const caller = new AbortController();
+      const gateway = new AbortController();
+      const output = commandResult();
+      let signal: AbortSignal | undefined;
+      mocks.run.mockImplementationOnce(async (_argv: string[], options: BufferedCommandOptions) => {
+        signal = options.signal;
+        entered.resolve();
+        await release.promise;
+        return output;
+      });
+      const owner = manager(gateway.signal);
+      const active = owner.generate({ ...authority, signal: caller.signal });
+      const outcome = active.catch((error: unknown) => error);
+      let closing: Promise<void> | undefined;
+      try {
+        await entered.promise;
+        await expect(owner.generate(authority)).rejects.toMatchObject({ code: "busy" });
+        if (source === "owner") {
+          closing = owner.close();
+        } else {
+          (source === "caller" ? caller : gateway).abort();
+        }
+        expect(signal?.aborted).toBe(true);
+      } finally {
+        release.resolve();
+        await closing;
+      }
+      expect(await outcome).toMatchObject({ code: "closed" });
+      expect(output.stdout.every((byte) => byte === 0)).toBe(true);
+      expect(mocks.run).toHaveBeenCalledOnce();
+    },
+  );
+});

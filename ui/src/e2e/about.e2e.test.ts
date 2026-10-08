@@ -273,20 +273,23 @@ suite.define(() => {
         .toContain("separate from this Control UI build");
 
       const hero = page.locator(".about-hero");
-      await expect.poll(() => hero.locator(".about-hero__name").textContent()).toBe("OpenClaw");
+      await expect.poll(() => hero.locator(".about-hero__name").textContent()).toBe("CypherClaw");
       await expect
         .poll(() => hero.locator(".about-hero__version").textContent())
         .toBe("v2026.7.10");
 
-      const githubLink = hero.getByRole("link", { name: "GitHub", exact: true });
+      const githubLink = hero.getByRole("link", { name: "CypherClaw on GitHub", exact: true });
       await expect
         .poll(() => githubLink.getAttribute("href"))
-        .toBe("https://github.com/openclaw/openclaw");
+        .toBe("https://github.com/CypherTroopers/cypherclaw");
       await expect.poll(() => githubLink.getAttribute("target")).toBe("_blank");
       await expect.poll(() => githubLink.getAttribute("rel")).toContain("noopener");
-      const discordLink = hero.getByRole("link", { name: "Discord", exact: true });
+      const discordLink = hero.getByRole("link", {
+        name: "OpenClaw Discord (upstream)",
+        exact: true,
+      });
       await expect.poll(() => discordLink.getAttribute("href")).toBe("https://discord.gg/clawd");
-      const xLink = hero.getByRole("link", { name: "X (Twitter)", exact: true });
+      const xLink = hero.getByRole("link", { name: "OpenClaw on X (upstream)", exact: true });
       await expect.poll(() => xLink.getAttribute("href")).toBe("https://x.com/openclaw");
 
       const clawd = page.getByRole("button", { name: "Wave hello to Clawd" });

@@ -238,3 +238,49 @@ extensions/discord/assets/embedded-app-sdk.mjs
 
 # Pinned Swift lint/format tools installed by scripts/install-swift-tools.sh
 .build/
+
+# Bundled Cypher node binaries and Windows dependencies
+!/cypher/build/bin/
+/cypher/build/bin/*
+!/cypher/build/bin/cypher-linux-amd64
+!/cypher/build/bin/cypher-darwin-arm64
+!/cypher/build/bin/cypher.exe
+!/cypher/build/bin/libcrypto-3-x64.dll
+!/cypher/build/bin/libgcc_s_seh-1.dll
+!/cypher/build/bin/libgmp-10.dll
+!/cypher/build/bin/libstdc++-6.dll
+!/cypher/build/bin/libwinpthread-1.dll
+
+# Local node data created by manual launches
+/cypher/chaindbname/
+/cypher/browser-llm-lab/searxng/config/settings.yml
+
+# Pinned standalone wallet generator distribution
+!/wallet-generator/bin/
+/wallet-generator/bin/*
+!/wallet-generator/bin/SHA256SUMS
+!/wallet-generator/bin/darwin-amd64/
+/wallet-generator/bin/darwin-amd64/*
+!/wallet-generator/bin/darwin-amd64/build-info.json
+!/wallet-generator/bin/darwin-amd64/coldwalletgenerator
+!/wallet-generator/bin/darwin-arm64/
+/wallet-generator/bin/darwin-arm64/*
+!/wallet-generator/bin/darwin-arm64/build-info.json
+!/wallet-generator/bin/darwin-arm64/coldwalletgenerator
+!/wallet-generator/bin/linux-amd64/
+/wallet-generator/bin/linux-amd64/*
+!/wallet-generator/bin/linux-amd64/build-info.json
+!/wallet-generator/bin/linux-amd64/coldwalletgenerator
+!/wallet-generator/bin/linux-arm64/
+/wallet-generator/bin/linux-arm64/*
+!/wallet-generator/bin/linux-arm64/build-info.json
+!/wallet-generator/bin/linux-arm64/coldwalletgenerator
+!/wallet-generator/bin/windows-amd64/
+/wallet-generator/bin/windows-amd64/*
+!/wallet-generator/bin/windows-amd64/build-info.json
+!/wallet-generator/bin/windows-amd64/coldwalletgenerator.exe
+!/wallet-generator/bin/windows-arm64/
+/wallet-generator/bin/windows-arm64/*
+!/wallet-generator/bin/windows-arm64/build-info.json
+!/wallet-generator/bin/windows-arm64/coldwalletgenerator.exe
+!/wallet-generator/coldwalletgenerator-source-with-dependencies.tar.gz

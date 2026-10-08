@@ -7,17 +7,20 @@ extension CritterStatusLabel {
     }
 
     private var effectiveAnimationsEnabled: Bool {
-        self.animationsEnabled && !self.isSleeping && !self.isPaused
+        false
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        let image = self.iconImage
+        let hasIndicators = self.gatewayNeedsAttention || self.voiceWakeMeterActive
+        let indicatorWidth: CGFloat = hasIndicators ? 10 : 0
+        HStack(spacing: 2) {
             CritterStatusImage(
-                image: self.iconImage,
-                rotation: self.iconRotation,
-                translation: self.iconTranslation,
-                motionEnabled: self.effectiveAnimationsEnabled && !self.earBoostActive)
-                .frame(width: 18, height: 18)
+                image: image,
+                rotation: .init(),
+                translation: .init(),
+                motionEnabled: false)
+                .frame(width: image.size.width, height: image.size.height)
                 // Avoid Combine's TimerPublisher here: on macOS 26.2 we've seen crashes inside executor checks
                 // triggered by its callbacks. Drive periodic updates via a Swift-concurrency task instead.
                 .task(id: self.tickTaskID) {
@@ -69,22 +72,25 @@ extension CritterStatusLabel {
                     }
                 }
 
-            if self.gatewayNeedsAttention {
-                Circle()
-                    .fill(self.gatewayBadgeColor)
-                    .frame(width: 6, height: 6)
-                    .padding(1)
-            }
-
-            if self.voiceWakeMeterActive {
-                Circle()
-                    .fill(.orange)
-                    .frame(width: 5, height: 5)
-                    .padding(2)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            if hasIndicators {
+                // Connection and voice indicators are separate UI beside the photo.
+                VStack(spacing: 0) {
+                    if self.gatewayNeedsAttention {
+                        Circle()
+                            .fill(self.gatewayBadgeColor)
+                            .frame(width: 6, height: 6)
+                    }
+                    Spacer(minLength: 0)
+                    if self.voiceWakeMeterActive {
+                        Circle()
+                            .fill(.orange)
+                            .frame(width: 5, height: 5)
+                    }
+                }
+                .frame(width: 8, height: image.size.height)
             }
         }
-        .frame(width: 18, height: 18)
+        .frame(width: image.size.width + indicatorWidth, height: image.size.height)
     }
 
     private var tickTaskID: Int {

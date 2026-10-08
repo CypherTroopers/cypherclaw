@@ -1,5 +1,5 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw"</string>
+    <string name="app_name" translatable="false">"CypherClaw"</string>
     <string name="chat" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"گفتگو"</string>
     <string name="session" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"نشست"</string>
     <string name="model" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"مدل"</string>
@@ -40,7 +40,7 @@
     <string name="agent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"عامل"</string>
     <string name="system" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"سیستم"</string>
     <string name="start_conversation" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"شروع یک گفتگو"</string>
-    <string name="start_conversation_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"در ساعت خود صحبت یا تایپ کنید. تلفن جفت‌شده پیام را از طریق نشست احراز هویت‌شدهٔ OpenClaw خود ارسال می‌کند."</string>
+    <string name="start_conversation_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"در ساعت خود صحبت یا تایپ کنید. تلفن جفت‌شده پیام را از طریق نشست احراز هویت‌شدهٔ CypherClaw خود ارسال می‌کند."</string>
     <string name="current_session" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"نشست فعلی"</string>
     <string name="context_label_value" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"%1$s: %2$s"</string>
     <string name="close" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"بستن"</string>
@@ -73,30 +73,30 @@
     <string name="phone_ready" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"گوشی آماده است"</string>
     <string name="gateway_connected" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway متصل شد"</string>
     <string name="gateway_offline" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway آفلاین است"</string>
-    <string name="gateway_offline_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"در OpenClaw روی تلفن جفت‌شده، دوباره به Gateway متصل شوید."</string>
-    <string name="open_phone_app" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"باز کردن OpenClaw در تلفن"</string>
+    <string name="gateway_offline_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"در CypherClaw روی تلفن جفت‌شده، دوباره به Gateway متصل شوید."</string>
+    <string name="open_phone_app" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"باز کردن CypherClaw در تلفن"</string>
     <string name="phone_not_ready_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ساعت هرگز خود Gateway را راه‌اندازی یا احراز هویت نمی‌کند."</string>
     <string name="phone_unavailable" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"گوشی در دسترس نیست"</string>
-    <string name="phone_unavailable_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"تلفن جفت‌شده را نزدیک نگه دارید و برنامهٔ سازگار OpenClaw را نصب کنید."</string>
+    <string name="phone_unavailable_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"تلفن جفت‌شده را نزدیک نگه دارید و برنامهٔ سازگار CypherClaw را نصب کنید."</string>
     <string name="selection_not_found" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"مورد انتخاب‌شده دیگر در دسترس نیست"</string>
     <string name="message_not_sent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"اقدام پذیرفته نشد"</string>
     <string name="something_went_wrong" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"مشکلی پیش آمد"</string>
     <string name="refresh_and_try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"فهرست‌ها را تازه‌سازی کنید و دوباره تلاش کنید."</string>
     <string name="model_catalog_refresh_failed" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"اطلاعات برخی مدل‌ها بازخوانی نشد. مدل‌های فهرست‌شده همچنان در دسترس هستند."</string>
-    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"برای انتخاب مدل‌ها در این گفتگو، OpenClaw روی گوشی خود و Gateway را به‌روزرسانی کنید."</string>
+    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"برای انتخاب مدل‌ها در این گفتگو، CypherClaw روی گوشی خود و Gateway را به‌روزرسانی کنید."</string>
     <string name="try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"دوباره از طریق ساعت امتحان کنید."</string>
     <string name="update_required" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"به‌روزرسانی لازم است"</string>
-    <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw را هم در تلفن و هم در ساعت به‌روزرسانی کنید."</string>
+    <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw را هم در تلفن و هم در ساعت به‌روزرسانی کنید."</string>
     <string name="refresh" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"تازه‌سازی"</string>
     <string name="retry" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"تلاش مجدد"</string>
-    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"پاسخ‌های OpenClaw"</string>
+    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"پاسخ‌های CypherClaw"</string>
     <string name="notification_reply" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"پاسخ"</string>
-    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"پاسخ OpenClaw"</string>
+    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"پاسخ CypherClaw"</string>
     <string name="notification_reply_failed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"پاسخ ارسال نشد"</string>
     <string name="notification_reply_failed_text" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"گوشی در دسترس نیست. برای تلاش دوباره روی پاسخ ضربه بزنید."</string>
-    <string name="notification_phone_changed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"باز کردن OpenClaw برای پاسخ دادن"</string>
+    <string name="notification_phone_changed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"باز کردن CypherClaw برای پاسخ دادن"</string>
     <string name="notification_phone_changed_text" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"گوشی ترجیحی شما تغییر کرده است. پیش از پاسخ دادن، برنامه را باز کنید تا نشست دوباره بارگیری شود."</string>
-    <string name="tile_label" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw"</string>
+    <string name="tile_label" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw"</string>
     <string name="tile_description" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"نشست‌ها را باز کنید و از طریق تلفن جفت‌شدهٔ خود پاسخ دهید"</string>
     <string name="tile_open" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"باز کردن"</string>
     <string name="tile_phone_proxy" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"پروکسی تلفن"</string>

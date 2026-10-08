@@ -1,0 +1,57 @@
+[
+  {
+    "package": "mingw-w64-x86_64-gmp-6.3.0-2-any.pkg.tar.zst",
+    "sha256": "8924433974c4add46cb46ea4f6ef283b5c5139d3f552375115b5580f855015cc",
+    "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-gmp-6.3.0-2-any.pkg.tar.zst",
+    "files": [
+      {
+        "path": "build/bin/libgmp-10.dll",
+        "sha256": "37248cda33845e7c5c35a574e57da762dd0a8268f0270d179f30a33746809681"
+      }
+    ]
+  },
+  {
+    "package": "mingw-w64-x86_64-libgcc-16.2.0-4-any.pkg.tar.zst",
+    "sha256": "d615f6a8536ca16b1f049daea1fa440a3b7a405449ec0e93ad6106db43682d54",
+    "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libgcc-16.2.0-4-any.pkg.tar.zst",
+    "files": [
+      {
+        "path": "build/bin/libgcc_s_seh-1.dll",
+        "sha256": "d7e343dd266747177c3699bc3201ea36eceef158e98530e089263bc55bb2a6d7"
+      }
+    ]
+  },
+  {
+    "package": "mingw-w64-x86_64-libstdc++-16.2.0-4-any.pkg.tar.zst",
+    "sha256": "3d4c3faf4c2c5c7a851ff12214ddcbf8c0d6df0964fc1d3ebd8c38f227183034",
+    "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libstdc++-16.2.0-4-any.pkg.tar.zst",
+    "files": [
+      {
+        "path": "build/bin/libstdc++-6.dll",
+        "sha256": "494bd9045948198ef4d3bc838c7362d4cfd49c890b439c096b1817aa7c7fa6ff"
+      }
+    ]
+  },
+  {
+    "package": "mingw-w64-x86_64-libwinpthread-14.0.0.r426.g4564ee4b5-1-any.pkg.tar.zst",
+    "sha256": "543017ce2731292b215bf1d36fd70a86d8a8d5ed0afba9d3db9fff89804cda71",
+    "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libwinpthread-14.0.0.r426.g4564ee4b5-1-any.pkg.tar.zst",
+    "files": [
+      {
+        "path": "build/bin/libwinpthread-1.dll",
+        "sha256": "72bf8802de3a99d28f0bc2db9a11f281a9f9f3fa83dab2bc67e69fac3bd3d9c0"
+      }
+    ]
+  },
+  {
+    "package": "mingw-w64-x86_64-openssl-3.6.4-1-any.pkg.tar.zst",
+    "sha256": "d613ab4e1b5af9e95cde16895765e1be53ab05657d8d51ff2707d4e99c29c55b",
+    "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-openssl-3.6.4-1-any.pkg.tar.zst",
+    "files": [
+      {
+        "path": "build/bin/libcrypto-3-x64.dll",
+        "sha256": "ad397e1391ae38100fa1043d69a3495efa73fd9c2784de0ffc3ede3df1fd092e"
+      }
+    ]
+  }
+]

@@ -1,0 +1,129 @@
+Cypher node asset provenance
+===========================
+
+This directory preserves the existing CypherClaw native node runtime assets.
+The three launchers, Unix relay helper, genesis, relay configuration, three
+executables, and five Windows DLLs were copied without content changes from
+cypher/ in CypherClaw commit bdd9f88d28f21fa74bcaee7e4cceab251cfb135f.
+SHA256SUMS identifies the exact files. No node executable was run or rebuilt
+while preparing this asset bundle.
+
+Node executable source and distribution
+--------------------------------------
+Repository: https://github.com/CypherTroopers/cypher
+Source commit: 60b8164405a4d5531c65f778e5661b9272cedbc2
+Distribution commit: e07269480dd29b0a2b2ffa665a119c70f2e56764
+Successful original build: https://github.com/CypherTroopers/cypher/actions/runs/37360945224
+Workflow: .github/workflows/build-binaries.yml at the source commit above
+Build script: build/build-cypher.sh at the source commit above
+Go version: go1.26.2
+CGO_ENABLED: 1
+Build tag: cypher_bounded_storage
+
+All three binaries contain main.gitCommit = the source commit above. Their
+bytes match both the distribution tree and the original successful Actions
+artifacts. provenance/<target>/manifest.txt and SHA256SUMS are unchanged
+upstream artifact files; go-build-info.txt records metadata read from each
+executable with go version -m. Metadata inspection does not execute the node.
+
+Original Actions artifact ZIP SHA256:
+  linux-amd64, artifact 11366477126:
+    7553bcff30e26ede8cbf6d92e555c02409b9e3a8fd2ffb175c6c8c8e9f723f33
+  darwin-arm64, artifact 11366861583:
+    4a544473c0bee16f0d56cc8ff4217beff6fd448fe86b1a226cb0566b029f4405
+  windows-amd64, artifact 11366816781:
+    9ee45b8f5889706f050f46c753c2b9542e2f6a436373bf57e6d2292216be63c0
+
+The upstream Linux artifact includes a duplicate named cypher. Only its
+identical cypher-linux-amd64 file is needed by the bundled Linux launcher.
+The latest upstream binaries may have different source/distribution commits;
+this bundle does not attribute their provenance to these preserved bytes.
+
+Pinned native and patched dependencies
+-------------------------------------
+Herumi BLS: 2026abe5e97e9a10fa7d7c66279ee728630d6219
+  https://github.com/herumi/bls/tree/2026abe5e97e9a10fa7d7c66279ee728630d6219
+Herumi MCL submodule: 877aa82ecc55dc111922492ad600e177d78dfc29
+  https://github.com/herumi/mcl/tree/877aa82ecc55dc111922492ad600e177d78dfc29
+LevelDB module: github.com/syndtr/goleveldb
+LevelDB version: v1.0.1-0.20220721030215-126854af5e6d
+LevelDB module sum: h1:vfofYNRScrDdvS342BElfbETmL1Aiz3i2t0zfRj16Hs=
+LevelDB additive patch SHA256:
+  38349bc371c7cdda2fa7f0f59c047c368959778bda2327a0f7625434833aa6f1
+The exact build script and patch are retained in the source archive. The
+archive's Go module sources retain the upstream unpatched LevelDB sources;
+the build script applies the pinned patch in its private build directory.
+
+The successful build logs record these native packages:
+  Linux: Ubuntu 24.04, libssl-dev 3.0.13-0ubuntu3.16,
+         libgmp-dev 2:6.3.0+dfsg-2ubuntu6.1.
+  macOS: macos-15 runner, Homebrew openssl@3 3.6.4 and gmp 6.3.0.
+  Windows: MSYS2 mingw-w64-x86_64-openssl 3.6.4-1, gmp 6.3.0-2,
+           libgcc and libstdc++ 16.2.0-4,
+           libwinpthread 14.0.0.r426.g4564ee4b5-1.
+See provenance/native-dependency-build-log-excerpts.txt. Each shipped Windows
+DLL was compared byte-for-byte with its original MSYS2 package. The exact
+package metadata and available license texts are in provenance/msys2/;
+packages.json pins their public download URLs, package SHA256, and DLL SHA256.
+
+Source material included
+------------------------
+cypher-source-60b8164-with-go-dependencies.tar.gz
+SHA256: 884ba41ad79bc7264ca2fffe6e5c0a40ca00e138b8f21550b464da7bb9374291
+Bytes: 55757149
+
+The source archive contains:
+  - Source-commit Cypher project files and native build instructions/scripts.
+  - Source for the 74 Go modules listed by the union of the three binaries'
+    embedded build metadata. Original downloaded module sums were verified
+    against that metadata before source-only extraction. go-modules.tsv pins
+    the original module versions, module sums, and download ZIP SHA256 values.
+  - The exact Herumi BLS and MCL source trees identified above.
+  - The upstream GNU GMP 6.3.0 source archive, SHA256
+    a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898,
+    from https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz.
+  - Original source license/copyright files and additional license texts.
+
+browser-llm-lab, editor metadata, prebuilt node/native libraries, installer
+artifacts, and committed cmd/cypher/data runtime files are excluded. Native
+executable test fixtures in dependency modules are also excluded. OMITTED.txt
+records exclusions made during final source assembly; SOURCE-SHA256SUMS pins
+the included source bytes. Initial repository extraction also excluded
+browser-llm-lab, .idea, build/bin, and crypto prebuilt library files. This is a
+source archive, not an installed vendor tree or runtime dependency override.
+No source files from this archive were built or executed during packaging.
+
+Known completeness and verification limits
+-----------------------------------------
+This local preparation is not a complete corresponding-source or release
+compliance certification. In particular, exact distribution patches/build
+recipes and complete corresponding source for every native dependency have
+not been assembled: GCC runtimes, OpenSSL, MinGW-w64/winpthreads, and the exact
+Homebrew/Ubuntu/MSYS2 GMP builds remain outside this archive. The original
+GMP 6.3.0 source does not establish those distribution-specific source bytes.
+The Go toolchain source is not bundled; its version and license are recorded.
+Native static link objects/relinking materials are not included. Package
+metadata and source references establish provenance, not source completeness.
+
+Whole-project go mod vendor on the original source snapshot did not complete:
+optional browsernode-tag imports have no required cypher-services module,
+cmd/evm references an absent tests package, and the bounded LevelDB package is
+provided only by the build script's patch. No guessed dependency edits were
+made. The archived module set comes from the actual successful binaries.
+Offline rebuilding, cross-platform execution, and source reproducibility
+were not tested as part of this package preparation. Complete the native
+corresponding-source distribution and license review before publication.
+
+Runtime compatibility observed from executable metadata
+-------------------------------------------------------
+Linux x86-64: dynamic system C/C++ runtime libraries; imported symbols require
+at least GLIBC 2.38 and GLIBCXX 3.4.32. These are metadata requirements, not a
+claim that every distribution providing them has been tested.
+macOS ARM64: Mach-O minimum OS version 15.0, SDK 15.5; system libraries.
+Windows x86-64: preserve all five supplied DLLs beside cypher.exe.
+There are no Linux ARM64, macOS x86-64, or Windows ARM64 node binaries here.
+Wallet generation has its own independent six-target asset set.
+
+The native relay config is intentionally retained unchanged (414 bytes) for
+the existing launchers' default behavior. No browser-llm-lab files, live node
+data directories, user settings, private keys, or IPC sockets are packaged.

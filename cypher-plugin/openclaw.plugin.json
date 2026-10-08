@@ -1,0 +1,23 @@
+{
+  "id": "cypher",
+  "name": "Cypher",
+  "description": "Manage a local Cypher node and generate wallets independently.",
+  "uiCapabilities": [
+    "page",
+    "navigation"
+  ],
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "controlUi": {
+    "entry": "dist/control-ui/68d0e4dcd22bf2163064512a49c49cf8d352e80fd5307f4e72514f68e517b2ca/index.js",
+    "styles": [
+      "dist/control-ui/68d0e4dcd22bf2163064512a49c49cf8d352e80fd5307f4e72514f68e517b2ca/index.css"
+    ]
+  }
+}

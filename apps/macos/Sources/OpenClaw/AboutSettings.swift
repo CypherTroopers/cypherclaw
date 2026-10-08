@@ -14,7 +14,7 @@ struct AboutSettings: View {
                 .accessibilityHidden(true)
 
             VStack(spacing: 5) {
-                Text("OpenClaw")
+                Text("CypherClaw")
                     .font(.system(size: 24, weight: .bold))
                 Text(String(format: String(localized: "Version %@"), self.build.versionDisplay))
                     .foregroundStyle(.secondary)
@@ -30,7 +30,7 @@ struct AboutSettings: View {
                 Link(destination: URL(string: "https://docs.openclaw.ai")!) {
                     Label("Docs", systemImage: "book")
                 }
-                Link(destination: URL(string: "https://github.com/openclaw/openclaw")!) {
+                Link(destination: URL(string: "https://github.com/CypherTroopers/cypherclaw")!) {
                     Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
                 Link(destination: URL(string: "https://discord.gg/clawd")!) {

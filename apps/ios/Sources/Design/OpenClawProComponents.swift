@@ -491,8 +491,7 @@ struct OpenClawProMark: View {
     var body: some View {
         OpenClawMascotView(interactive: self.interactive, paused: self.paused)
             .frame(width: self.size, height: self.size)
-            .shadow(color: OpenClawBrand.accent.opacity(0.18), radius: self.shadowRadius, y: self.shadowRadius / 3)
-            .accessibilityLabel("OpenClaw")
+            .accessibilityLabel("CypherClaw")
     }
 }
 

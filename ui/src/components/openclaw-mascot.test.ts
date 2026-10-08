@@ -13,35 +13,56 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("replaces the animated mascot with a same-size neutral mark and restores it on theme changes", async () => {
-  delete document.documentElement.dataset.themeMascot;
+it("replaces the supplied mascot with a same-size neutral mark and restores it on theme changes", async () => {
   setCurrentThemeBranding({ mascot: "claw", critters: [] });
-  const requestFrame = vi.fn(() => 1);
-  const cancelFrame = vi.fn();
-  vi.stubGlobal("requestAnimationFrame", requestFrame);
-  vi.stubGlobal("cancelAnimationFrame", cancelFrame);
-  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
   const mascot = document.createElement("openclaw-mascot") as LitElement & { size: number };
   mascot.size = 48;
   document.body.append(mascot);
   await mascot.updateComplete;
-  expect(mascot.shadowRoot?.querySelector("canvas")).not.toBeNull();
-  expect(requestFrame).toHaveBeenCalledOnce();
+  expect(mascot.shadowRoot?.querySelector("img")?.getAttribute("src")).toBe(
+    "/cypherclaw-mascot.png",
+  );
+  expect(mascot.hasAttribute("data-playing")).toBe(true);
+
+  visibility.mockReturnValue("hidden");
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(mascot.hasAttribute("data-playing")).toBe(false);
+  visibility.mockReturnValue("visible");
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(mascot.hasAttribute("data-playing")).toBe(true);
 
   setCurrentThemeBranding({ mascot: "none", critters: [] });
   document.documentElement.dataset.themeMascot = "none";
   await Promise.resolve();
   await mascot.updateComplete;
-  expect(mascot.shadowRoot?.querySelector("canvas")).toBeNull();
+  expect(mascot.shadowRoot?.querySelector("img")).toBeNull();
   expect(mascot.shadowRoot?.querySelector(".openclaw-mascot--neutral svg")).not.toBeNull();
   expect(mascot.style.getPropertyValue("--openclaw-mascot-size")).toBe("48px");
-  expect(cancelFrame).toHaveBeenCalledWith(1);
+  expect(mascot.hasAttribute("data-playing")).toBe(false);
 
   setCurrentThemeBranding({ mascot: "claw", critters: [] });
   document.documentElement.dataset.themeMascot = "claw";
   await Promise.resolve();
   await mascot.updateComplete;
-  expect(mascot.shadowRoot?.querySelector("canvas")).not.toBeNull();
+  expect(mascot.shadowRoot?.querySelector("img")).not.toBeNull();
   expect(mascot.shadowRoot?.querySelector(".openclaw-mascot--neutral")).toBeNull();
-  expect(requestFrame).toHaveBeenCalledTimes(2);
+  expect(mascot.hasAttribute("data-playing")).toBe(true);
+});
+
+it("keeps the supplied artwork still for reduced motion and pauses hidden documents", async () => {
+  vi.stubGlobal("matchMedia", () => ({
+    matches: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  const mascot = document.createElement("openclaw-mascot") as LitElement;
+  document.body.append(mascot);
+  await mascot.updateComplete;
+  expect(mascot.shadowRoot?.querySelector("img")).not.toBeNull();
+  expect(mascot.hasAttribute("data-playing")).toBe(false);
+  visibility.mockReturnValue("hidden");
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(mascot.hasAttribute("data-playing")).toBe(false);
 });

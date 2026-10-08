@@ -25,6 +25,11 @@ describe("controlUiPublicAssetPath", () => {
       for (const asset of [
         "favicon.svg",
         "apple-touch-icon.png",
+        "cypherclaw-mascot.png",
+        "cypherclaw-mark.png",
+        "pwa-icon-192.png",
+        "pwa-icon-512.png",
+        "pwa-icon-maskable-512.png",
         "manifest.webmanifest",
         "themes/absolutely.css",
         "fonts/lora.css",

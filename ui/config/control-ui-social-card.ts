@@ -1,29 +1,38 @@
-import fs from "node:fs";
-import { PhotonImage, resize, SamplingFilter, watermark } from "@silvia-odwyer/photon-node";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import {
+  draw_text,
+  PhotonImage,
+  resize,
+  SamplingFilter,
+  watermark,
+} from "@silvia-odwyer/photon-node";
 import type { Plugin } from "vite";
 
-/** Generate the public card from the existing brand artwork, without a browser or fonts. */
+/** Render the independent fork's supplied artwork and product identity. */
 export function controlUiSocialCardPlugin(): Plugin {
   return {
     name: "control-ui-social-card",
     apply: "build",
     buildStart() {
+      const artworkPath = fileURLToPath(
+        new URL("../../assets/branding/cypherclaw-transparent.png", import.meta.url),
+      );
+      this.addWatchFile(artworkPath);
       const pixels = Buffer.alloc(1200 * 630 * 4, Buffer.from([11, 16, 22, 255]));
       const canvas = new PhotonImage(pixels, 1200, 630);
-      const images = [canvas];
+      const original = PhotonImage.new_from_byteslice(readFileSync(artworkPath));
+      let artwork: PhotonImage | undefined;
       try {
-        const source = PhotonImage.new_from_byteslice(
-          fs.readFileSync(new URL("../../docs/assets/openclaw-hero-dark.png", import.meta.url)),
-        );
-        images.push(source);
-        const logo = resize(source, 1060, 376, SamplingFilter.Lanczos3);
-        images.push(logo);
-        watermark(canvas, logo, 70n, 127n);
+        artwork = resize(original, 430, 430, SamplingFilter.Lanczos3);
+        watermark(canvas, artwork, 50n, 100n);
+        draw_text(canvas, "CypherClaw", 480, 225, 94);
+        draw_text(canvas, "Your personal AI assistant", 486, 355, 36);
         this.emitFile({ type: "asset", fileName: "social-card.png", source: canvas.get_bytes() });
       } finally {
-        for (const image of images) {
-          image.free();
-        }
+        artwork?.free();
+        original.free();
+        canvas.free();
       }
     },
   };

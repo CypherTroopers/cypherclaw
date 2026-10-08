@@ -13,6 +13,7 @@ import type {
 import type { ModelCatalogEntry } from "../../agents/model-catalog.types.js";
 import type { CliDeps } from "../../cli/deps.types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { CypherNodeManager } from "../../cypher/manager.js";
 import type { AgentRunDelegatedAuthority } from "../../infra/agent-run-authority.types.js";
 import type { ExecApprovalRequest, ExecApprovalResolved } from "../../infra/exec-approvals.js";
 import type {
@@ -27,6 +28,7 @@ import type {
 import type { SubsystemLogger } from "../../logging/subsystem.js";
 import type { PluginRuntimeCore } from "../../plugins/runtime/types-core.js";
 import type { SystemAgentOperation } from "../../system-agent/operation-types.js";
+import type { WalletGeneratorManager } from "../../wallet-generator/manager.js";
 import type { WizardSession } from "../../wizard/session.js";
 import type { AgentRuntimeApprovalAuthorityValidator } from "../agent-runtime-approval-authority.js";
 import type { InternalAgentTurnFacadeFactory } from "../agent-turn/internal-facade.types.js";
@@ -187,6 +189,10 @@ export type GatewaySystemAgentSession = {
 
 /** Kernel-owned services and state that can be constructed without binding sockets. */
 type GatewayKernelContext = {
+  /** Created on first Cypher request and retired with this Gateway instance. */
+  cypherNodeManager?: CypherNodeManager;
+  /** Independent one-shot generator, retired with this Gateway instance. */
+  walletGenerator?: WalletGeneratorManager;
   deps: CliDeps;
   /** Host-bound plugin ingress; the transport owns its shared hook dispatch queue. */
   dispatchHookAgentTurn?: (

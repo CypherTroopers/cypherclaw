@@ -373,7 +373,7 @@ final class DashboardManager {
                 auth: DashboardWindowAuth(gatewayUrl: nil, token: nil, password: nil),
                 tlsParams: nil,
                 mode: .unconfigured,
-                displayName: "OpenClaw"),
+                displayName: "CypherClaw"),
             target: .primary,
             present: false)
         replacement?.showFailure(
@@ -566,7 +566,7 @@ final class DashboardManager {
                 auth: DashboardWindowAuth(gatewayUrl: nil, token: nil, password: nil),
                 tlsParams: nil,
                 mode: .unconfigured,
-                displayName: "OpenClaw"),
+                displayName: "CypherClaw"),
             target: .primary,
             windowAutosaveName: self.mainWindowAutosaveName,
             auxiliary: false)

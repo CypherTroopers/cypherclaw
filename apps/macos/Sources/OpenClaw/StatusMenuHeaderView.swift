@@ -185,7 +185,7 @@ struct StatusMenuHeaderView: View {
         {
             return primaryName
         }
-        return "OpenClaw"
+        return "CypherClaw"
     }
 
     private var connectionModeLabel: String? {

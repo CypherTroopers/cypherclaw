@@ -6,6 +6,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Notification
+import android.graphics.BitmapFactory
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -475,7 +476,7 @@ internal class ConversationReplyNotifier(
     val style =
       NotificationCompat
         .MessagingStyle(userPerson())
-        .setConversationTitle(nativeString("OpenClaw"))
+        .setConversationTitle(nativeString("CypherClaw"))
         .setGroupConversation(false)
         .addMessage(assistantText, System.currentTimeMillis(), assistant)
     return baseBuilder(target, contentIntent, generation)
@@ -493,11 +494,12 @@ internal class ConversationReplyNotifier(
   ): NotificationCompat.Builder =
     NotificationCompat
       .Builder(context, conversationChannelId)
-      .setSmallIcon(R.mipmap.ic_launcher)
+      .setSmallIcon(android.R.drawable.stat_notify_chat)
+      .setLargeIcon(BitmapFactory.decodeResource(context.resources, R.drawable.cypherclaw_mascot))
       .setCategory(NotificationCompat.CATEGORY_MESSAGE)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
       .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-      .setContentTitle(nativeString("OpenClaw"))
+      .setContentTitle(nativeString("CypherClaw"))
       .setContentIntent(contentIntent)
       .setPublicVersion(publicVersion(contentIntent))
       .addExtras(Bundle().apply { putParcelable(extraPublicationGeneration, generation) })
@@ -511,8 +513,9 @@ internal class ConversationReplyNotifier(
   private fun publicVersion(contentIntent: PendingIntent): Notification =
     NotificationCompat
       .Builder(context, conversationChannelId)
-      .setSmallIcon(R.mipmap.ic_launcher)
-      .setContentTitle(nativeString("OpenClaw"))
+      .setSmallIcon(android.R.drawable.stat_notify_chat)
+      .setLargeIcon(BitmapFactory.decodeResource(context.resources, R.drawable.cypherclaw_mascot))
+      .setContentTitle(nativeString("CypherClaw"))
       .setContentText(nativeString("Chat"))
       .setContentIntent(contentIntent)
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -559,7 +562,7 @@ internal class ConversationReplyNotifier(
     val shortcut =
       ShortcutInfoCompat
         .Builder(context, target.shortcutId)
-        .setShortLabel(nativeString("OpenClaw"))
+        .setShortLabel(nativeString("CypherClaw"))
         .setLongLived(true)
         .setPerson(assistantPerson())
         .setLocusId(LocusIdCompat(target.shortcutId))
@@ -572,7 +575,7 @@ internal class ConversationReplyNotifier(
   private fun assistantPerson(): Person =
     Person
       .Builder()
-      .setName(nativeString("OpenClaw"))
+      .setName(nativeString("CypherClaw"))
       .setBot(true)
       .build()
 

@@ -239,7 +239,6 @@ private struct GatewayQuickSetupHeader: View {
         VStack(alignment: .leading, spacing: 14) {
             ZStack(alignment: .bottomTrailing) {
                 OpenClawActivationGlyph(size: 70, mood: self.mood, interactive: true)
-                    .shadow(color: OpenClawBrand.activationGlow.opacity(0.18), radius: 10, x: 0, y: 5)
 
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(OpenClawType.caption2SemiBold)

@@ -5,10 +5,15 @@ export const CONTROL_UI_BUILD_ID_ATTRIBUTE = "data-openclaw-control-ui-build-id"
 /** Root files emitted by the Control UI build and served under any configured mount. */
 export const CONTROL_UI_ROOT_PUBLIC_ASSETS = [
   "apple-touch-icon.png",
+  "cypherclaw-mascot.png",
+  "cypherclaw-mark.png",
   "favicon-32.png",
   "favicon.ico",
   "favicon.svg",
   "manifest.webmanifest",
+  "pwa-icon-192.png",
+  "pwa-icon-512.png",
+  "pwa-icon-maskable-512.png",
   "sw.js",
 ] as const;
 export type ControlUiRootPublicAsset = (typeof CONTROL_UI_ROOT_PUBLIC_ASSETS)[number];

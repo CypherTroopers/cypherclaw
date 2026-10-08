@@ -1,13 +1,7 @@
 import { css, html, LitElement, type PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
-import { MascotAnimator } from "./mascot-animator.ts";
-import { drawMascot } from "./mascot-canvas.ts";
-import {
-  mascotPalette,
-  staticMascotPose,
-  type MascotMood,
-  type MascotPose,
-} from "./mascot-pose.ts";
+import { inferControlUiPublicAssetPath } from "../app/public-assets.ts";
+import type { MascotMood } from "./mascot-pose.ts";
 import { currentThemeBranding, neutralMark } from "./neutral-mark.ts";
 
 const DEFAULT_SIZE = 120;
@@ -23,10 +17,7 @@ const MASCOT_MOODS = new Set<MascotMood>([
   "attentive",
 ]);
 
-function currentSeconds(): number {
-  return performance.now() / 1_000;
-}
-
+// Preserve the shared element and mood contract while displaying the fork's artwork.
 class OpenClawMascot extends LitElement {
   static override styles = css`
     :host {
@@ -39,18 +30,48 @@ class OpenClawMascot extends LitElement {
       line-height: 0;
     }
 
-    canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-      will-change: transform;
-    }
-
+    img,
     .openclaw-mascot--neutral,
     .openclaw-mascot--neutral svg {
       display: block;
       width: 100%;
       height: 100%;
+    }
+
+    img {
+      object-fit: contain;
+      animation: cypher-mascot-float 5s ease-in-out infinite;
+      animation-play-state: paused;
+    }
+
+    :host([data-playing]) img {
+      animation-play-state: running;
+    }
+
+    img[data-mood="thinking"],
+    img[data-mood="working"] {
+      animation-duration: 2.8s;
+    }
+
+    img[data-mood="sleepy"],
+    img[data-mood="sad"] {
+      animation: none;
+    }
+
+    @keyframes cypher-mascot-float {
+      0%,
+      100% {
+        transform: translateY(0);
+      }
+      50% {
+        transform: translateY(-2%);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      img {
+        animation: none;
+      }
     }
   `;
 
@@ -58,8 +79,6 @@ class OpenClawMascot extends LitElement {
   @property({ type: Number }) size = DEFAULT_SIZE;
   @property({ type: Boolean }) tease = false;
 
-  private readonly animator = new MascotAnimator();
-  private animationFrame = 0;
   private visible = true;
   private reducedMotion = false;
   private intersectionObserver: IntersectionObserver | null = null;
@@ -67,7 +86,6 @@ class OpenClawMascot extends LitElement {
   private motionQuery: MediaQueryList | null = null;
 
   private readonly handleVisibilityChange = () => this.syncPlayback();
-
   private readonly handleMotionChange = (event: MediaQueryListEvent) => {
     this.reducedMotion = event.matches;
     this.syncPlayback();
@@ -77,11 +95,9 @@ class OpenClawMascot extends LitElement {
     super.connectedCallback();
     this.setAttribute("aria-hidden", "true");
     document.addEventListener("visibilitychange", this.handleVisibilityChange);
-
     this.motionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)") ?? null;
     this.reducedMotion = this.motionQuery?.matches ?? false;
     this.motionQuery?.addEventListener("change", this.handleMotionChange);
-
     if (typeof IntersectionObserver !== "undefined") {
       this.intersectionObserver = new IntersectionObserver((entries) => {
         this.visible = entries.some((entry) => entry.isIntersecting);
@@ -89,7 +105,6 @@ class OpenClawMascot extends LitElement {
       });
       this.intersectionObserver.observe(this);
     }
-
     if (typeof MutationObserver !== "undefined") {
       this.themeObserver = new MutationObserver(() => this.requestUpdate());
       this.themeObserver.observe(document.documentElement, {
@@ -100,7 +115,7 @@ class OpenClawMascot extends LitElement {
   }
 
   override disconnectedCallback(): void {
-    this.stopAnimation();
+    this.removeAttribute("data-playing");
     document.removeEventListener("visibilitychange", this.handleVisibilityChange);
     this.motionQuery?.removeEventListener("change", this.handleMotionChange);
     this.motionQuery = null;
@@ -111,129 +126,39 @@ class OpenClawMascot extends LitElement {
     super.disconnectedCallback();
   }
 
-  protected override firstUpdated(): void {
-    // Seed the animator's mood before the first pose so `begin()` schedules
-    // for the real mood; `updated()` runs after this and would be too late.
-    this.animator.setMood(this.resolvedMood, currentSeconds());
-    this.animator.setTease(this.tease, currentSeconds());
-    this.drawCurrentFrame(currentSeconds());
-    this.syncPlayback();
-  }
-
   protected override updated(changed: PropertyValues<this>): void {
     if (changed.has("size")) {
       this.style.setProperty("--openclaw-mascot-size", `${this.resolvedSize}px`);
     }
-    if (changed.has("mood")) {
-      this.animator.setMood(this.resolvedMood, currentSeconds());
-    }
-    if (changed.has("tease")) {
-      this.animator.setTease(this.tease, currentSeconds());
-    }
-    this.drawCurrentFrame(currentSeconds());
-    this.syncPlayback();
-  }
-
-  catchOnce(): void {
-    if (!this.isConnected || this.reducedMotion || currentThemeBranding().mascot === "none") {
-      return;
-    }
-    const time = currentSeconds();
-    this.animator.playCatch(time);
-    this.drawCurrentFrame(time);
     this.syncPlayback();
   }
 
   override render() {
     return currentThemeBranding().mascot === "none"
       ? html`<span class="openclaw-mascot--neutral">${neutralMark}</span>`
-      : html`<canvas></canvas>`;
-  }
-
-  private get resolvedMood(): MascotMood {
-    return MASCOT_MOODS.has(this.mood) ? this.mood : "idle";
+      : html`<img
+          src=${inferControlUiPublicAssetPath("cypherclaw-mascot.png")}
+          alt=""
+          width="512"
+          height="512"
+          data-mood=${MASCOT_MOODS.has(this.mood) ? this.mood : "idle"}
+          draggable="false"
+        />`;
   }
 
   private get resolvedSize(): number {
     return Number.isFinite(this.size) && this.size > 0 ? this.size : DEFAULT_SIZE;
   }
 
-  private get shouldAnimate(): boolean {
-    return (
-      this.isConnected &&
-      currentThemeBranding().mascot === "claw" &&
-      this.visible &&
-      !this.reducedMotion &&
-      document.visibilityState !== "hidden"
-    );
-  }
-
-  private readonly renderAnimationFrame = (timestamp: number) => {
-    this.animationFrame = 0;
-    if (!this.shouldAnimate) {
-      return;
-    }
-    this.drawCurrentFrame(timestamp / 1_000);
-    this.animationFrame = window.requestAnimationFrame(this.renderAnimationFrame);
-  };
-
   private syncPlayback(): void {
-    if (!this.renderRoot.querySelector("canvas")) {
-      this.stopAnimation();
-      return;
-    }
-    if (this.reducedMotion) {
-      this.stopAnimation();
-      this.drawPose(staticMascotPose(this.resolvedMood));
-      return;
-    }
-    if (!this.shouldAnimate) {
-      this.stopAnimation();
-      return;
-    }
-    if (this.animationFrame === 0) {
-      this.animationFrame = window.requestAnimationFrame(this.renderAnimationFrame);
-    }
-  }
-
-  private stopAnimation(): void {
-    if (this.animationFrame !== 0) {
-      window.cancelAnimationFrame(this.animationFrame);
-      this.animationFrame = 0;
-    }
-  }
-
-  private drawCurrentFrame(time: number): void {
-    this.drawPose(
-      this.reducedMotion ? staticMascotPose(this.resolvedMood) : this.animator.poseAt(time),
+    this.toggleAttribute(
+      "data-playing",
+      this.isConnected &&
+        currentThemeBranding().mascot === "claw" &&
+        this.visible &&
+        !this.reducedMotion &&
+        document.visibilityState !== "hidden",
     );
-  }
-
-  private drawPose(pose: MascotPose): void {
-    const canvas = this.renderRoot.querySelector("canvas");
-    if (!(canvas instanceof HTMLCanvasElement) || typeof Path2D === "undefined") {
-      return;
-    }
-    const context = canvas.getContext("2d");
-    if (!context) {
-      return;
-    }
-    const size = this.resolvedSize;
-    const pixelRatio = Math.max(1, window.devicePixelRatio || 1);
-    const pixelSize = Math.round(size * pixelRatio);
-    if (canvas.width !== pixelSize || canvas.height !== pixelSize) {
-      canvas.width = pixelSize;
-      canvas.height = pixelSize;
-    }
-    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-    context.clearRect(0, 0, size, size);
-    drawMascot(
-      pose,
-      mascotPalette(document.documentElement.dataset.themeMode === "light"),
-      context,
-      size,
-    );
-    canvas.style.transform = `translate3d(0, ${(pose.floatOffset * size) / 120}px, 0)`;
   }
 }
 

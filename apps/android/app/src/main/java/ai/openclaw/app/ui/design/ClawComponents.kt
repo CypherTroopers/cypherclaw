@@ -647,7 +647,7 @@ internal fun ClawComponentShowcase(modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.SpaceBetween,
       ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-          Text(text = "OpenClaw", style = ClawTheme.type.display, color = ClawTheme.colors.text)
+          Text(text = "CypherClaw", style = ClawTheme.type.display, color = ClawTheme.colors.text)
           Text(text = "Design system prototype", style = ClawTheme.type.body, color = ClawTheme.colors.textMuted)
         }
         ClawStatusPill(text = "Connected", status = ClawStatus.Success)

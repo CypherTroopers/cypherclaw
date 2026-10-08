@@ -84,6 +84,12 @@ export async function prepareGatewayKernelRequestRuntime(params: {
       retireQuestionChannelGateway(runtime.connectionWork.signal);
       closeGatewayDeviceRevocation(gatewayRequestContext);
       await gatewayRequestContext.scopeUpgradeCoordinator?.close();
+      await gatewayRequestContext.walletGenerator?.close();
+      try {
+        await gatewayRequestContext.cypherNodeManager?.close();
+      } catch {
+        log.warn("Cypher node could not finish stopping. Check its status before restarting it.");
+      }
       const projection = await projectionReady.catch(() => undefined);
       await shutdownRuntime.flushPendingSessionsChangedEvents(gatewayRequestContext);
       if (projection) {

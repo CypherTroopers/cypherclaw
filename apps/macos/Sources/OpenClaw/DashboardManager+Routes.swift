@@ -165,7 +165,7 @@ extension DashboardManager {
             auth: auth,
             tlsParams: endpoint.tls?.params,
             mode: mode,
-            displayName: "OpenClaw",
+            displayName: "CypherClaw",
             legacyNativeCredentials: self.currentNativeStartupCredentials,
             nativeAuthProvider: self.nativeAuthProvider(target: .primary, endpoint: endpoint)), endpoint)
     }

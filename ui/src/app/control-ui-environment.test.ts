@@ -1,9 +1,10 @@
 /* @vitest-environment jsdom */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type {
-  ControlUiBootstrapConfig,
-  ControlUiEnvironment,
+import {
+  CONTROL_UI_BOOTSTRAP_CONFIG_PATH,
+  type ControlUiBootstrapConfig,
+  type ControlUiEnvironment,
 } from "../../../src/gateway/control-ui-bootstrap-contract.js";
 import "../components/app-topbar.ts";
 import "../components/sidebar-agent-card.ts";
@@ -17,6 +18,31 @@ type EnvironmentElement = HTMLElement & {
   avatarText?: string;
   updateComplete: Promise<boolean>;
 };
+
+function bootstrapAndFaviconFetch(bootstraps: ControlUiBootstrapConfig[]) {
+  const responses = [...bootstraps];
+  return vi.fn<typeof fetch>(async (input) => {
+    if (input === "/favicon.svg") {
+      return new Response(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M0 0h32v32H0z"/></svg>',
+      );
+    }
+    expect(input).toBe(CONTROL_UI_BOOTSTRAP_CONFIG_PATH);
+    return new Response(JSON.stringify(responses.shift()));
+  });
+}
+
+function waitForComposedFavicon(icon: HTMLLinkElement): Promise<void> {
+  return new Promise((resolve) => {
+    const observer = new MutationObserver(() => {
+      if (icon.getAttribute("href")?.startsWith("data:image/svg+xml,")) {
+        observer.disconnect();
+        resolve();
+      }
+    });
+    observer.observe(icon, { attributes: true, attributeFilter: ["href"] });
+  });
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -61,13 +87,12 @@ describe("Control UI environment presentation", () => {
       environment,
       seamColor: "#123456",
     };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(JSON.stringify(payload))),
-    );
+    vi.stubGlobal("fetch", bootstrapAndFaviconFetch([payload]));
+    const composedFavicon = waitForComposedFavicon(favicon);
     const config = createApplicationConfigCapability({ resourceBasePath: "" });
     await config.refresh();
     await vi.dynamicImportSettled();
+    await composedFavicon;
     sidebar.environment = config.current.environment;
     topbar.environment = config.current.environment;
     await Promise.all([sidebar.updateComplete, topbar.updateComplete]);
@@ -105,19 +130,20 @@ describe("Control UI environment presentation", () => {
     };
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({ ...bootstrap, environment: { label: "edge", color: "amber" } }),
-          ),
-        )
-        .mockResolvedValueOnce(new Response(JSON.stringify(bootstrap))),
+      bootstrapAndFaviconFetch([
+        { ...bootstrap, environment: { label: "edge", color: "amber" } },
+        bootstrap,
+      ]),
     );
+    const composedFavicons = Promise.all([
+      waitForComposedFavicon(svgFavicon),
+      waitForComposedFavicon(pngFavicon),
+    ]);
     const config = createApplicationConfigCapability({ resourceBasePath: "" });
 
     await config.refresh();
     await vi.dynamicImportSettled();
+    await composedFavicons;
 
     expect(document.querySelector(".control-ui-environment-stripe")).not.toBeNull();
     expect(svgFavicon.getAttribute("href")).toContain("data:image/svg+xml,");

@@ -616,7 +616,7 @@ private fun OverviewHeader(
     }
     OpenClawMascot(modifier = Modifier.size(25.dp))
     Text(
-      text = nativeString("OpenClaw"),
+      text = nativeString("CypherClaw"),
       style = ClawTheme.type.title,
       color = ClawTheme.colors.text,
       modifier = Modifier.weight(1f),
@@ -961,7 +961,7 @@ internal fun overviewAgentName(
   defaultAgentId: String?,
 ): String {
   val agent = overviewAgent(agents = agents, defaultAgentId = defaultAgentId)
-  return agent?.name?.takeIf { it.isNotBlank() } ?: agent?.id?.takeIf { it.isNotBlank() } ?: nativeString("OpenClaw")
+  return agent?.name?.takeIf { it.isNotBlank() } ?: agent?.id?.takeIf { it.isNotBlank() } ?: nativeString("CypherClaw")
 }
 
 internal fun overviewAgentBadgeText(
@@ -975,7 +975,7 @@ internal fun overviewAgentBadgeText(
     ?.takeIf { it.isNotEmpty() }
     ?.let { return it }
   if (agent == null) return "OC"
-  val source = agent.name?.takeIf { it.isNotBlank() } ?: agent.id.takeIf { it.isNotBlank() } ?: nativeString("OpenClaw")
+  val source = agent.name?.takeIf { it.isNotBlank() } ?: agent.id.takeIf { it.isNotBlank() } ?: nativeString("CypherClaw")
   return agentInitials(source)
 }
 
@@ -1048,7 +1048,7 @@ internal fun sessionSourceLabel(
     } else {
       normalized
     }
-  if (!scopedKey.contains(':') && !scopedKey.contains('#')) return nativeString("OpenClaw")
+  if (!scopedKey.contains(':') && !scopedKey.contains('#')) return nativeString("CypherClaw")
   val source = scopedKey.substringBefore(':').substringBefore('#').lowercase()
   val channelLabel =
     channelsSummary
@@ -1058,7 +1058,7 @@ internal fun sessionSourceLabel(
       }?.label
       ?.takeIf { it.isNotBlank() }
   if (channelLabel != null) return channelLabel
-  return nativeString(sessionSourceLabels[source] ?: "OpenClaw")
+  return nativeString(sessionSourceLabels[source] ?: "CypherClaw")
 }
 
 internal data class HomeAttentionRow(
@@ -1155,7 +1155,11 @@ private fun HomeAttentionListRow(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-      Icon(imageVector = row.settingsRoute.icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = ClawTheme.colors.text)
+      if (row.settingsRoute == SettingsRoute.SystemAgent) {
+        OpenClawMascot(modifier = Modifier.size(20.dp))
+      } else {
+        Icon(imageVector = row.settingsRoute.icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = ClawTheme.colors.text)
+      }
       Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
         Text(
           text = localizedTitle,
@@ -1395,7 +1399,7 @@ private fun SettingsShellScreen(
       }
       item {
         SettingsListRow(
-          title = verbatimText(displayName.ifBlank { "OpenClaw" }),
+          title = verbatimText(displayName.ifBlank { "CypherClaw" }),
           value = nativeText("Device name and identity"),
           icon = SettingsRoute.Profile.icon,
           actionDescription = nativeString("Open profile"),
@@ -1551,7 +1555,11 @@ private fun SettingsListRow(
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(ClawTheme.spacing.sm),
   ) {
-    Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(24.dp), tint = iconTint)
+    if (icon === ClawIcons.OpenClaw) {
+      OpenClawMascot(modifier = Modifier.size(24.dp))
+    } else {
+      Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(24.dp), tint = iconTint)
+    }
     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
       Text(text = localizedTitle, style = ClawTheme.type.body.copy(fontSize = 16.sp, lineHeight = 22.sp), color = ClawTheme.colors.text)
       if (subtitle != null) {

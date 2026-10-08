@@ -26,6 +26,7 @@ export const SIDEBAR_NAV_ROUTES = [
   "cron",
   "sessions",
   "systems",
+  "cypher",
   "activity",
   "meetings",
   "plugins",
@@ -68,7 +69,7 @@ export type SidebarZoneEntry =
 // Keep the highest-value operational destinations visible on first use. Users
 // can still replace this route set through the customize menu.
 export const DEFAULT_SIDEBAR_ENTRIES = (
-  ["agents-home", "dashboards", "systems", "cron", "plugins"] as const
+  ["cypher", "agents-home", "dashboards", "systems", "cron", "plugins"] as const
 ).map((route) => serializeSidebarEntry({ type: "route", route }));
 
 /**
@@ -350,6 +351,7 @@ const NAVIGATION_PRESENTATION: Record<NavigationRouteId, NavigationPresentation>
   connection: navigationPresentation("radio", "connection"),
   sessions: navigationPresentation("fileText", "sessions"),
   systems: navigationPresentation("monitor", "systems"),
+  cypher: navigationPresentation("coins", "cypher"),
   usage: navigationPresentation("coins", "usage"),
   cron: navigationPresentation("calendarClock", "cron"),
   skills: navigationPresentation("bookOpenText", "skills"),
@@ -466,15 +468,15 @@ export function titleForRoute(routeId: NavigationRouteId): string {
 /** Window/tab title, markers leftmost because tabs truncate from the right.
  * A disconnected Gateway replaces the approval count (a stale queue is not
  * actionable); titles already ending in the brand
- * ("Ask OpenClaw") skip the suffix so it never reads "… OpenClaw — OpenClaw". */
+ * ("Ask CypherClaw") skip the suffix so it never reads "… CypherClaw — CypherClaw". */
 export function formatDocumentTitle(options: {
   context: string;
   attentionCount?: number;
   gatewayDisconnected?: boolean;
 }): string {
-  const base = options.context.endsWith("OpenClaw")
+  const base = options.context.endsWith("CypherClaw")
     ? options.context
-    : `${options.context} — OpenClaw`;
+    : `${options.context} — CypherClaw`;
   if (options.gatewayDisconnected) {
     return `(${t("connection.disconnectedTitle")}) ${base}`;
   }

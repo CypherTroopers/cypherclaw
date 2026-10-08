@@ -1,0 +1,5 @@
+Use case: background-extraction.
+Asset type: transparent UI and tray logo for CypherClaw.
+Edit target: the referenced latest 1254 x 1254 JPEG supplied by the user.
+Primary request: remove ONLY the exterior white photographic background and floor backdrop to actual transparent alpha. Preserve the entire waving black CypherTrooper exactly as it appears in the source, including both hands and feet, its white face emblem, white shoes, white nameplate, exact black text CYPHERTROOPER, original textures, lighting, shape, colors, proportions, pose, position, and full-figure framing.
+Constraints: This is a faithful background extraction, not a new rendering. Keep white pixels belonging to the emblem, shoes, and nameplate opaque. Preserve small gaps between parts as transparent only where they were background. Do not crop or zoom into the head. Keep a square canvas and the full original composition and original relative placement. No redraw, restyle, retouch, recolor, rotation, stretching, accessories, outline, new shadow, badge, border, or text replacement. Remove only the background; keep the original subject intact.

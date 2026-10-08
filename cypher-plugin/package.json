@@ -1,0 +1,52 @@
+{
+  "name": "@cyphertroopers/openclaw-cypher",
+  "version": "0.1.0",
+  "description": "Cypher node management and independent wallet generation for OpenClaw.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.16.0 <25 || >=26.1.0"
+  },
+  "packageManager": "pnpm@12.5.1",
+  "main": "./dist/index.js",
+  "files": [
+    "dist/",
+    "assets/",
+    "openclaw.plugin.json",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "prepack": "pnpm build"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.9.8"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "esbuild": "0.28.2",
+    "jsdom": "30.1.1",
+    "lit": "3.3.3",
+    "openclaw": "2026.9.8",
+    "playwright": "1.63.0",
+    "typescript": "7.1.0-dev.20260920.1",
+    "vitest": "5.0.1"
+  },
+  "openclaw": {
+    "install": {
+      "minHostVersion": ">=2026.9.8"
+    },
+    "extensions": ["./dist/index.js"],
+    "controlUi": "./browser/index.ts"
+  }
+}

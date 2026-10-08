@@ -1,0 +1,11 @@
+packages:
+  - .
+
+allowBuilds:
+  "@google/genai": true
+  "@lydell/node-pty": true
+  "@openclaw/proxyline": true
+  esbuild: true
+  koffi: false
+  openclaw: true
+  protobufjs: true

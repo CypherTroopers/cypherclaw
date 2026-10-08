@@ -1,5 +1,5 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw"</string>
+    <string name="app_name" translatable="false">"CypherClaw"</string>
     <string name="chat" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"चैट"</string>
     <string name="session" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"सत्र"</string>
     <string name="model" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"मॉडल"</string>
@@ -40,7 +40,7 @@
     <string name="agent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"एजेंट"</string>
     <string name="system" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"सिस्टम"</string>
     <string name="start_conversation" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"बातचीत शुरू करें"</string>
-    <string name="start_conversation_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"अपनी घड़ी पर बोलें या टाइप करें. पेयर किया गया फ़ोन अपने प्रमाणित OpenClaw सत्र के ज़रिए संदेश भेजता है."</string>
+    <string name="start_conversation_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"अपनी घड़ी पर बोलें या टाइप करें. पेयर किया गया फ़ोन अपने प्रमाणित CypherClaw सत्र के ज़रिए संदेश भेजता है."</string>
     <string name="current_session" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"वर्तमान सत्र"</string>
     <string name="context_label_value" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"%1$s: %2$s"</string>
     <string name="close" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"बंद करें"</string>
@@ -73,30 +73,30 @@
     <string name="phone_ready" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"फ़ोन तैयार है"</string>
     <string name="gateway_connected" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway कनेक्ट हो गया"</string>
     <string name="gateway_offline" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway ऑफ़लाइन है"</string>
-    <string name="gateway_offline_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"पेयर किए गए फ़ोन पर OpenClaw में Gateway को फिर से कनेक्ट करें."</string>
-    <string name="open_phone_app" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"फ़ोन पर OpenClaw खोलें"</string>
+    <string name="gateway_offline_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"पेयर किए गए फ़ोन पर CypherClaw में Gateway को फिर से कनेक्ट करें."</string>
+    <string name="open_phone_app" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"फ़ोन पर CypherClaw खोलें"</string>
     <string name="phone_not_ready_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"घड़ी कभी भी खुद Gateway को शुरू या प्रमाणित नहीं करती।"</string>
     <string name="phone_unavailable" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"फ़ोन से संपर्क नहीं हो पा रहा है"</string>
-    <string name="phone_unavailable_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"पेयर किए गए फ़ोन को पास रखें और उससे मेल खाने वाला OpenClaw ऐप इंस्टॉल करें."</string>
+    <string name="phone_unavailable_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"पेयर किए गए फ़ोन को पास रखें और उससे मेल खाने वाला CypherClaw ऐप इंस्टॉल करें."</string>
     <string name="selection_not_found" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"चयन अब उपलब्ध नहीं है"</string>
     <string name="message_not_sent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"कार्रवाई स्वीकार नहीं की गई"</string>
     <string name="something_went_wrong" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"कुछ गड़बड़ी हुई"</string>
     <string name="refresh_and_try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"सूचियाँ रीफ़्रेश करें और फिर से कोशिश करें."</string>
     <string name="model_catalog_refresh_failed" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"कुछ मॉडल रीफ़्रेश नहीं किए जा सके। सूची में मौजूद मॉडल अब भी उपलब्ध हैं।"</string>
-    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"इस चैट के लिए मॉडल चुनने के लिए अपने फ़ोन पर OpenClaw और Gateway को अपडेट करें।"</string>
+    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"इस चैट के लिए मॉडल चुनने के लिए अपने फ़ोन पर CypherClaw और Gateway को अपडेट करें।"</string>
     <string name="try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"घड़ी से फिर कोशिश करें."</string>
     <string name="update_required" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"अपडेट आवश्यक है"</string>
-    <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"फ़ोन और घड़ी, दोनों पर OpenClaw अपडेट करें."</string>
+    <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"फ़ोन और घड़ी, दोनों पर CypherClaw अपडेट करें."</string>
     <string name="refresh" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"रीफ़्रेश करें"</string>
     <string name="retry" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"फिर से कोशिश करें"</string>
-    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw के जवाब"</string>
+    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw के जवाब"</string>
     <string name="notification_reply" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"जवाब दें"</string>
-    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw का जवाब"</string>
+    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw का जवाब"</string>
     <string name="notification_reply_failed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"जवाब नहीं भेजा गया"</string>
     <string name="notification_reply_failed_text" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"फ़ोन अनुपलब्ध है. फिर से कोशिश करने के लिए उत्तर दें पर टैप करें."</string>
-    <string name="notification_phone_changed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"जवाब देने के लिए OpenClaw खोलें"</string>
+    <string name="notification_phone_changed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"जवाब देने के लिए CypherClaw खोलें"</string>
     <string name="notification_phone_changed_text" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"आपका पसंदीदा फ़ोन बदल गया है. जवाब देने से पहले सत्र को फिर से लोड करने के लिए ऐप खोलें."</string>
-    <string name="tile_label" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw"</string>
+    <string name="tile_label" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"CypherClaw"</string>
     <string name="tile_description" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"सत्र खोलें और अपने पेयर किए गए फ़ोन से जवाब दें"</string>
     <string name="tile_open" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"खोलें"</string>
     <string name="tile_phone_proxy" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"फ़ोन प्रॉक्सी"</string>

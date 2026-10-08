@@ -125,6 +125,7 @@ describe("OAuth loopback callback server", () => {
           }),
       );
       expect(policy.get("default-src")).toEqual(["'none'"]);
+      expect(policy.get("img-src")).toEqual(["data:"]);
       expect(policy.get("style-src")).toEqual([`'sha256-${styleHash}'`]);
       expect(policy.has("script-src")).toBe(false);
       expect(policy.get("frame-ancestors")).toEqual(["'none'"]);

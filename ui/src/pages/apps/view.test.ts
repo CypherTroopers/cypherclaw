@@ -98,7 +98,7 @@ describe("renderApps", () => {
     expect([...url.searchParams]).toEqual([["url", "https://research.example:8443/assistant"]]);
     expect(launch?.getAttribute("target")).toBeNull();
     const card = launch?.closest(".apps-card");
-    expect(card?.querySelector("h3")?.textContent).toBe("macOS");
+    expect(card?.querySelector("h3")?.textContent).toBe("macOS · OpenClaw (upstream)");
     expect(
       card?.querySelector("a[href='https://github.com/openclaw/openclaw/releases']")?.textContent?.trim(),
     ).toBe("Download");

@@ -90,7 +90,7 @@ final class DashboardAlertPresenter {
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
-        panel.title = "OpenClaw"
+        panel.title = "CypherClaw"
         panel.isReleasedWhenClosed = false
         panel.isRestorable = false
         panel.level = .floating

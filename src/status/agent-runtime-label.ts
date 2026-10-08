@@ -17,7 +17,7 @@ import { resolveSessionPinnedHarnessId } from "../sessions/agent-harness-session
 // Status runtime labels turn harness/provider/session state into a short
 // operator-facing name, sanitizing any persisted ACP/backend text.
 const AGENT_RUNTIME_LABELS: Readonly<Record<string, string>> = {
-  openclaw: "OpenClaw Default",
+  openclaw: "CypherClaw Default",
   codex: "OpenAI Codex",
   "codex-cli": "OpenAI Codex",
   "claude-cli": "Claude CLI",

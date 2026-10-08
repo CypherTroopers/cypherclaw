@@ -568,7 +568,7 @@ extension SettingsProTab {
                     OpenClawProMark(size: 96, shadowRadius: 18, interactive: true)
                         .accessibilityHidden(true)
                     VStack(spacing: 2) {
-                        Text("OpenClaw")
+                        Text("CypherClaw")
                             .font(OpenClawType.title2SemiBold)
                         Text("Personal AI on your devices")
                             .font(OpenClawType.footnote)
@@ -607,7 +607,7 @@ extension SettingsProTab {
                     title: "GitHub",
                     icon: "chevron.left.slash.chevron.right",
                     color: .gray,
-                    url: URL(string: "https://github.com/openclaw/openclaw")!)
+                    url: URL(string: "https://github.com/CypherTroopers/cypherclaw")!)
                 self.aboutLinkRow(
                     title: "Discord",
                     icon: "bubble.left.and.bubble.right.fill",

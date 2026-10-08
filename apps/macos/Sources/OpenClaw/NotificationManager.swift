@@ -157,7 +157,7 @@ final class BackgroundSessionNotifications: NSObject, UNUserNotificationCenterDe
         guard let admission = self.actions.begin(sourceIdentifier: identifier, open: open) else { return }
         self.remove(admission.retired)
         let sent = await NotificationManager().send(
-            title: "OpenClaw",
+            title: "CypherClaw",
             body: "A background session finished. Open it to see the result.",
             sound: nil,
             identifier: admission.identifier,
@@ -239,7 +239,7 @@ enum TestNotificationOutcome: Encodable, Equatable {
 enum TestNotificationAction {
     static func send() async -> TestNotificationOutcome {
         let sent = await NotificationManager().send(
-            title: "OpenClaw",
+            title: "CypherClaw",
             body: "Test notification",
             sound: nil)
         return sent

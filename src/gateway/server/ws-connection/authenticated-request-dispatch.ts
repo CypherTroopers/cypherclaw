@@ -349,9 +349,10 @@ export function createGatewayAuthenticatedRequestDispatcher(params: {
       const executeRequest = async () => {
         diagnostics?.bindTrace();
         let entry: GatewayRequestEntry | undefined;
-        // Ordinary mutations survive reconnects; an explicit reload wait instead
-        // belongs to its requester so disconnect can release its admission fence.
+        // Ordinary mutations survive reconnects. Request-owned work, including
+        // secret generation, ends when its requester disconnects.
         const cancelOnDisconnect =
+          req.method === "wallet.generator.generate" ||
           req.method === "sessions.companion.ask" ||
           (req.method === "plugins.reload" &&
             asOptionalRecord(req.params)?.waitForDrain === true) ||

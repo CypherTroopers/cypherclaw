@@ -1,15 +1,15 @@
 {
   "fill": {
-    "solid": "srgb:0.97255,0.96078,0.92549,1.00000"
+    "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
   },
   "groups": [
     {
       "layers": [
         {
-          "image-name": "molty.svg",
-          "name": "Open C",
+          "image-name": "cypherclaw.png",
+          "name": "CypherClaw",
           "position": {
-            "scale": 0.94,
+            "scale": 1,
             "translation-in-points": [
               0,
               0
