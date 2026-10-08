@@ -82,6 +82,7 @@ export async function prepareGatewayKernelRequestRuntime(params: {
       retireQuestionChannelGateway(runtime.connectionWork.signal);
       closeGatewayDeviceRevocation(gatewayRequestContext);
       await gatewayRequestContext.scopeUpgradeCoordinator?.close();
+      await gatewayRequestContext.walletGenerator?.close();
       try {
         await gatewayRequestContext.cypherNodeManager?.close();
       } catch {

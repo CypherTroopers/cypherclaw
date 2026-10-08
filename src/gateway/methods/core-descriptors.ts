@@ -724,4 +724,6 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["cypher.accounts.lock", "cypher", "operator.admin", "2026.9"],
   ["cypher.reward.get", "cypher", "operator.admin", "2026.9"],
   ["cypher.reward.set", "cypher", "operator.admin", "2026.9"],
+  ["wallet.generator.status", "wallet-generator", "operator.read", "2026.9"],
+  ["wallet.generator.generate", "wallet-generator", "operator.admin", "2026.9"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

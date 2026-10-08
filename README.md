@@ -39,7 +39,7 @@ Keep the Gateway running. In a second terminal, run `pnpm openclaw dashboard` to
 
 Cypher source and original command documentation are available in [Cypher FHS-D](https://github.com/CypherTroopers/cypher/tree/FHS-D) and its [IPC account and reward setup guide](https://github.com/CypherTroopers/cypher/blob/FHS-D/README.md#beginner-setup-common-rpc-node-and-rewards). Windows graceful node shutdown still requires verification on Windows.
 
-The node runs on the **Gateway host**, which may differ from the device displaying the browser. To use `cypher.exe`, run the Gateway on native Windows. A Gateway running in WSL uses the Linux binary. Intel Macs, Linux arm64, and Windows arm64 do not have a matching bundled binary.
+The node runs on the **Gateway host**, which may differ from the device displaying the browser. To use `cypher.exe`, run the Gateway on native Windows. A Gateway running in WSL uses the Linux binary. Intel Macs, Linux arm64, and Windows arm64 do not have a matching bundled node binary.
 
 In the Cypher page, start the node, create or select a local account, unlock it with its password, and configure mining. The **signing account (A)** identifies the local node; the **reward address (B)** receives the configured Common RPC rewards. They are separate settings. Start and stop mining explicitly, and use **Stop node** to end the node process managed by this Gateway. Account creation, unlocking, reward changes, mining changes, and node lifecycle operations require a Gateway operator with admin permission.
 
@@ -53,7 +53,17 @@ For a local source-package tarball, use the repository's supported packaging com
 node scripts/package-openclaw-for-docker.mjs --allow-unreleased-changelog
 ```
 
-The command builds package artifacts and writes the tarball under `.artifacts/docker-e2e-package` by default. The package allowlist includes the three Cypher launchers, genesis and peer configuration, the Unix relay argument helper, the three target binaries, and the Windows DLLs. Chain data, keystores, and private relay configurations are outside that allowlist. A complete package build and native installation with these Cypher additions have not yet been verified. This local packaging command does not publish a package.
+The command builds package artifacts and writes the tarball under `.artifacts/docker-e2e-package` by default. The package allowlist includes the three Cypher launchers, genesis and peer configuration, the Unix relay argument helper, the three target node binaries, and the Windows DLLs. It also includes the six standalone wallet generators, their provenance and licenses, and their corresponding source archive. Chain data, keystores, and private relay configurations are outside that allowlist. A complete package build and native installation with these Cypher additions have not yet been verified. This local packaging command does not publish a package.
+
+## Generate a wallet
+
+The **Wallet generator** panel at the bottom of the Cypher page creates a new EVM wallet independently of node management. Select **Generate wallet** to run the bundled generator on the Gateway host and display the address and private key in the UI. The node can be stopped or disconnected from IPC. Generating a wallet requires a Gateway operator with admin permission.
+
+The generator supports Linux, macOS, and Windows on x64 and ARM64. Selection follows the Gateway host's OS and CPU, even when the browser runs on another device. The UI shows the selected target and command. The fixed executable is verified against its pinned SHA-256 before use; no command or executable path is accepted from the browser. See the [bundled generator's provenance and licenses](wallet-generator/README.md).
+
+The private key starts hidden. Use **Show private key** to reveal it, copy it only when needed, and securely save it before selecting **Clear display**. The result is temporary: leaving the page, disconnecting, or changing the Gateway clears it. Generation does not import the wallet into the node or change the signing account or reward recipient. The result is not saved to browser storage, node logs, or chat history.
+
+The private key passes through the Gateway and the browser. The generator does not check network isolation. For offline use, run both on the same trusted computer with networking disconnected.
 
 ## Upstream OpenClaw installation reference
 

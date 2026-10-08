@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.tgz
+
+# These are the plugin's pinned runtime assets and corresponding source archive.
+!assets/cypher/build/bin/
+!assets/cypher/build/bin/**
+!assets/wallet-generator/bin/
+!assets/wallet-generator/bin/**
+!assets/cypher/cypher-source-60b8164-with-go-dependencies.tar.gz
+!assets/wallet-generator/coldwalletgenerator-source-with-dependencies.tar.gz

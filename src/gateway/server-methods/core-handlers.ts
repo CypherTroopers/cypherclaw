@@ -52,6 +52,8 @@ const CORE_GATEWAY_HANDLER_MODULES = {
     import("./plugins-control-ui.js").then((module) => module.pluginsControlUiHandlers),
   cron: () => import("./cron.js").then((module) => module.cronHandlers),
   cypher: () => import("./cypher.js").then((module) => module.cypherHandlers),
+  "wallet-generator": () =>
+    import("./wallet-generator.js").then((module) => module.walletGeneratorHandlers),
   devices: () => import("./devices.js").then((module) => module.deviceHandlers),
   "device-pair-setup": () =>
     import("./device-pair-setup.js").then((module) => module.devicePairSetupHandlers),

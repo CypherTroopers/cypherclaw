@@ -16,6 +16,25 @@ This file records third-party notices for code or substantial implementation
 portions incorporated into OpenClaw source, beyond normal package-manager
 dependency metadata.
 
+## Standalone wallet generator
+
+The executables in `wallet-generator/bin/` are copied unchanged from
+[CypherTroopers/offlinewalletgenerator](https://github.com/CypherTroopers/offlinewalletgenerator)
+at distribution commit `63dfd53949c5b7523e42369251512fd7e8a2f0d6`.
+Their recorded source commit is `8879d9e4c0490999096bb299a0e2da31a1b20e50`.
+Original generator files use the upstream MIT license retained in
+`wallet-generator/LICENSE`; this does not relicense the linked dependencies.
+
+The generator imports go-ethereum v1.17.6 under LGPL-3.0-or-later and its
+dependencies under their respective licenses. The package includes the original
+`wallet-generator/THIRD_PARTY_NOTICES.md`, copied dependency and Go license texts
+under `wallet-generator/third-party-licenses/`, and the corresponding project and
+dependency sources in
+`wallet-generator/coldwalletgenerator-source-with-dependencies.tar.gz`.
+Keep those files with the binaries when redistributing them. Provenance,
+checksums, and instructions for rebuilding with modified library code are in
+`wallet-generator/README.md` and `wallet-generator/BUILDINFO.txt`.
+
 ## Pi / pi-mono
 
 Portions of OpenClaw were adapted from Pi / pi-mono, and OpenClaw also depends

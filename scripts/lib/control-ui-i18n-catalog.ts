@@ -52,6 +52,7 @@ import { registerToolDiagnosticsEnglish } from "../../ui/src/i18n/locales/en-too
 import { registerTranscriptsEnglish } from "../../ui/src/i18n/locales/en-transcripts.ts";
 import { registerUpdateActionsEnglish } from "../../ui/src/i18n/locales/en-update-actions.ts";
 import { registerUsageEnglish } from "../../ui/src/i18n/locales/en-usage.ts";
+import { registerWalletGeneratorEnglish } from "../../ui/src/i18n/locales/en-wallet-generator.ts";
 import { en } from "../../ui/src/i18n/locales/en.ts";
 import {
   mergeControlUiTranslationMaps,
@@ -116,6 +117,7 @@ const sourceFiles = [
   "en-tool-diagnostics.ts",
   "en-transcripts.ts",
   "en-usage.ts",
+  "en-wallet-generator.ts",
 ];
 
 export function loadControlUiSourceCatalog(): TranslationMap {
@@ -222,6 +224,7 @@ export function loadControlUiSourceCatalog(): TranslationMap {
     registerUpdateActionsEnglish.catalog,
     registerTranscriptsEnglish.catalog,
     registerUsageEnglish.catalog,
+    registerWalletGeneratorEnglish.catalog,
     loadControlUiCoreHintCatalog(),
   );
 }

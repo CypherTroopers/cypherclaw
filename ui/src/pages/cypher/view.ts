@@ -10,6 +10,7 @@ import {
 } from "../../components/settings-ui.ts";
 import { renderSettingsWorkspace } from "../../components/settings-workspace.ts";
 import { t } from "../../i18n/index.ts";
+import "../../components/wallet-generator/wallet-generator.ts";
 import "./style.css";
 
 export type CypherAction =
@@ -312,6 +313,6 @@ ${status?.logs.length ? status.logs.join("\n") : t("cypher.noLogs")}</pre>
       subtitle: t("cypher.subtitle"),
       actions: html` ${button("refresh", "cypher.refresh", props.allowed("cypher.status"))} `,
     })}
-    ${renderSettingsWorkspace(renderSettingsPage(html`${nodeSection}${accounts}${mining}${reward}${logs}`))}
+    ${renderSettingsWorkspace(renderSettingsPage(html`${nodeSection}${accounts}${mining}${reward}${logs}<openclaw-wallet-generator></openclaw-wallet-generator>`))}
   `;
 }
