@@ -592,6 +592,7 @@ export async function executeMutableUpdate(
         reapplyLocalOverrides: opts.reapplyLocalOverrides,
         tag: params.tag,
         installSpec: params.packageInstallSpec ?? undefined,
+        expectedArtifact: params.packageExpectedArtifact,
         timeoutMs: updateStepTimeoutMs,
         workTimeoutMs: params.timeoutMs ?? null,
         honorPackageRoot:

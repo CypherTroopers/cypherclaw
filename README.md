@@ -19,14 +19,13 @@ See [CypherClaw stable-source maintenance](CYPHERCLAW_UPSTREAM.md) for the pinne
 
 ## Install CypherClaw and use the Cypher node
 
-CypherClaw adds Cypher directly to the Gateway and Control UI. Install from this checkout to obtain these additions. The `openclaw` CLI command, package name, configuration paths, and environment variable names are retained for compatibility; the displayed product name is CypherClaw. The official installer URLs and published `openclaw` package in the upstream installation section below install upstream OpenClaw and do not contain CypherClaw's Cypher integration. A separate distribution source must be configured before those installation methods can deliver this fork.
+CypherClaw adds Cypher directly to the Gateway and Control UI. The `openclaw` CLI command, package name, configuration paths, and environment variable names are retained for compatibility; the displayed product name is CypherClaw. The official installer URLs and published `openclaw` package below install upstream OpenClaw. This fork has a separate [GitHub Releases build and installer](CYPHERCLAW_DISTRIBUTION.md), including a `cypherclaw` launcher and the existing setup wizard. Its one-line install commands become usable after the first GitHub Release is actually published. Until then, use the source checkout or an isolated local candidate.
 
 Install Node 24.16+ (below 25) or Node 26.1+, and pnpm 12.5.1. From the root of **this fork's checkout**, run the following commands on Linux, macOS, or native Windows PowerShell:
 
 ```sh
 pnpm install
 pnpm build
-pnpm ui:build
 pnpm openclaw onboard
 pnpm openclaw gateway run
 ```
@@ -45,7 +44,7 @@ The node runs on the **Gateway host**, which may differ from the device displayi
 
 In the Cypher page, start the node, create or select a local account, unlock it with its password, and configure mining. The **signing account (A)** identifies the local node; the **reward address (B)** receives the configured Common RPC rewards. They are separate settings. Start and stop mining explicitly, and use **Stop node** to end the node process managed by this Gateway. Account creation, unlocking, reward changes, mining changes, and node lifecycle operations require a Gateway operator with admin permission.
 
-UI-managed and manual launches use the same OS-specific launch scripts. The Gateway passes its inherited environment to the launcher without overriding node settings; the scripts own the data-directory, RPC, relay, and console defaults. By default, chain data is stored in `cypher/chaindbname` beside the scripts, HTTP JSON-RPC listens on `0.0.0.0:8000`, WebSocket JSON-RPC listens on `0.0.0.0:9251`, Browser relay is enabled, and the interactive console remains enabled. UI operations use the local Cypher IPC socket or Windows named pipe. Browser relay is not required for the Cypher UI.
+UI-managed and manual launches use the same OS-specific launch scripts. The Gateway passes its inherited environment to the launcher; the scripts own RPC, relay, and console defaults. Source installs default to chain data in `cypher/chaindbname` beside the scripts. Marked GitHub release packages default to persistent data under the selected profile's state directory and preserve explicit overrides. HTTP JSON-RPC listens on `0.0.0.0:8000`, WebSocket JSON-RPC listens on `0.0.0.0:9251`, Browser relay is enabled, and the interactive console remains enabled. UI operations use the local Cypher IPC socket or Windows named pipe. Browser relay is not required for the Cypher UI.
 
 Set launcher overrides in the Gateway environment when using the UI, or in the shell environment for manual launches. `CYPHER_DATADIR` selects another data directory; relative paths are resolved beside the launch script. `CYPHER_HEADLESS=1` omits the console, and `CYPHER_IPC_PATH` selects the IPC endpoint. On Unix, a bare IPC filename is resolved inside the selected data directory; on Windows, it names a pipe. `CYPHER_RPC_ENABLED=0` disables HTTP and WebSocket listeners, while `CYPHER_RPC_BIND` and `CYPHER_WS_BIND` select their bind addresses. Browser relay uses `cypher/config/browser-relay/common-mine.json` unless `CYPHER_BROWSER_RELAY_CONFIG` selects another configuration file; `CYPHER_BROWSER_RELAY=0` disables it. Genesis initialization runs only when the selected chain-data directory does not exist; existing chain data and peer files are preserved. Changing the selected directory does not move existing data.
 
@@ -55,7 +54,7 @@ For a local source-package tarball, use the repository's supported packaging com
 node scripts/package-openclaw-for-docker.mjs --allow-unreleased-changelog
 ```
 
-The command builds package artifacts and writes the tarball under `.artifacts/docker-e2e-package` by default. The package allowlist includes the three Cypher launchers, genesis and peer configuration, the Unix relay argument helper, the three target node binaries, and the Windows DLLs. It also includes the six standalone wallet generators, their provenance and licenses, and their corresponding source archive. Chain data, keystores, and private relay configurations are outside that allowlist. A complete package build and native installation with these Cypher additions have not yet been verified. This local packaging command does not publish a package.
+The command builds package artifacts and writes the tarball under `.artifacts/docker-e2e-package` by default. The package allowlist includes the three Cypher launchers, genesis and peer configuration, the public relay configuration and Unix helper, the three target node binaries, and Windows DLLs. The node's build record, checksum ledger, licenses, provenance, and source archive live under CypherClaw's `cypher/` directory and are included in the package, along with the six standalone wallet generators and their provenance, licenses, and corresponding source archive. Chain data, keystores, and private relay configurations are outside that allowlist. This local packaging command does not publish a package. Use the [fork release builder](CYPHERCLAW_DISTRIBUTION.md#build-a-reviewed-stable-commit) for a sealed CypherClaw installer package and its publication status.
 
 ## Generate a wallet
 

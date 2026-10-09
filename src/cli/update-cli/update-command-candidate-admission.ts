@@ -287,6 +287,7 @@ export async function withUpdateCandidateAdmission<T>(
         installKind: prepared.installKind,
         tag: target.tag,
         installSpec: target.packageInstallSpec ?? undefined,
+        expectedArtifact: target.packageExpectedArtifact,
         timeoutMs: params.timeoutMs,
         workTimeoutMs: prepared.timeoutMs ?? null,
         startedAt: prepared.startedAt,

@@ -16,6 +16,29 @@ This file records third-party notices for code or substantial implementation
 portions incorporated into OpenClaw source, beyond normal package-manager
 dependency metadata.
 
+## Bundled Cypher node
+
+The executables and Windows DLLs in `cypher/build/bin/` retain their original
+bytes from [CypherTroopers/cypher](https://github.com/CypherTroopers/cypher),
+source commit `60b8164405a4d5531c65f778e5661b9272cedbc2` and distribution commit
+`e07269480dd29b0a2b2ffa665a119c70f2e56764`. The node command credits The
+cypherium Authors (2020) and uses GPL-3.0-or-later; its go-ethereum-derived
+libraries retain their original authors' LGPL-3.0-or-later notices. Native
+dependencies retain their own licenses.
+
+`cypher/BUILDINFO.txt` records the source and original build identities,
+dependency versions, platform requirements, and verification scope.
+`cypher/SHA256SUMS` identifies the node assets and retained materials. Original
+artifact manifests, Go build metadata, and Windows dependency package notices
+are under `cypher/provenance/`; additional license texts are under
+`cypher/licenses/`.
+
+`cypher/cypher-source-60b8164-with-go-dependencies.tar.gz` preserves the pinned
+Cypher project source, build scripts, bounded LevelDB patch, the 74 Go modules
+recorded in the binaries, Herumi BLS/MCL sources, upstream GMP 6.3.0 source,
+and original source notices. Keep these node materials with the bundled
+runtime assets as part of the CypherClaw body distribution.
+
 ## Standalone wallet generator
 
 The executables in `wallet-generator/bin/` are copied unchanged from

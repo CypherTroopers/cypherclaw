@@ -352,22 +352,20 @@ export class CypherNodeManager {
             throw error;
           }
         }
-      } else {
-        if (
-          await fs.lstat(paths.ipcPath).then(
-            () => true,
-            (error: unknown) => {
-              if (hasErrnoCode(error, "ENOENT")) {
-                return false;
-              }
-              throw new CypherOperationError("The Cypher IPC endpoint could not be inspected.");
-            },
-          )
-        ) {
-          throw new CypherOperationError(
-            "A Cypher IPC endpoint already exists. Use Connect IPC for that node.",
-          );
-        }
+      } else if (
+        await fs.lstat(paths.ipcPath).then(
+          () => true,
+          (error: unknown) => {
+            if (hasErrnoCode(error, "ENOENT")) {
+              return false;
+            }
+            throw new CypherOperationError("The Cypher IPC endpoint could not be inspected.");
+          },
+        )
+      ) {
+        throw new CypherOperationError(
+          "A Cypher IPC endpoint already exists. Use Connect IPC for that node.",
+        );
       }
       if (this.#options.preflight) {
         await this.#options.preflight();
@@ -386,6 +384,13 @@ export class CypherNodeManager {
             "Cypher binaries or launch files are missing or not executable. Install this fork with its bundled Cypher files.",
           );
         }
+      }
+      if (this.#env.CYPHER_BROWSER_RELAY_CONFIG) {
+        const { provisionCypherClawRelayConfiguration } =
+          await import("../infra/cypherclaw-distribution.js");
+        await provisionCypherClawRelayConfiguration(pathApi.dirname(paths.rootDir), this.#env, () =>
+          this.#assert(authority),
+        );
       }
       this.#assert(authority);
       this.#logs = [];

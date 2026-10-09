@@ -2,6 +2,10 @@ import path from "node:path";
 import { theme } from "../../../packages/terminal-core/src/theme.js";
 import { resolveStateDir } from "../../config/paths.js";
 import { isBunRuntime } from "../../daemon/runtime-binary.js";
+import {
+  readCypherClawDistribution,
+  resolveCypherClawRelease,
+} from "../../infra/cypherclaw-distribution.js";
 import { createLowDiskSpaceWarning } from "../../infra/disk-space.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { SqliteReadOnlyInspectionContentionError } from "../../infra/sqlite-readonly-worker-protocol.js";
@@ -28,6 +32,7 @@ import {
   resolveNpmLifecyclePolicyGate,
   type ResolvedGlobalInstallTarget,
 } from "../../infra/update-global.js";
+import type { PackageUpdateArtifact } from "../../infra/update-package-artifact.js";
 import { createUpdatePreflightFailure } from "../../infra/update-preflight-details.js";
 import { updateRunStepsFromResultStep } from "../../infra/update-run-step.js";
 import {
@@ -222,6 +227,27 @@ export async function resolveUpdateCommandTarget(
       recordUpdateCommandTarget(opts.run, {
         step: { step: "installation-inspection", status: "in_progress" },
       });
+      const selectedPackageServicePlan =
+        installKind === "package"
+          ? (prepared.servicePlan ??
+            (await resolveManagedServicePackageUpdatePlan({
+              root,
+              pkgOwnership,
+              rebind: prepared.shouldRestart,
+            })))
+          : undefined;
+      if (selectedPackageServicePlan?.rootRedirect) {
+        root = selectedPackageServicePlan.rootRedirect.root;
+      }
+      const distribution =
+        installKind === "package" ? await readCypherClawDistribution(root) : null;
+      if (distribution && requestedChannel && requestedChannel !== "stable") {
+        await refuseUpdate(
+          "unsupported-cypherclaw-channel",
+          "This CypherClaw distribution uses its stable GitHub releases. Use `cypherclaw update` or an exact CypherClaw release with `--tag`.",
+        );
+        return undefined;
+      }
       if (requestedChannel === "extended-stable" && installKind === "git") {
         await refuseUpdate("unsupported_git_channel");
         return undefined;
@@ -264,6 +290,7 @@ export async function resolveUpdateCommandTarget(
       }
 
       const channel =
+        (distribution ? "stable" : undefined) ??
         (opts.sourceUpdate ? DEFAULT_GIT_CHANNEL : requestedChannel) ??
         storedChannel ??
         (installKind === "git"
@@ -280,7 +307,7 @@ export async function resolveUpdateCommandTarget(
       // documented dev contract is a git checkout. Exception: --tag is a one-run
       // package-target override, so it keeps a stored-dev package install on the
       // package path; only an explicitly requested dev channel outranks it.
-      const explicitTag = normalizeTag(opts.tag);
+      let explicitTag = normalizeTag(opts.tag);
       const switchToGit =
         installKind !== "git" &&
         (requestedChannel === "dev" || (channel === "dev" && explicitTag === null));
@@ -327,6 +354,7 @@ export async function resolveUpdateCommandTarget(
       let downgradeRisk = false;
       let fallbackToLatest = false;
       let packageInstallSpec: string | null = null;
+      let packageExpectedArtifact: PackageUpdateArtifact | undefined;
       let packageInstallEnv: NodeJS.ProcessEnv | undefined;
       let packageInstallTarget: ResolvedGlobalInstallTarget | undefined;
       let installedPackageName = DEFAULT_PACKAGE_NAME;
@@ -342,6 +370,7 @@ export async function resolveUpdateCommandTarget(
 
       if (updateInstallKind === "package") {
         const servicePlan =
+          selectedPackageServicePlan ??
           prepared.servicePlan ??
           (await resolveManagedServicePackageUpdatePlan({
             root,
@@ -487,7 +516,23 @@ export async function resolveUpdateCommandTarget(
             env: packageInstallEnv,
           });
         let targetMetadata: Awaited<ReturnType<typeof fetchNpmPackageTargetStatus>> | undefined;
-        if (channel === "extended-stable") {
+        if (
+          distribution &&
+          (!explicitTag || canResolveRegistryVersionForPackageTarget(explicitTag))
+        ) {
+          const release = await resolveCypherClawRelease(explicitTag ?? "latest", timeoutMs);
+          opts.run?.executorFence?.assertCurrent();
+          tag = release.artifact.url;
+          explicitTag = tag;
+          targetVersion = release.manifest.version;
+          packageInstallSpec = tag;
+          packageExpectedArtifact = release.artifact;
+          packageTargetSchemaVersions = release.schemaVersions;
+          packageRuntimeTarget = {
+            version: targetVersion,
+            nodeEngine: release.manifest.package.nodeEngine,
+          };
+        } else if (channel === "extended-stable") {
           const extendedStable = await resolveExtendedStablePackage({
             installKind: updateInstallKind,
             timeoutMs,
@@ -533,11 +578,12 @@ export async function resolveUpdateCommandTarget(
             target: packageInstallSpec,
           });
         downgradeRisk =
-          canResolveRegistryVersionForPackageTarget(tag) &&
+          (packageExpectedArtifact !== undefined ||
+            canResolveRegistryVersionForPackageTarget(tag)) &&
           !fallbackToLatest &&
           currentVersion != null &&
           (targetVersion == null ? tag !== "latest" : cmp != null && cmp > 0);
-        if (targetVersion) {
+        if (targetVersion && !packageExpectedArtifact) {
           // A package-spec override may select a different artifact or a mutable tag.
           if (packageSpec(targetVersion) !== `${DEFAULT_PACKAGE_NAME}@${targetVersion}`) {
             targetMetadata = undefined;
@@ -635,6 +681,7 @@ export async function resolveUpdateCommandTarget(
         downgradeRisk,
         fallbackToLatest,
         packageInstallSpec,
+        packageExpectedArtifact,
         packageInstallEnv,
         packageInstallTarget,
         packageAlreadyCurrent,

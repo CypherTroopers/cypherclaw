@@ -52,19 +52,19 @@ Verify the Cypher node controls, IPC behavior, wallet generation, bundled assets
 
 ## Update a source installation
 
-After a reviewed stable-based fork branch is published, source users update from that branch in the CypherTroopers repository. Verify `origin` and the checked-out branch before using a fast-forward-only pull. With the published branch named `main`:
+Source users update from the reviewed `cypherclaw-stable` branch in the CypherTroopers repository. Verify `origin` and the checked-out branch before using a fast-forward-only pull:
 
 ```sh
 git remote get-url origin
 git status -sb
-git pull --ff-only origin main
+git pull --ff-only origin cypherclaw-stable
 pnpm install --frozen-lockfile
 pnpm build
 ```
 
 `pnpm build` includes the Control UI build. Dependency installation and rebuilding are update-time work; an unchanged configured checkout normally starts with `pnpm openclaw gateway run`. Follow the existing process manager's lifecycle when activating rebuilt code. Changing or restarting an existing live Gateway requires the operator's approval and compatible state.
 
-The inherited `openclaw update` command is not the fork's upstream intake procedure. Its registry paths use the official `openclaw` package, and its channel switches or Git tag activation can replace the fork source. Keep source installation updates on the reviewed fork branch until a fork-specific distribution and update contract is implemented and verified.
+The inherited `openclaw update` command is not the fork's upstream intake procedure. Unmarked source/official package installs retain upstream registry and channel behavior. Keep source installation updates on the reviewed fork branch. Packages produced by the [CypherClaw release builder](CYPHERCLAW_DISTRIBUTION.md) carry distribution metadata: their CLI and Control UI update path selects this fork's stable GitHub Releases, verifies the artifact, and uses the existing package update lifecycle. This marker is added only to the packaged artifact; it does not change the source checkout's update identity.
 
 ## Keep official publication with its owner
 

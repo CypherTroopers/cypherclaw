@@ -147,6 +147,9 @@ if (!isEntryMain) {
   if (earlyProfile.ok && earlyProfile.profile) {
     applyCliProfileEnv({ profile: earlyProfile.profile });
   }
+  const { applyCypherClawDistributionEnvironment } =
+    await import("./infra/cypherclaw-distribution.js");
+  await applyCypherClawDistributionEnvironment(installRoot);
   const startupEnv = { ...process.env };
   const { assertSupportedRuntime, isCurrentRuntimeSupported } =
     await import("./infra/runtime-guard.js");

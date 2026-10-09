@@ -3,6 +3,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { applyCypherClawDistributionEnvironment } from "../infra/cypherclaw-distribution.js";
+import { withTestDir } from "../test-helpers/temp-dir.js";
 import { callCypherIpc, CypherIpcError, type CypherRpcMethod } from "./ipc.js";
 import { CypherNodeManager, type CypherAuthority, type CypherProcess } from "./manager.js";
 
@@ -202,6 +204,64 @@ describe("Cypher node owner", () => {
     });
     expect(rpc).not.toHaveBeenCalled();
     expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("provisions the packaged node relay only on Start and preserves existing or explicit configuration", async () => {
+    await withTestDir({ prefix: "cypherclaw-node-relay-" }, async (home) => {
+      const root = path.join(home, "package");
+      const cypherRoot = path.join(root, "cypher");
+      const source = path.join(cypherRoot, "config", "browser-relay", "common-mine.json");
+      await fs.mkdir(path.dirname(source), { recursive: true });
+      await fs.writeFile(source, '{"socketPath":"auto"}\n');
+      await fs.writeFile(
+        path.join(root, "package.json"),
+        JSON.stringify({
+          name: "openclaw",
+          openclaw: {
+            distribution: {
+              id: "cypherclaw",
+              repository: "CypherTroopers/cypherclaw",
+              channel: "stable",
+              sourceBranch: "cypherclaw-stable",
+              sourceCommit: "a".repeat(40),
+              releaseTag: "cypherclaw-v2026.9.9-aaaaaaaaaaaa",
+            },
+          },
+        }),
+      );
+      const env: NodeJS.ProcessEnv = { HOME: home, OPENCLAW_PROFILE: "cypherclaw" };
+      await applyCypherClawDistributionEnvironment(root, env);
+      for (const [key, value] of Object.entries(env)) {
+        vi.stubEnv(key, value);
+      }
+      const relay = path.join(
+        home,
+        ".openclaw-cypherclaw",
+        "cypher",
+        "browser-relay",
+        "common-mine.json",
+      );
+      const first = fixture({ rootDir: cypherRoot });
+      await first.manager.status();
+      await expect(fs.access(relay)).rejects.toMatchObject({ code: "ENOENT" });
+      await first.manager.start(authority);
+      expect(await fs.readFile(relay, "utf8")).toBe('{"socketPath":"auto"}\n');
+      await first.manager.stop(authority);
+      await fs.writeFile(relay, "operator relay configuration\n");
+      const second = fixture({ rootDir: cypherRoot });
+      await second.manager.start(authority);
+      expect(await fs.readFile(relay, "utf8")).toBe("operator relay configuration\n");
+      await second.manager.stop(authority);
+      await fs.rm(relay);
+      vi.stubEnv("CYPHER_BROWSER_RELAY_CONFIG", path.join(home, "custom-relay.json"));
+      const custom = fixture({ rootDir: cypherRoot });
+      await custom.manager.start(authority);
+      await expect(fs.access(relay)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(custom.launch.mock.calls[0]?.[0].env.CYPHER_BROWSER_RELAY_CONFIG).toBe(
+        path.join(home, "custom-relay.json"),
+      );
+      await custom.manager.stop(authority);
+    });
   });
 
   it("refuses unsupported architectures", async () => {

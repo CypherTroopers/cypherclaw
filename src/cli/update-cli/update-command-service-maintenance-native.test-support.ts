@@ -153,6 +153,7 @@ export async function runNativeMaintenanceUpdate(
     downgradeRisk: false,
     fallbackToLatest: false,
     packageInstallSpec: "/synthetic/candidate.tgz",
+    packageExpectedArtifact: undefined,
     packageInstallEnv: undefined,
     packageInstallTarget: undefined,
     packageAlreadyCurrent: false,

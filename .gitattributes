@@ -1,6 +1,8 @@
 * text=auto eol=lf
 CLAUDE.md -text
 src/gateway/server-methods/CLAUDE.md -text
+# Preserve retained license bytes recorded in cypher/SHA256SUMS.
+cypher/licenses/herumi-mcl-README.md -text
 ui/src/i18n/.i18n/* linguist-generated
 apps/.i18n/** linguist-generated
 apps/android/app/src/main/res/values-*/strings.xml linguist-generated

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { resolveConfigPath } from "../../config/paths.js";
 import { resolveGatewayInstallEntrypoint } from "../../daemon/gateway-entrypoint.js";
+import { readCypherClawDistribution } from "../../infra/cypherclaw-distribution.js";
 import { resolveInstallWorkTimeoutMs } from "../../infra/install-mode-options.js";
 import {
   runGlobalPackageUpdateSteps,
@@ -442,6 +443,7 @@ export type PackageInstallUpdateParams = {
   installKind: "git" | "package" | "unknown";
   tag: string;
   installSpec?: string;
+  expectedArtifact?: import("../../infra/update-package-artifact.js").PackageUpdateArtifact;
   timeoutMs: number;
   /** Null leaves forward work unbounded; omission retains the caller's timeout. */
   workTimeoutMs?: number | null;
@@ -597,6 +599,7 @@ export async function runPackageInstallUpdate(
     });
 
   const before = pkgRoot ? await readPackageUpdateIdentity(pkgRoot) : { version: null };
+  const forkDistribution = await readCypherClawDistribution(pkgRoot || params.root);
   const doctorSettlements: UpdateStepResult[] = [];
 
   const packageUpdate = await runGlobalPackageUpdateSteps({
@@ -608,7 +611,16 @@ export async function runPackageInstallUpdate(
       }),
     },
     validateCandidate: params.validateCandidate,
-    beforeVerifyCandidate: params.beforeVerifyCandidate,
+    beforeVerifyCandidate: forkDistribution
+      ? async (candidateRoot) => {
+          if (!(await readCypherClawDistribution(candidateRoot))) {
+            throw new Error(
+              "The update candidate must preserve the CypherClaw stable distribution identity.",
+            );
+          }
+          await params.beforeVerifyCandidate?.(candidateRoot);
+        }
+      : params.beforeVerifyCandidate,
     resolveLifecycleNodeRunner: params.resolveLifecycleNodeRunner ?? (() => params.nodeRunner),
     beforeActivate: params.beforeActivate,
     assertCurrent: params.assertCurrent,
@@ -617,6 +629,7 @@ export async function runPackageInstallUpdate(
     getActivation: params.getActivation,
     installTarget,
     installSpec,
+    expectedArtifact: params.expectedArtifact,
     packageName,
     packageRoot: pkgRoot,
     // Artifact equality cannot skip a method switch or retained-runtime staging.

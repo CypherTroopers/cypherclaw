@@ -660,6 +660,23 @@ describe("buildNodeServiceEnvironment", () => {
 });
 
 describe("resolveGatewayStateDir", () => {
+  it.each(["linux", "darwin", "win32"] as const)(
+    "retains Cypher data and the private package prefix for %s managed updates",
+    (platform) => {
+      const source = {
+        HOME: "/home/operator",
+        OPENCLAW_PROFILE: "cypherclaw",
+        OPENCLAW_NO_AUTO_UPDATE: "1",
+        NPM_CONFIG_PREFIX: "/home/operator/.cypherclaw",
+        CYPHER_DATADIR: "/home/operator/.openclaw-cypherclaw/cypher/chaindbname",
+        CYPHER_BROWSER_RELAY_CONFIG:
+          "/home/operator/.openclaw-cypherclaw/cypher/browser-relay/common-mine.json",
+        CYPHER_IPC_PATH: "owner-node.ipc",
+      };
+      expect(buildServiceEnvironment({ env: source, port: 18789, platform })).toMatchObject(source);
+    },
+  );
+
   it("uses the default state dir when no overrides are set", () => {
     const env = { HOME: "/Users/test" };
     expect(resolveGatewayStateDir(env)).toBe(path.join("/Users/test", ".openclaw"));

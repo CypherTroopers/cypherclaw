@@ -1,0 +1,373 @@
+#!/usr/bin/env node
+
+import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { create as createTar, extract as extractTar } from "tar";
+import { booleanFlag, parseFlagArgs, stringFlag } from "./lib/arg-utils.runtime.mjs";
+import {
+  CYPHERCLAW_NODE_VERSION as NODE_VERSION,
+  CYPHERCLAW_REPOSITORY as REPOSITORY,
+  CYPHERCLAW_SOURCE_BRANCH as SOURCE_BRANCH,
+  CYPHERCLAW_TARGETS,
+  hashFile,
+  validateCypherClawReleaseManifest,
+  verifyAsset,
+} from "./lib/cypherclaw-contract.mjs";
+import { assertRealOutputRoot } from "./lib/output-root-guard.mjs";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const MANIFEST = "cypherclaw-release.json";
+const PACKAGE = "cypherclaw.tgz";
+const ASSETS = [
+  ["install.sh", "scripts/install-cypherclaw.sh"],
+  ["install.ps1", "scripts/install-cypherclaw.ps1"],
+  ["install-node.sh", "scripts/install-cli.sh"],
+  ["install-node.ps1", "scripts/install.ps1"],
+  ["install-runtime.mjs", "scripts/install-cypherclaw.mjs"],
+  ["cypherclaw-contract.mjs", "scripts/lib/cypherclaw-contract.mjs"],
+];
+const NATIVE_BINARIES = [
+  "cypher-linux-amd64",
+  "cypher-darwin-arm64",
+  "cypher.exe",
+  "libcrypto-3-x64.dll",
+  "libgcc_s_seh-1.dll",
+  "libgmp-10.dll",
+  "libstdc++-6.dll",
+  "libwinpthread-1.dll",
+];
+const NATIVE_MATERIALS = [
+  "BUILDINFO.txt",
+  "cypher-source-60b8164-with-go-dependencies.tar.gz",
+  "licenses/GPL-3.0.txt",
+  "licenses/LGPL-3.0.txt",
+  "provenance/linux-amd64/manifest.txt",
+  "provenance/darwin-arm64/manifest.txt",
+  "provenance/windows-amd64/manifest.txt",
+];
+
+function usage() {
+  return [
+    "Usage: node scripts/build-cypherclaw-release.mjs --source-sha <40-character SHA> --output-dir <directory> [--candidate] [--skip-build]",
+    "       node scripts/build-cypherclaw-release.mjs --check --output-dir <directory>",
+    "",
+    "The default build requires a clean checkout and a commit on cypherclaw-stable.",
+    "--candidate prepares local worktree proof and records it as unpublishable.",
+    "--skip-build is candidate-only and requires existing dist/build-info.json bound to the selected SHA.",
+    "--check verifies the sealed assets and package source identity without rebuilding.",
+  ].join("\n");
+}
+
+async function run(command, args, { capture = false, env = process.env } = {}) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: ROOT,
+      env,
+      stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit",
+    });
+    let output = "";
+    child.stdout?.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolve(output.trim());
+      } else {
+        reject(new Error(`${command} ${args.join(" ")} failed (${code ?? signal})`));
+      }
+    });
+  });
+}
+
+async function describeFile(directory, file) {
+  const filename = path.join(directory, file);
+  const stat = await fs.lstat(filename);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error(`Release asset must be a regular file: ${filename}`);
+  }
+  return { file, ...(await hashFile(filename)) };
+}
+
+async function verifyNativeProvenance(root = ROOT) {
+  const source = path.join(root, "cypher");
+  const ledger = new Map();
+  for (const line of (await fs.readFile(path.join(source, "SHA256SUMS"), "utf8"))
+    .trim()
+    .split(/\r?\n/u)) {
+    const match = /^([a-f0-9]{64}) {2}(.+)$/u.exec(line);
+    if (!match) {
+      throw new Error("Cypher provenance SHA256SUMS is malformed");
+    }
+    const relative = match[2];
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9._+-]*)*$/u.test(relative)) {
+      throw new Error(`Unsafe Cypher provenance path: ${relative}`);
+    }
+    if (ledger.has(relative)) {
+      throw new Error(`Duplicate Cypher provenance path: cypher/${relative}`);
+    }
+    ledger.set(relative, match[1]);
+  }
+  for (const relative of [
+    ...NATIVE_BINARIES.map((filename) => `build/bin/${filename}`),
+    ...NATIVE_MATERIALS,
+  ]) {
+    if (!ledger.has(relative)) {
+      throw new Error(`Cypher provenance SHA256SUMS is missing cypher/${relative}`);
+    }
+  }
+  for (const [relative, expected] of ledger) {
+    if ((await hashFile(path.join(source, relative))).sha256 !== expected) {
+      throw new Error(`Cypher file differs from its retained provenance: cypher/${relative}`);
+    }
+  }
+}
+
+async function readStagedPackage(directory, tarball) {
+  extractTar({ file: tarball, cwd: directory, strict: true, sync: true });
+  const packageRoot = path.join(directory, "package");
+  const packageJson = JSON.parse(await fs.readFile(path.join(packageRoot, "package.json"), "utf8"));
+  const buildInfo = JSON.parse(
+    await fs.readFile(path.join(packageRoot, "dist/build-info.json"), "utf8"),
+  );
+  await fs.access(path.join(packageRoot, "dist/control-ui/index.html"));
+  await fs.access(path.join(packageRoot, "cypher/config/browser-relay/common-mine.json"));
+  await verifyNativeProvenance(packageRoot);
+  return { packageRoot, packageJson, buildInfo };
+}
+
+async function checkRelease(outputDir) {
+  const manifest = validateCypherClawReleaseManifest(
+    JSON.parse(await fs.readFile(path.join(outputDir, MANIFEST), "utf8")),
+  );
+  const entries = [manifest.package, ...manifest.assets];
+  for (const entry of entries) {
+    await verifyAsset(path.join(outputDir, entry.file), entry);
+  }
+  const expectedChecksums = [...entries, await describeFile(outputDir, MANIFEST)]
+    .toSorted((a, b) => a.file.localeCompare(b.file))
+    .map(({ file, sha256 }) => `${sha256}  ${file}\n`)
+    .join("");
+  if ((await fs.readFile(path.join(outputDir, "SHA256SUMS"), "utf8")) !== expectedChecksums) {
+    throw new Error("SHA256SUMS does not bind exactly the manifest and all release assets");
+  }
+  const stage = await fs.mkdtemp(path.join(outputDir, ".check-package-"));
+  try {
+    const { packageJson, buildInfo } = await readStagedPackage(
+      stage,
+      path.join(outputDir, PACKAGE),
+    );
+    const distribution = packageJson.openclaw?.distribution;
+    if (
+      packageJson.name !== manifest.package.name ||
+      packageJson.version !== manifest.version ||
+      packageJson.engines?.node !== manifest.package.nodeEngine ||
+      packageJson.openclaw?.schemaVersions?.state !== manifest.package.schemaVersions.state ||
+      packageJson.openclaw?.schemaVersions?.agent !== manifest.package.schemaVersions.agent ||
+      buildInfo.commit !== manifest.sourceCommit ||
+      buildInfo.version !== manifest.version ||
+      distribution?.id !== "cypherclaw" ||
+      distribution.repository !== manifest.repository ||
+      distribution.channel !== manifest.channel ||
+      distribution.sourceBranch !== manifest.sourceBranch ||
+      distribution.sourceCommit !== manifest.sourceCommit ||
+      distribution.releaseTag !== manifest.releaseTag
+    ) {
+      throw new Error("Packed package, build identity, and release manifest disagree");
+    }
+  } finally {
+    await fs.rm(stage, { recursive: true, force: true });
+  }
+  console.log(`Verified ${manifest.releaseTag}: ${manifest.sourceCommit}`);
+  return manifest;
+}
+
+async function main() {
+  const options = parseFlagArgs(
+    process.argv.slice(2),
+    { candidate: false, check: false, help: false, outputDir: "", skipBuild: false, sourceSha: "" },
+    [
+      booleanFlag("--candidate", "candidate"),
+      booleanFlag("--check", "check"),
+      booleanFlag("--help", "help"),
+      booleanFlag("--skip-build", "skipBuild"),
+      stringFlag("--output-dir", "outputDir"),
+      stringFlag("--source-sha", "sourceSha"),
+    ],
+  );
+  if (options.help) {
+    console.log(usage());
+    return;
+  }
+  if (!options.outputDir) {
+    throw new Error(usage());
+  }
+  const outputDir = path.resolve(options.outputDir);
+  assertRealOutputRoot(outputDir);
+  if (options.check) {
+    if (options.candidate || options.skipBuild || options.sourceSha) {
+      throw new Error("--check accepts only --output-dir");
+    }
+    await checkRelease(outputDir);
+    return;
+  }
+  if (options.skipBuild && !options.candidate) {
+    throw new Error(
+      "--skip-build requires --candidate; production release bytes must be rebuilt from the clean selected SHA",
+    );
+  }
+  if (!/^[a-f0-9]{40}$/u.test(options.sourceSha)) {
+    throw new Error("--source-sha must be a full lowercase 40-character Git commit SHA");
+  }
+  const sourceCommit = await run("git", ["rev-parse", "HEAD"], { capture: true });
+  if (sourceCommit !== options.sourceSha) {
+    throw new Error("The selected source SHA is not the current checkout HEAD");
+  }
+  const sourceDirty = Boolean(
+    await run("git", ["status", "--porcelain", "--untracked-files=normal"], { capture: true }),
+  );
+  if (!options.candidate) {
+    if (sourceDirty) {
+      throw new Error(
+        "Release preparation requires a clean checkout; use --candidate for local proof",
+      );
+    }
+    await run("git", ["merge-base", "--is-ancestor", sourceCommit, `origin/${SOURCE_BRANCH}`]);
+  }
+  await verifyNativeProvenance();
+  await fs.mkdir(outputDir, { recursive: true });
+  if ((await fs.readdir(outputDir)).length) {
+    throw new Error("Use an empty output directory; existing release artifacts are preserved");
+  }
+  const sourcePackage = JSON.parse(await fs.readFile(path.join(ROOT, "package.json"), "utf8"));
+  const version = sourcePackage.version;
+  const releaseTag = `cypherclaw-v${version}-${sourceCommit.slice(0, 12)}`;
+  const commitTimestamp = await run("git", ["show", "-s", "--format=%cI", sourceCommit], {
+    capture: true,
+  });
+  const env = {
+    ...process.env,
+    GIT_COMMIT: sourceCommit,
+    OPENCLAW_BUILD_TIMESTAMP: new Date(commitTimestamp).toISOString(),
+    OPENCLAW_CONTROL_UI_RELEASE_BUILD: "1",
+    // Packing this native-asset bundle exceeded the upstream five-minute budget
+    // while npm was still computing. Keep the canonical packer's override.
+    OPENCLAW_DOCKER_PACKAGE_PACK_TIMEOUT_MS:
+      process.env.OPENCLAW_DOCKER_PACKAGE_PACK_TIMEOUT_MS ?? String(30 * 60 * 1000),
+  };
+  if (options.skipBuild) {
+    const previousBuild = JSON.parse(
+      await fs.readFile(path.join(ROOT, "dist/build-info.json"), "utf8"),
+    );
+    if (previousBuild.commit !== sourceCommit || previousBuild.version !== version) {
+      throw new Error("Existing build is not bound to the selected source SHA and version");
+    }
+  }
+  await run(
+    process.execPath,
+    [
+      "scripts/package-openclaw-for-docker.mjs",
+      "--output-dir",
+      outputDir,
+      "--output-name",
+      PACKAGE,
+      ...(options.skipBuild ? ["--skip-build"] : []),
+    ],
+    { env },
+  );
+  const stage = await fs.mkdtemp(path.join(outputDir, ".stage-package-"));
+  try {
+    const { packageRoot, packageJson, buildInfo } = await readStagedPackage(
+      stage,
+      path.join(outputDir, PACKAGE),
+    );
+    if (buildInfo.commit !== sourceCommit || buildInfo.version !== version) {
+      throw new Error("Package build metadata does not match the selected source SHA and version");
+    }
+    packageJson.openclaw.distribution = {
+      id: "cypherclaw",
+      repository: REPOSITORY,
+      channel: "stable",
+      sourceBranch: SOURCE_BRANCH,
+      sourceCommit,
+      releaseTag,
+    };
+    await fs.writeFile(
+      path.join(packageRoot, "package.json"),
+      `${JSON.stringify(packageJson, null, 2)}\n`,
+    );
+    createTar(
+      { cwd: stage, file: path.join(outputDir, PACKAGE), gzip: true, portable: true, sync: true },
+      ["package"],
+    );
+  } finally {
+    await fs.rm(stage, { recursive: true, force: true });
+  }
+  await run(process.execPath, [
+    "scripts/check-openclaw-package-tarball.mjs",
+    "--require-bundled-workspace-deps",
+    path.join(outputDir, PACKAGE),
+  ]);
+  const assets = [];
+  for (const [destination, source] of ASSETS) {
+    await fs.copyFile(path.join(ROOT, source), path.join(outputDir, destination));
+    assets.push(await describeFile(outputDir, destination));
+  }
+  if (!options.candidate) {
+    if (
+      (await run("git", ["rev-parse", "HEAD"], { capture: true })) !== sourceCommit ||
+      (await run("git", ["status", "--porcelain", "--untracked-files=normal"], { capture: true }))
+    ) {
+      throw new Error(
+        "The source checkout changed during release preparation; retain the candidate and rebuild from a clean selected SHA",
+      );
+    }
+  }
+  const manifest = {
+    schemaVersion: 1,
+    repository: REPOSITORY,
+    channel: "stable",
+    sourceBranch: SOURCE_BRANCH,
+    sourceCommit,
+    version,
+    releaseTag,
+    nodeVersion: NODE_VERSION,
+    package: {
+      ...(await describeFile(outputDir, PACKAGE)),
+      name: "openclaw",
+      nodeEngine: sourcePackage.engines.node,
+      schemaVersions: sourcePackage.openclaw.schemaVersions,
+    },
+    assets,
+    supportedTargets: [...CYPHERCLAW_TARGETS],
+    publication: {
+      ready: !options.candidate,
+      limitations: options.candidate
+        ? ["Local candidate proof; worktree bytes are not an immutable reviewed release commit."]
+        : [],
+    },
+  };
+  await fs.writeFile(path.join(outputDir, MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
+  const checksums = [manifest.package, ...assets, await describeFile(outputDir, MANIFEST)]
+    .toSorted((a, b) => a.file.localeCompare(b.file))
+    .map(({ file, sha256 }) => `${sha256}  ${file}\n`)
+    .join("");
+  await fs.writeFile(path.join(outputDir, "SHA256SUMS"), checksums);
+  await checkRelease(outputDir);
+  console.log(
+    `Prepared ${outputDir}; ${
+      manifest.publication.ready
+        ? "ready for publication."
+        : "local candidate remains unpublishable."
+    }`,
+  );
+}
+
+try {
+  await main();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+}

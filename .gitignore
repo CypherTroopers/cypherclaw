@@ -118,6 +118,7 @@ USER.md
 !extensions/oc-path/src/oc-path/tests/fixtures/real/USER.md
 *.tgz
 *.tar.gz
+!cypher/cypher-source-60b8164-with-go-dependencies.tar.gz
 *.zip
 .idea
 .vscode/

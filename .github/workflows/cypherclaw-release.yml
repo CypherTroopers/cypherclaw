@@ -1,0 +1,132 @@
+name: CypherClaw Release
+run-name: CypherClaw stable ${{ inputs.source_sha }} ${{ inputs.publish && 'publish' || 'prepare' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Reviewed full 40-character commit SHA on cypherclaw-stable
+        required: true
+        type: string
+      publish:
+        description: Publish the prepared release only if its manifest has no publication blockers
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cypherclaw-release-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'CypherTroopers/cypherclaw'
+    runs-on: ubuntu-24.04
+    outputs:
+      release_tag: ${{ steps.identity.outputs.release_tag }}
+      publication_ready: ${{ steps.identity.outputs.publication_ready }}
+    steps:
+      - name: Validate source identity
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'A full lowercase source SHA is required.' >&2; exit 1; }
+
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pinned package toolchain
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: "24.21.0"
+          install-bun: "true"
+          frozen-lockfile: "true"
+
+      - name: Build and seal release assets
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: node scripts/build-cypherclaw-release.mjs --source-sha "$SOURCE_SHA" --output-dir .artifacts/cypherclaw-release
+
+      - name: Record release identity
+        id: identity
+        run: |
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const manifest = JSON.parse(fs.readFileSync('.artifacts/cypherclaw-release/cypherclaw-release.json', 'utf8'));
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `release_tag=${manifest.releaseTag}\npublication_ready=${manifest.publication.ready}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Prepared ${manifest.releaseTag} from ${manifest.sourceCommit}.\n\n${manifest.publication.limitations.map((entry) => `- ${entry}`).join('\n')}\n`);
+          NODE
+
+      - name: Upload prepared release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cypherclaw-release-${{ inputs.source_sha }}
+          path: .artifacts/cypherclaw-release/*
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: prepare
+    if: github.repository == 'CypherTroopers/cypherclaw' && inputs.publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Reject publication blockers
+        env:
+          PUBLICATION_READY: ${{ needs.prepare.outputs.publication_ready }}
+        run: |
+          if [[ "$PUBLICATION_READY" != true ]]; then
+            echo 'The prepared manifest records unresolved publication blockers. The preparation artifact remains available; publication was refused.' >&2
+            exit 1
+          fi
+
+      - name: Download exact prepared assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cypherclaw-release-${{ inputs.source_sha }}
+          path: release
+
+      - name: Verify sealed bytes
+        working-directory: release
+        run: sha256sum --check SHA256SUMS
+
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          tag_commit() {
+            local refs direct peeled
+            refs="$(git ls-remote --tags https://github.com/CypherTroopers/cypherclaw.git \
+              "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+            direct="$(awk -v ref="refs/tags/$RELEASE_TAG" '$2 == ref { print $1 }' <<< "$refs")"
+            peeled="$(awk -v ref="refs/tags/$RELEASE_TAG^{}" '$2 == ref { print $1 }' <<< "$refs")"
+            printf '%s' "${peeled:-$direct}"
+          }
+          selected_tag_commit="$(tag_commit)"
+          if [[ -n "$selected_tag_commit" && "$selected_tag_commit" != "$SOURCE_SHA" ]]; then
+            echo "The existing release tag points to $selected_tag_commit instead of the selected $SOURCE_SHA. Publication was refused." >&2
+            exit 1
+          fi
+          if [[ -z "$selected_tag_commit" ]]; then
+            # Creating the exact ref first gives release creation a checked tag.
+            # GitHub refuses a concurrent creator; uncertain writes are preserved.
+            gh api --method POST repos/CypherTroopers/cypherclaw/git/refs \
+              --raw-field "ref=refs/tags/$RELEASE_TAG" --raw-field "sha=$SOURCE_SHA" >/dev/null
+          fi
+          [[ "$(tag_commit)" == "$SOURCE_SHA" ]] || { echo 'Cannot verify the selected tag before publication.' >&2; exit 1; }
+          gh release create "$RELEASE_TAG" release/* \
+            --repo CypherTroopers/cypherclaw --verify-tag --latest \
+            --title "CypherClaw $RELEASE_TAG" \
+            --notes "Built from cypherclaw-stable commit $SOURCE_SHA. SHA256SUMS binds the installer, runtime, manifest, and package assets."
+          [[ "$(tag_commit)" == "$SOURCE_SHA" ]] || { echo 'The published release tag changed; preserve the release for investigation.' >&2; exit 1; }

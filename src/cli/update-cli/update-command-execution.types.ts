@@ -32,6 +32,7 @@ export type MutableUpdateExecutionParams = {
   shouldRestart: boolean;
   devTarget?: DevUpdateTarget;
   packageInstallSpec: string | null;
+  packageExpectedArtifact?: import("../../infra/update-package-artifact.js").PackageUpdateArtifact;
   packageInstallEnv?: NodeJS.ProcessEnv;
   packageInstallTarget?: ResolvedGlobalInstallTarget;
   stagedPackage?: StagedPackageInstallUpdate;

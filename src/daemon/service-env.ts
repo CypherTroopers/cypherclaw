@@ -464,6 +464,10 @@ function buildCommonServiceEnvironment(
     NODE_USE_SYSTEM_CA: startupTlsEnv.NODE_USE_SYSTEM_CA,
     OPENCLAW_STATE_DIR: stateDir,
     OPENCLAW_CONFIG_PATH: configPath,
+    OPENCLAW_NO_AUTO_UPDATE: env.OPENCLAW_NO_AUTO_UPDATE,
+    NPM_CONFIG_PREFIX: env.NPM_CONFIG_PREFIX,
+    npm_config_prefix: env.npm_config_prefix,
+    ...Object.fromEntries(Object.entries(env).filter(([key]) => /^CYPHER_[A-Z0-9_]+$/.test(key))),
     ...readServiceProxyEnvironment(env),
     ...(minimalPath ? { PATH: minimalPath } : {}),
   };

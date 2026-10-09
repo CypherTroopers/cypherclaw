@@ -328,6 +328,45 @@ it("validates a matching explicit artifact when switching from Git to a package 
   });
 });
 
+it("refuses a local upstream artifact before admitting a fork package replacement", async () => {
+  await withTestDir({ prefix: "cypherclaw-local-artifact-" }, async (base) => {
+    const { params, expectOriginalInstallation } = await createPackageInstallFixture(base, "2.0.0");
+    await fs.writeFile(
+      path.join(params.root, "package.json"),
+      JSON.stringify({
+        name: "openclaw",
+        version: "1.0.0",
+        openclaw: {
+          distribution: {
+            id: "cypherclaw",
+            repository: "CypherTroopers/cypherclaw",
+            channel: "stable",
+            sourceBranch: "cypherclaw-stable",
+            sourceCommit: "a".repeat(40),
+            releaseTag: "cypherclaw-v1.0.0-aaaaaaaaaaaa",
+          },
+        },
+      }),
+    );
+    const validateCandidate = vi.fn(async () => []);
+    const beforeActivate = vi.fn(async () => {});
+    const result = await runPackageInstallUpdate({
+      ...params,
+      tag: "file:/tmp/local-upstream.tgz",
+      validateCandidate,
+      beforeActivate,
+      onTransaction: vi.fn(),
+    });
+    expect(result.status).toBe("error");
+    expect(result.failedStep?.stderrTail).toContain(
+      "preserve the CypherClaw stable distribution identity",
+    );
+    expect(validateCandidate).not.toHaveBeenCalled();
+    expect(beforeActivate).not.toHaveBeenCalled();
+    await expectOriginalInstallation();
+  });
+});
+
 it("admits a matching staged artifact without retaining or replacing the running package", async () => {
   await withTestDir({ prefix: "update-admitted-noop-" }, async (base) => {
     const {

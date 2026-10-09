@@ -3,6 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import type { PackageUpdateStepRunner } from "./package-update-lifecycle.js";
 import type { ResolvedGlobalInstallTarget } from "./update-global.js";
+import {
+  downloadPackageUpdateArtifact,
+  type PackageUpdateArtifact,
+} from "./update-package-artifact.js";
 import { isFailedUpdateStep } from "./update-run-step.js";
 import type { UpdateStepResult } from "./update-step-result.js";
 
@@ -80,6 +84,7 @@ export async function prepareNpmGitSourceInstallSpec(params: {
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   installCwd?: string;
+  expectedArtifact?: PackageUpdateArtifact;
 }): Promise<PreparedNpmInstallSpec> {
   const result: PreparedNpmInstallSpec = {
     installSpec: params.installSpec,
@@ -88,6 +93,35 @@ export async function prepareNpmGitSourceInstallSpec(params: {
     steps: [],
     failedStep: null,
   };
+  if (params.expectedArtifact) {
+    const startedAt = Date.now();
+    // openclaw-temp-dir: allow artifact cleanup belongs to the package update stage.
+    const packDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-update-artifact-"));
+    result.packDir = packDir;
+    const artifactPath = path.join(packDir, "package.tgz");
+    const step: UpdateStepResult = {
+      name: "package-artifact-verification",
+      command: `verify SHA-256 ${params.expectedArtifact.url}`,
+      cwd: packDir,
+      durationMs: 0,
+      exitCode: 0,
+    };
+    try {
+      if (params.installSpec !== params.expectedArtifact.url) {
+        throw new Error("Package target differs from its verified release artifact.");
+      }
+      await downloadPackageUpdateArtifact(params.expectedArtifact, artifactPath, params.timeoutMs);
+      result.installSpec = artifactPath;
+      result.installCwd = packDir;
+    } catch (error) {
+      step.exitCode = 1;
+      step.stderrTail = error instanceof Error ? error.message : String(error);
+      result.failedStep = step;
+    }
+    step.durationMs = Date.now() - startedAt;
+    result.steps.push(step);
+    return result;
+  }
   if (
     params.installTarget.manager !== "npm" ||
     !isNpmGitSourceInstallSpec(params.installSpec, params.packageName)

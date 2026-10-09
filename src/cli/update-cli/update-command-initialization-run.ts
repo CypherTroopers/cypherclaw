@@ -128,6 +128,7 @@ export async function initializeAndRunUpdate(
                 installKind: prepared.installKind,
                 tag: target.tag,
                 installSpec: target.packageInstallSpec ?? undefined,
+                expectedArtifact: target.packageExpectedArtifact,
                 timeoutMs: prepared.timeoutMs ?? DEFAULT_UPDATE_STEP_TIMEOUT_MS,
                 workTimeoutMs: prepared.timeoutMs ?? null,
                 startedAt: prepared.startedAt,

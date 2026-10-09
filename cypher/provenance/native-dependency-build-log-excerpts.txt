@@ -1,0 +1,18 @@
+Source: https://github.com/CypherTroopers/cypher/actions/runs/37360945224
+Excerpts retaining exact native dependency versions from the successful source build.
+
+1_Build Windows amd64.txt
+2026-10-05T19:07:11.3031838Z  mingw-w64-x86_64-openssl-3.6.4-1-any downloading...
+2026-10-05T19:07:11.3036534Z  mingw-w64-x86_64-libstdc++-16.2.0-4-any downloading...
+2026-10-05T19:07:11.3037656Z  mingw-w64-x86_64-gmp-6.3.0-2-any downloading...
+2026-10-05T19:07:11.3044165Z  mingw-w64-x86_64-libgcc-16.2.0-4-any downloading...
+2026-10-05T19:07:11.3048304Z  mingw-w64-x86_64-libwinpthread-14.0.0.r426.g4564ee4b5-1-any downloading...
+
+2_Build Linux amd64.txt
+2026-10-05T19:06:54.0545131Z libgmp-dev is already the newest version (2:6.3.0+dfsg-2ubuntu6.1).
+2026-10-05T19:06:54.1484904Z Get:2 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libssl-dev amd64 3.0.13-0ubuntu3.16 [2409 kB]
+
+3_Build macOS arm64.txt
+2026-10-05T19:07:01.3092950Z Warning: openssl@3 3.6.4 is already installed and up-to-date.
+2026-10-05T19:07:01.3150730Z Warning: gmp 6.3.0 is already installed and up-to-date.
+

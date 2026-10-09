@@ -64,6 +64,7 @@ import {
   readPackageManagerProbeValue,
   resolveNpmGlobalPrefixLayoutFromGlobalRoot,
 } from "./update-npm-prefix.js";
+import type { PackageUpdateArtifact } from "./update-package-artifact.js";
 import type { UpdateRecovery } from "./update-recovery.js";
 import { isFailedUpdateStep } from "./update-run-step.js";
 import type { UpdateStepResult } from "./update-step-result.js";
@@ -152,6 +153,7 @@ async function prepareStagedPackageInstall(
 export async function runGlobalPackageUpdateSteps(params: {
   installTarget: ResolvedGlobalInstallTarget;
   installSpec: string;
+  expectedArtifact?: PackageUpdateArtifact;
   packageName: string;
   packageRoot?: string | null;
   requirePackageReplacement?: boolean;
@@ -407,6 +409,7 @@ export async function runGlobalPackageUpdateSteps(params: {
       timeoutMs: workTimeoutMs,
       env: params.env,
       installCwd: params.installCwd,
+      expectedArtifact: params.expectedArtifact,
     });
     packedInstallDir = preparedSpec.packDir;
     steps.push(...preparedSpec.steps);
