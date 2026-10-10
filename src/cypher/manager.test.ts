@@ -5,113 +5,21 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyCypherClawDistributionEnvironment } from "../infra/cypherclaw-distribution.js";
 import { withTestDir } from "../test-helpers/temp-dir.js";
-import { callCypherIpc, CypherIpcError, type CypherRpcMethod } from "./ipc.js";
-import { CypherNodeManager, type CypherAuthority, type CypherProcess } from "./manager.js";
+import { CypherIpcError } from "./ipc.js";
+import { A, B, authority, deferred, createCypherManagerFixtures } from "./manager.test-support.js";
 
 const childProcessMock = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock("node:child_process", () => ({ spawn: childProcessMock.spawn }));
 
-const A = `0x${"1".repeat(40)}`;
-const B = `0x${"2".repeat(40)}`;
-const GENESIS = `0x${"a".repeat(64)}`;
-const authority: CypherAuthority = { assertCurrent: () => {} };
-type Options = NonNullable<ConstructorParameters<typeof CypherNodeManager>[0]>;
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
-
-class FakeProcess implements CypherProcess {
-  pid = 123;
-  exited = false;
-  dataListener: (data: string) => void = () => {};
-  exitListener: (code: number | null) => void = () => {};
-  interrupt = vi.fn(() => {
-    this.exit(0);
-  });
-  onData(listener: (data: string) => void) {
-    this.dataListener = listener;
-  }
-  onExit(listener: (code: number | null) => void) {
-    this.exitListener = listener;
-  }
-  exit(code: number | null) {
-    this.exited = true;
-    this.exitListener(code);
-  }
-}
-
 describe("Cypher node owner", () => {
-  const fixtures: Array<{ manager: CypherNodeManager; process: FakeProcess }> = [];
-
-  function fixture(options: Options = {}) {
-    const process = new FakeProcess();
-    const values: Partial<Record<CypherRpcMethod, unknown>> = {
-      web3_clientVersion: "Cypher/test",
-      eth_chainId: "0x9a24df",
-      eth_blockNumber: "0x10",
-      net_peerCount: "0x2",
-      eth_mining: false,
-      eth_hashrate: "0x0",
-      eth_accounts: [A],
-      eth_coinbase: A,
-      miner_start: "Mining started",
-      miner_setEtherbase: true,
-      personal_newAccount: A,
-      personal_unlockAccount: true,
-      personal_lockAccount: true,
-      personal_getCommonRPCRewardAddress: {
-        configured: true,
-        signer: A,
-        rewardRecipient: B,
-        chainId: "0x9a24df",
-        genesisHash: GENESIS,
-      },
-    };
-    const rpc = vi.fn<typeof callCypherIpc>();
-    rpc.mockImplementation(async (_endpoint, method, _params, callOptions) => {
-      callOptions?.assertCurrent?.();
-      if (options.platform === "win32" && process.exited) {
-        throw new CypherIpcError("IPC endpoint absent.", "ENOENT");
-      }
-      return values[method];
-    });
-    const launch = vi.fn<NonNullable<Options["launch"]>>(async (launchOptions) => {
-      launchOptions.assertCurrent();
-      return process;
-    });
-    const preflight = vi.fn(async () => {});
-    const endpointExists = vi.fn(async () => false);
-    const manager = new CypherNodeManager({
-      platform: "linux",
-      arch: "x64",
-      rootDir: "/bundled/cypher",
-      rpc,
-      launch,
-      preflight,
-      endpointExists,
-      stopTimeoutMs: 50,
-      ...options,
-    });
-    fixtures.push({ manager, process });
-    return { manager, process, rpc, values, launch, preflight, endpointExists };
-  }
+  const { fixture, cleanup } = createCypherManagerFixtures();
 
   beforeEach(() => {
     vi.useFakeTimers();
     vi.stubEnv("CYPHER_DATADIR", "/state/chaindbname");
   });
   afterEach(async () => {
-    for (const entry of fixtures.splice(0)) {
-      if (!entry.process.exited) {
-        entry.process.exit(0);
-      }
-      await entry.manager.close().catch(() => {});
-    }
+    await cleanup();
     vi.restoreAllMocks();
     childProcessMock.spawn.mockReset();
     vi.unstubAllEnvs();
@@ -266,7 +174,7 @@ describe("Cypher node owner", () => {
 
   it("refuses unsupported architectures", async () => {
     const { manager, launch } = fixture({ platform: "darwin", arch: "x64" });
-    await expect(manager.start(authority)).rejects.toThrow("no bundled Cypher binary");
+    await expect(manager.start(authority)).rejects.toThrow("no bundled ColossusX binary");
     expect(launch).not.toHaveBeenCalled();
   });
 

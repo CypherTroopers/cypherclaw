@@ -24,6 +24,10 @@ import { resolveCronJobsStorePath } from "../cron/store/paths.js";
 import { readActiveCronRunReceiptOwnersInDatabase } from "../cron/store/run-receipt-read.js";
 import { observeCronRunRecoveryInDatabase } from "../cron/store/run-recovery.read.js";
 import {
+  readCypherTransferInDatabase,
+  listCypherTransfersInDatabase,
+} from "../cypher/transfer-store.kernel.js";
+import {
   readGitHubPublicationRequest,
   readKnownGitHubPublicationPullRequestUrlsInDatabase,
 } from "../gateway/github-publication-store.js";
@@ -556,6 +560,18 @@ serveOwnedWorkerTasks(
               return {
                 type: command.type,
                 values: selectUserPreferenceValues(db, command.profileIds, command.key),
+              };
+            }
+            if (command.type === "cypherTransfers.get") {
+              return {
+                type: command.type,
+                record: readCypherTransferInDatabase(db, command.requestId),
+              };
+            }
+            if (command.type === "cypherTransfers.list") {
+              return {
+                type: command.type,
+                records: listCypherTransfersInDatabase(db, command.options),
               };
             }
             if (command.type === "userProfiles.email.resolve") {

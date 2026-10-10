@@ -27,6 +27,7 @@ import type {
   ConfigHealthEntryBasis,
 } from "../config/io.health-state.types.js";
 import type { CronStateWorkerOperations } from "../cron/store/worker-contract.js";
+import type { CypherTransferWriteOperations } from "../cypher/transfer-store.contract.js";
 import type { FleetRegistryWriteOperations } from "../fleet/registry.types.js";
 import type {
   RepositoryGitHubPublicationPendingQuery,
@@ -110,6 +111,7 @@ export type OpenClawStateWorkerOpenPreparation = { type: "deviceIdentity"; ident
 
 /** Commands share one physical shared-state actor; bindings belong to commands, not open input. */
 export type OpenClawStateWorkerOperations = UpdateRunReconciliationOperations &
+  CypherTransferWriteOperations &
   CaptureWorkerOperations &
   TuiLastSessionWorkerOperations &
   AcpSessionWriteOperations &

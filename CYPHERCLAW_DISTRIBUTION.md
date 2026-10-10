@@ -2,7 +2,7 @@
 
 CypherClaw uses GitHub Releases for a prebuilt package containing the CLI, Gateway, Control UI, and bundled Cypher assets. Maintainers build a reviewed commit from `cypherclaw-stable`; users install the sealed package and complete the existing OpenClaw onboarding wizard. The technical package name remains `openclaw`, with a `cypherclaw` launcher selecting an isolated profile.
 
-**Publication status:** production preparation requires a clean reviewed commit, verifies the bundled Cypher release materials, and requires matching finality-patch provenance for all three native targets before recording `publication.ready=true`. Local candidates record `publication.ready=false` and can retain older binaries with explicit limitations. The public commands install the latest published release; preparing these changes does not update that release.
+**Publication status:** production preparation requires a clean reviewed commit, verifies the bundled Cypher release materials, and requires matching official build provenance and the transaction-finality IPC API for all three native targets before recording `publication.ready=true`. Local candidates record `publication.ready=false` and can retain older binaries with explicit limitations. The public commands install the latest published release; preparing these changes does not update that release.
 
 ## Install a published release
 
@@ -34,6 +34,8 @@ If setup was skipped or the install ran without a terminal, run `cypherclaw onbo
 
 The default package/runtime directory is `~/.cypherclaw`. The launcher defaults to `OPENCLAW_PROFILE=cypherclaw`, so configuration and state use `~/.openclaw-cypherclaw`. Bundled-release chain data lives beneath that state's `cypher/chaindbname`; its first relay configuration is copied into `cypher/browser-relay/common-mine.json`. Updates preserve these paths. Explicit `OPENCLAW_PROFILE`, `OPENCLAW_STATE_DIR`, `CYPHER_DATADIR`, and `CYPHER_BROWSER_RELAY_CONFIG` values retain their existing meaning. Changing a selected data directory does not migrate an older installation's data.
 
+The ColossusX page separates Overview, Node, Wallets, Send, Mining, and Explorer, with a short introduction in each tab. Wallets displays exact CLX balances and node-reported lock state. Send requires review before signing and distinguishes acceptance, receipt inclusion, and successful FHS finality. Explorer opens the actual site in another tab only for matching chain ID and genesis; explorer indexing can lag behind the node's result. See the [node UI guide in the README](README.md#install-cypherclaw-and-use-the-cypher-node).
+
 The installer adds the launcher directory to Bash/Zsh startup configuration or Windows User PATH. It prints the absolute launcher path if it cannot save that change. It does not require a system-wide npm prefix.
 
 ## Update the installed package
@@ -43,6 +45,8 @@ cypherclaw update
 ```
 
 The CLI and Control UI use the same existing package updater. Fork metadata directs resolution to this repository's stable GitHub Releases. The selected manifest supplies package SHA-256, byte length, Node engines, and database schema requirements before the updater stages the package. Existing admission, backups, Doctor, activation, service recovery, and rollback remain with that updater. Official npm update notifications and automatic npm updates are disabled for this marked distribution.
+
+The first UI send creates its feature table in the profile's existing `state/openclaw.sqlite`. Minimal transfer metadata and the original hash survive reloads and restarts without automatic expiration; passwords, private keys, and signed raw transactions are never retained. Recovery only queries the original hash. This additive table uses the existing worker, first-use schema, and backup owners; older software ignores it. Keep chain data and keystore paths unchanged during upgrade or rollback. An older native node lacking `eth_getTransactionFinality` remains usable but shows confirmation as unavailable rather than reporting receipt-only completion.
 
 An immutable release can be selected with `cypherclaw update --tag cypherclaw-v<version>-<commit-prefix>`. Re-running the installer also delegates an existing installation to the package updater. Other upstream release channels are unavailable for this distribution. Source checkouts retain their separate [stable intake and update procedure](CYPHERCLAW_UPSTREAM.md).
 

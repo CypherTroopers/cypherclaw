@@ -41,6 +41,7 @@ import {
   isCronStateWorkerCommand,
   prepareCronStateWorkerCommand,
 } from "../cron/store/dispatch.worker.js";
+import { executeCypherTransferCommand } from "../cypher/transfer-store.worker.js";
 import { executeFleetRegistryCommand } from "../fleet/registry.worker.js";
 import { readPendingRepositoryGitHubPublicationInDatabase } from "../gateway/github-repository-publication.kernel.js";
 import {
@@ -182,6 +183,9 @@ export function executeSharedStateCommand(
     path: context.databasePath,
     env: getSqliteWorkerStateContext().environment,
   });
+  if (command.type === "cypherTransfers.insert" || command.type === "cypherTransfers.update") {
+    return executeCypherTransferCommand(command, { ...stateOptions(), database: open() });
+  }
   if (isMcpOAuthWorkerCommand(command)) {
     return executeMcpOAuthWorkerCommand(open(), command);
   }

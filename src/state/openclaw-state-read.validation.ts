@@ -24,9 +24,22 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
     typeof environment.OPENCLAW_STATE_DIR === "string" &&
     (environment.OPENCLAW_SUPERVISOR_MODE === undefined ||
       environment.OPENCLAW_SUPERVISOR_MODE === "external") &&
-    ((input.command.type === "deliveryQueue.outbound" &&
-      (input.command.id === undefined || typeof input.command.id === "string") &&
-      (input.command.mode === "pending" || input.command.mode === "unfinished")) ||
+    ((input.command.type === "cypherTransfers.get" &&
+      typeof input.command.requestId === "string") ||
+      (input.command.type === "cypherTransfers.list" &&
+        isRecord(input.command.options) &&
+        (input.command.options.nodeKey === undefined ||
+          typeof input.command.options.nodeKey === "string") &&
+        (input.command.options.pendingOnly === undefined ||
+          typeof input.command.options.pendingOnly === "boolean") &&
+        (input.command.options.limit === undefined ||
+          (typeof input.command.options.limit === "number" &&
+            Number.isInteger(input.command.options.limit) &&
+            input.command.options.limit >= 1 &&
+            input.command.options.limit <= 100))) ||
+      (input.command.type === "deliveryQueue.outbound" &&
+        (input.command.id === undefined || typeof input.command.id === "string") &&
+        (input.command.mode === "pending" || input.command.mode === "unfinished")) ||
       input.command.type === "acpSessions.list" ||
       (input.command.type === "acpSessions.metadata" &&
         Array.isArray(input.command.entries) &&

@@ -23,6 +23,10 @@ const mocks = vi.hoisted(() => ({
   lockAccount: vi.fn(),
   getReward: vi.fn(),
   setReward: vi.fn(),
+  wallets: vi.fn(),
+  transfers: vi.fn(),
+  prepareTransfer: vi.fn(),
+  sendTransfer: vi.fn(),
 }));
 
 vi.mock("./session-mutation-guards.js", () => ({
@@ -51,6 +55,10 @@ vi.mock("../../cypher/manager.js", async (original) => {
       lockAccount = mocks.lockAccount;
       getReward = mocks.getReward;
       setReward = mocks.setReward;
+      wallets = mocks.wallets;
+      transfers = mocks.transfers;
+      prepareTransfer = mocks.prepareTransfer;
+      sendTransfer = mocks.sendTransfer;
     },
   };
 });
@@ -98,6 +106,13 @@ describe("Cypher Gateway boundary", () => {
     ["cypher.accounts.select", { address: "0x" + "0".repeat(40) }],
     ["cypher.accounts.unlock", { address: signer, password: "fixture", duration: 86_401 }],
     ["cypher.accounts.lock", { address: "personal.newAccount('fixture')" }],
+    ["cypher.wallets.list", { limit: 51 }],
+    ["cypher.wallets.list", { offset: -1 }],
+    ["cypher.transfers.list", { limit: 101 }],
+    ["cypher.transfers.prepare", { from: signer, to: recipient, amount: 0.1 }],
+    ["cypher.transfers.prepare", { from: signer, to: recipient, amount: "0" }],
+    ["cypher.transfers.prepare", { from: signer, to: recipient, amount: "0.0000000000000000001" }],
+    ["cypher.transfers.send", { requestId: "invalid", quoteId: "invalid", password: "fixture" }],
     [
       "cypher.reward.set",
       { signer, recipient: signer.toUpperCase().replace("0X", "0x"), password: "fixture" },
@@ -186,7 +201,7 @@ describe("Cypher Gateway boundary", () => {
     const failed = await invoke("cypher.accounts.create", { password: "fixture private password" });
     expect(failed.respond).toHaveBeenCalledWith(false, undefined, {
       code: "UNAVAILABLE",
-      message: "Cypher operation failed. Check the node status and try again.",
+      message: "ColossusX operation failed. Check the node status and try again.",
     });
     mocks.stop.mockRejectedValueOnce(
       new CypherOperationError("This Gateway does not own this node."),
@@ -204,7 +219,9 @@ describe("Cypher Gateway boundary", () => {
     expect(listCoreGatewayHandlerMethodNames().get("cypher")).toEqual(methods);
     for (const method of methods) {
       expect(resolveCoreOperatorGatewayMethodScope(method)).toBe(
-        method === "cypher.status" ? "operator.read" : "operator.admin",
+        ["cypher.status", "cypher.wallets.list", "cypher.transfers.list"].includes(method)
+          ? "operator.read"
+          : "operator.admin",
       );
     }
     expect(methods).not.toContain("cypher.rpc");

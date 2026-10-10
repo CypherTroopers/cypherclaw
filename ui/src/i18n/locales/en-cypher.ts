@@ -3,23 +3,121 @@ import { en } from "./en.ts";
 
 const enCypher = {
   cypher: {
-    title: "Cypher",
-    subtitle: "Manage the Cypher node on the connected Gateway's computer.",
+    title: "ColossusX",
+    tabsLabel: "ColossusX management",
+    tabs: {
+      overview: "Overview",
+      node: "Node",
+      wallets: "Wallets",
+      send: "Send",
+      mining: "Mining",
+      explorer: "Explorer",
+    },
+    overview: "Your node at a glance",
+    overviewHint:
+      "Check your node and network here. First, confirm that the node is connected; then open Wallets to view your funds.",
+    wallets: "Your wallets",
+    walletsHint:
+      "These wallets belong to the node on your Gateway computer. Select one to use it, or create a wallet if the list is empty.",
+    wallet: "Wallet",
+    connectFirst: "Open the Node tab and start or connect to your node first.",
+    emptyWallets:
+      "No wallets were found on this node. Enter a password below and choose Create wallet.",
+    walletLocked: "Locked",
+    walletUnlocked: "Unlocked",
+    lockUnknown: "Lock state unavailable",
+    sendFromWallet: "Send from this wallet",
+    viewExplorer: "View in explorer ↗",
+    walletPage: "Wallets {start}–{end} of {total}",
+    previous: "Previous",
+    next: "Next",
+    copyAddress: "Copy address",
+    addressCopied: "Wallet address copied.",
+    copyFailed: "The address could not be copied. Select and copy the address manually.",
+    refreshWallets: "Refresh wallets and balances",
+    openWallets: "Open wallets",
+    send: "Send CLX",
+    sendHint:
+      "Send funds from a wallet on your node. Choose the wallet, enter the recipient and amount, then review the transfer before sending.",
+    transferDetails: "Transfer details",
+    sendFrom: "From",
+    sendRecipient: "Recipient address",
+    amount: "Amount (CLX)",
+    reviewTransfer: "Review amount and fee",
+    confirmTransfer: "Review and confirm",
+    confirmHint:
+      "Check the recipient, amount and estimated fee. Enter this wallet's password only when you are ready to send.",
+    estimatedFee: "Estimated maximum fee",
+    actualFee: "Actual fee",
+    total: "Amount plus estimated maximum fee",
+    confirmCheckbox: "I checked the recipient and amount and want to send this transfer.",
+    sendNow: "Confirm and send",
+    editTransfer: "Edit transfer",
+    quoteExpired: "This fee estimate expired. Review the amount and fee again before sending.",
+    sendAccepted: "The transfer was submitted. Follow its result below until it is complete.",
+    sendComplete: "Transfer complete: {amount} CLX.",
+    sendUnknown:
+      "The node has not confirmed acceptance. The original transaction hash is being checked below; do not send the payment again yet.",
+    sendFailed: "This transfer failed. {reason}",
+    sendAdmissionRejected:
+      "The node rejected the transfer because Common admission is not ready. Check the Node and Mining settings before trying again.",
+    sendExecutionFailed:
+      "The transaction was finalized with failed execution. Check its receipt and your balance before trying again.",
+    sendFailedHint: "Check the transfer record and node logs for the cause before trying again.",
+    sendUnavailable:
+      "This node is not ready to accept transfers. Check its Common admission configuration.",
+    finalityUnavailable:
+      "This node cannot report FHS finality. A receipt alone does not confirm completion; update the bundled node to enable this check.",
+    transferHistory: "Your outgoing transfers",
+    historyHint:
+      "Transfers sent from this screen are saved by your Gateway. Refresh or return here later to check their results.",
+    emptyTransfers: "No transfers have been sent from this screen yet.",
+    txHash: "Transaction hash",
+    unknownTransfer:
+      "The result is still being checked using this transaction hash. Avoid sending the same payment again while its result is unknown.",
+    transferError: "The node reported {code}. Check the transfer result before trying again.",
+    transferStates: {
+      unknown: "Checking result",
+      submitted: "Accepted by node",
+      included: "Included · awaiting finality",
+      complete: "Complete",
+      failed: "Failed",
+    },
+    explorer: "Blockchain explorer",
+    explorerHint:
+      "Look up an address, transfer or block on ColossusX. Enter it below, or use a wallet or transfer's View in explorer link.",
+    explorerSearch: "Look up on ColossusX",
+    explorerQuery: "Wallet address, transaction hash or block number",
+    openExplorer: "Open result ↗",
+    explorerHome: "Open explorer home ↗",
+    explorerMatched:
+      "Your node matches the ColossusX explorer network. Results open in a new browser tab.",
+    explorerMismatch:
+      "Connect to the ColossusX network to use these links. Your node's chain ID and genesis must both match the explorer.",
+    explorerInvalid:
+      "Enter a complete 0x address, transaction hash or decimal block number. Explorer links also require a matching network.",
+    explorerDelay:
+      "The explorer may take time to index a transfer. Its indexing delay does not change a completion result confirmed by your node.",
+    independentGenerator: "Independent wallet generator (advanced)",
+    independentGeneratorHint:
+      "This generator creates a separate address and private key; it does not add a wallet to your node. Save the key before clearing it or leaving the ColossusX page.",
+    subtitle: "Manage the ColossusX node on the connected Gateway's computer.",
     node: "Node",
     nodeHint:
-      "Start the bundled node or explicitly connect to a node already running on this computer.",
+      "Start or connect to the node that holds your wallets. Choose Start node for the bundled node, or Connect IPC if a node is already running on this computer.",
     start: "Start node",
     stop: "Stop node",
     connect: "Connect IPC",
     disconnect: "Disconnect IPC",
     refresh: "Refresh status and logs",
-    offline: "Connect to the Gateway to manage Cypher.",
-    unavailable: "This Gateway does not provide Cypher controls. Install the Cypher-enabled build.",
+    offline: "Connect to the Gateway to manage ColossusX.",
+    unavailable:
+      "This Gateway does not provide ColossusX controls. Install a build with ColossusX support.",
     readRequired: "Operator read access is required to view node status and logs.",
     working: "Waiting for the node to complete this action…",
     adminRequired:
       "Administrator access is required to change the node, accounts, mining, or rewards.",
-    unsupported: "No bundled Cypher binary is available for this Gateway's OS and architecture.",
+    unsupported: "No bundled ColossusX binary is available for this Gateway's OS and architecture.",
     external: "Connected to an existing node. Stop it through the application that started it.",
     owned: "Started by this Gateway",
     notOwned: "Existing or stopped node",
@@ -44,7 +142,7 @@ const enCypher = {
       stopping: "Stopping",
       error: "Error",
     },
-    accounts: "Accounts and signer A",
+    accounts: "Mining signer",
     accountsHint:
       "The signer identifies this node. Selecting an account does not change the separate reward recipient B.",
     account: "Local account",
@@ -52,7 +150,7 @@ const enCypher = {
     signer: "Current signer A",
     noAccounts: "No local accounts",
     accountPassword: "Account password",
-    createAccount: "Create account",
+    createAccount: "Create wallet",
     unlock: "Unlock account",
     lock: "Lock account",
     unlockDuration: "Unlock duration (seconds)",
@@ -65,7 +163,7 @@ const enCypher = {
     selected: "Signer A updated.",
     mining: "Mining",
     miningHint:
-      "Mining uses the selected local signer A. Reward routing is configured separately below.",
+      "Mining uses a separate signer account. Choose the signer and thread count, then start mining; reward routing is configured below.",
     miningActive: "Mining active",
     miningInactive: "Mining stopped",
     threads: "Mining threads",

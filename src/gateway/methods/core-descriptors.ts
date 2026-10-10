@@ -37,6 +37,7 @@ type CoreGatewayMethodSpecRow = readonly [
   policy?: CoreGatewayMethodPolicy,
 ];
 const CONTROL_PLANE_WRITE = { controlPlaneWrite: true } as const;
+const STARTUP_CONTROL_PLANE_WRITE = { startup: true, controlPlaneWrite: true } as const;
 
 // This is the canonical core method policy table: every core handler must appear here so
 // listing, authorization, startup availability, and write throttling stay in sync.
@@ -433,13 +434,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   // sessions.files.* trusted-operator read domain.
   ["controlUi.sessionPullRequests.subscribe", "control-ui", "operator.read", "2026.7"],
   ["controlUi.sessionPreview", "control-ui", "operator.read", "2026.8"],
-  [
-    "gateway.suspend.prepare",
-    "suspend",
-    "operator.admin",
-    "2026.7",
-    { startup: true, controlPlaneWrite: true },
-  ],
+  ["gateway.suspend.prepare", "suspend", "operator.admin", "2026.7", STARTUP_CONTROL_PLANE_WRITE],
   ["gateway.suspend.status", "suspend", "operator.read", "2026.7"],
   // Resume is the safety escape hatch and must not sit behind write-rate limiting.
   ["gateway.suspend.resume", "suspend", "operator.admin", "2026.7"],
@@ -453,20 +448,8 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["openclaw.setup.verify", "system-agent", "operator.admin", "<=2026.7"],
   // Cloud-worker mutations depend on the loaded provider registry and owned
   // reconciler, so advertise them early but gate dispatch until sidecars are ready.
-  [
-    "environments.create",
-    "environments",
-    "operator.admin",
-    "2026.7",
-    { startup: true, controlPlaneWrite: true },
-  ],
-  [
-    "environments.destroy",
-    "environments",
-    "operator.admin",
-    "2026.7",
-    { startup: true, controlPlaneWrite: true },
-  ],
+  ["environments.create", "environments", "operator.admin", "2026.7", STARTUP_CONTROL_PLANE_WRITE],
+  ["environments.destroy", "environments", "operator.admin", "2026.7", STARTUP_CONTROL_PLANE_WRITE],
   ["sessions.catalog.list", "session-catalog", "operator.read", "2026.7"],
   ["sessions.catalog.read", "session-catalog", "operator.read", "2026.7"],
   ["terminal.upload", "terminal", "operator.admin", "2026.7"],
@@ -475,19 +458,13 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["approval.get", null, "operator.approvals", "2026.7"],
   ["approval.resolve", null, "operator.approvals", "2026.7"],
   ["sessions.search", "sessions-read", "operator.read", "<=2026.7"],
-  [
-    "sessions.dispatch",
-    "sessions-dispatch",
-    "dynamic",
-    "2026.7",
-    { startup: true, controlPlaneWrite: true },
-  ],
+  ["sessions.dispatch", "sessions-dispatch", "dynamic", "2026.7", STARTUP_CONTROL_PLANE_WRITE],
   [
     "sessions.reclaim",
     "sessions-dispatch",
     "operator.write",
     "2026.7",
-    { startup: true, controlPlaneWrite: true },
+    STARTUP_CONTROL_PLANE_WRITE,
   ],
   ["models.probe", "models-probe", "operator.admin", "<=2026.7"],
   // Memory migration reads host assistant state and writes agent workspaces.
@@ -565,13 +542,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["portal.list", "portals", "operator.read", "2026.8"],
   ["portal.open", "portals", "operator.write", "2026.8", CONTROL_PLANE_WRITE],
   ["portal.close", "portals", "operator.write", "2026.8", CONTROL_PLANE_WRITE],
-  [
-    "sessions.move",
-    "sessions-dispatch",
-    "dynamic",
-    "2026.8",
-    { startup: true, controlPlaneWrite: true },
-  ],
+  ["sessions.move", "sessions-dispatch", "dynamic", "2026.8", STARTUP_CONTROL_PLANE_WRITE],
   ["sessions.assignOwner", "sessions-mutations", "operator.write", "2026.8"],
   ["progressCard.get", "progress-card", "operator.read", "2026.8"],
   ["progressCard.put", "progress-card", "operator.write", "2026.8"],
@@ -599,34 +570,16 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["session.members.listEvidence", "sessions-sharing", "operator.read", "2026.8"],
   ["plugins.inspect", "plugins", "operator.read", "2026.8"],
   ["users.github.status", "users", "operator.read", "2026.8", { startup: true }],
-  [
-    "users.github.authorize.start",
-    "users",
-    "operator.read",
-    "2026.8",
-    { startup: true, controlPlaneWrite: true },
-  ],
-  [
-    "users.github.authorize.poll",
-    "users",
-    "operator.read",
-    "2026.8",
-    { startup: true, controlPlaneWrite: true },
-  ],
+  ["users.github.authorize.start", "users", "operator.read", "2026.8", STARTUP_CONTROL_PLANE_WRITE],
+  ["users.github.authorize.poll", "users", "operator.read", "2026.8", STARTUP_CONTROL_PLANE_WRITE],
   [
     "users.github.authorize.cancel",
     "users",
     "operator.read",
     "2026.8",
-    { startup: true, controlPlaneWrite: true },
+    STARTUP_CONTROL_PLANE_WRITE,
   ],
-  [
-    "users.github.disconnect",
-    "users",
-    "operator.read",
-    "2026.8",
-    { startup: true, controlPlaneWrite: true },
-  ],
+  ["users.github.disconnect", "users", "operator.read", "2026.8", STARTUP_CONTROL_PLANE_WRITE],
   ["sessions.github.options", "sessions-github", "operator.read", "2026.8", { startup: true }],
   ["sessions.github.status", "sessions-github", "operator.read", "2026.8", { startup: true }],
   [
@@ -634,7 +587,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
     "sessions-github",
     "operator.write",
     "2026.8",
-    { startup: true, controlPlaneWrite: true },
+    STARTUP_CONTROL_PLANE_WRITE,
   ],
   ["sessions.title.prepare", "sessions-title", "operator.write", "2026.8", CONTROL_PLANE_WRITE],
   ["users.mentionable", "users-mentionable", "operator.read", "2026.8", { startup: true }],
@@ -662,7 +615,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["gateway.suspend.handoff", "suspend", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
   ["transcripts.export", "transcripts", "operator.read", "2026.9"],
   ["transcripts.status", "transcripts", "operator.read", "2026.9"],
-  ["update.report", "update", "operator.admin", "2026.9", { controlPlaneWrite: true }],
+  ["update.report", "update", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
   ["skills.workshop.read", "skills", "operator.read", "2026.9"],
   // Public sharing appends so every previously advertised method index remains stable.
   ["session.publicShare.set", "sessions-sharing", "operator.write", "2026.9"],
@@ -670,13 +623,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["plugins.catalog.browse", "plugins", "operator.read", "2026.9"],
   ["plugins.catalog.categories", "plugins", "operator.read", "2026.9"],
   ["plugins.catalog.get", "plugins", "operator.read", "2026.9"],
-  [
-    "environments.prepare",
-    "environments",
-    "operator.admin",
-    "2026.9",
-    { startup: true, controlPlaneWrite: true },
-  ],
+  ["environments.prepare", "environments", "operator.admin", "2026.9", STARTUP_CONTROL_PLANE_WRITE],
   ["models.authRefresh", "models-auth-status", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
   ["models.authLogin", "models-auth-login", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
   ["models.authSetApiKey", "models-auth-status", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
@@ -700,20 +647,8 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["desktop.release", "environments", "operator.admin", "2026.9", { startup: true }],
   ["mcp.authLogin", "mcp-auth-login", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
   ["environments.session.status", "environments", "operator.read", "2026.9"],
-  [
-    "environments.session.create",
-    "environments",
-    "operator.admin",
-    "2026.9",
-    { controlPlaneWrite: true },
-  ],
-  [
-    "environments.session.destroy",
-    "environments",
-    "operator.admin",
-    "2026.9",
-    { controlPlaneWrite: true },
-  ],
+  ["environments.session.create", "environments", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
+  ["environments.session.destroy", "environments", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
   ["environments.session.exec", "environments", "operator.admin", "2026.9"],
   ["sessions.setInvolvement", "sessions-mutations", "operator.read", "2026.9"],
   ["transcripts.summarize", "transcripts", "operator.write", "2026.9"],
@@ -775,4 +710,8 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["cypher.reward.set", "cypher", "operator.admin", "2026.9"],
   ["wallet.generator.status", "wallet-generator", "operator.read", "2026.9"],
   ["wallet.generator.generate", "wallet-generator", "operator.admin", "2026.9"],
+  ["cypher.wallets.list", "cypher", "operator.read", "2026.9"],
+  ["cypher.transfers.prepare", "cypher", "operator.admin", "2026.9"],
+  ["cypher.transfers.send", "cypher", "operator.admin", "2026.9"],
+  ["cypher.transfers.list", "cypher", "operator.read", "2026.9"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

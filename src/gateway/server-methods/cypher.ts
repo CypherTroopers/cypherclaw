@@ -1,11 +1,13 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
+import { CypherIpcError } from "../../cypher/ipc.js";
 import {
   CypherNodeManager,
   CypherOperationError,
   isCypherAddress,
   type CypherAuthority,
 } from "../../cypher/manager.js";
+import { cypherAmountUnits } from "../../cypher/transfer.js";
 import { readGatewayRequestMutationAuthority } from "./session-mutation-guards.js";
 import type {
   GatewayRequestContext,
@@ -21,6 +23,10 @@ type MiningParams = { threads: number; signer: string; password: string };
 type UnlockParams = AddressParams & PasswordParams & { duration: number };
 type SignerParams = { signer: string };
 type RewardParams = SignerParams & PasswordParams & { recipient: string };
+type WalletListParams = { offset?: number; limit?: number };
+type TransferListParams = { limit?: number };
+type TransferPrepareParams = { from: string; to: string; amount: string };
+type TransferSendParams = PasswordParams & { requestId: string; quoteId: string };
 
 function exactParams(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   return isRecord(value) && Object.keys(value).every((key) => keys.includes(key));
@@ -57,19 +63,68 @@ const rewardParams: Validator<RewardParams> = (value): value is RewardParams =>
   isCypherAddress(value.recipient) &&
   value.signer.toLowerCase() !== value.recipient.toLowerCase() &&
   validPassword(value.password);
+const walletListParams: Validator<WalletListParams> = (value): value is WalletListParams =>
+  exactParams(value, ["offset", "limit"]) &&
+  (value.offset === undefined ||
+    (typeof value.offset === "number" &&
+      Number.isInteger(value.offset) &&
+      value.offset >= 0 &&
+      value.offset <= 1024)) &&
+  (value.limit === undefined || boundedInteger(value.limit, 50));
+const transferListParams: Validator<TransferListParams> = (value): value is TransferListParams =>
+  exactParams(value, ["limit"]) && (value.limit === undefined || boundedInteger(value.limit, 100));
+const transferPrepareParams: Validator<TransferPrepareParams> = (
+  value,
+): value is TransferPrepareParams => {
+  if (
+    !exactParams(value, ["from", "to", "amount"]) ||
+    !isCypherAddress(value.from) ||
+    !isCypherAddress(value.to)
+  ) {
+    return false;
+  }
+  try {
+    cypherAmountUnits(value.amount);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const transferSendParams: Validator<TransferSendParams> = (value): value is TransferSendParams =>
+  exactParams(value, ["requestId", "quoteId", "password"]) &&
+  typeof value.requestId === "string" &&
+  uuidPattern.test(value.requestId) &&
+  typeof value.quoteId === "string" &&
+  uuidPattern.test(value.quoteId) &&
+  validPassword(value.password);
 
 function managerFor(context: GatewayRequestContext): CypherNodeManager {
   return (context.cypherNodeManager ??= new CypherNodeManager());
 }
 
 function cypherError(error: unknown) {
-  if (error instanceof CypherOperationError) {
+  if (error instanceof CypherOperationError || error instanceof CypherIpcError) {
     return errorShape(ErrorCodes.UNAVAILABLE, error.message, { details: { code: error.code } });
   }
   return errorShape(
     ErrorCodes.UNAVAILABLE,
-    "Cypher operation failed. Check the node status and try again.",
+    "ColossusX operation failed. Check the node status and try again.",
   );
+}
+
+function read<T>(
+  method: string,
+  validate: Validator<T>,
+  operation: (manager: CypherNodeManager, params: T) => Promise<unknown>,
+): GatewayRequestHandler {
+  return defineValidatedGatewayHandler(method, validate, async ({ context, params, respond }) => {
+    try {
+      respond(true, await operation(managerFor(context), params));
+    } catch (error) {
+      respond(false, undefined, cypherError(error));
+    }
+  });
 }
 
 function mutation<T>(
@@ -154,5 +209,21 @@ export const cypherHandlers: GatewayRequestHandlers = {
   ),
   "cypher.reward.set": mutation("cypher.reward.set", rewardParams, (manager, params, authority) =>
     manager.setReward(params, authority),
+  ),
+  "cypher.wallets.list": read("cypher.wallets.list", walletListParams, (manager, params) =>
+    manager.wallets(params),
+  ),
+  "cypher.transfers.prepare": mutation(
+    "cypher.transfers.prepare",
+    transferPrepareParams,
+    (manager, params, authority) => manager.prepareTransfer(params, authority),
+  ),
+  "cypher.transfers.send": mutation(
+    "cypher.transfers.send",
+    transferSendParams,
+    (manager, params, authority) => manager.sendTransfer(params, authority),
+  ),
+  "cypher.transfers.list": read("cypher.transfers.list", transferListParams, (manager, params) =>
+    manager.transfers(params),
   ),
 };

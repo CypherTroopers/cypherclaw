@@ -575,6 +575,34 @@ CREATE TABLE IF NOT EXISTS operator_approval_standing_grant_generations (
   job_definition_generation INTEGER NOT NULL CHECK (job_definition_generation >= 1)
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS cypher_transfers (
+  request_id TEXT PRIMARY KEY NOT NULL,
+  quote_id TEXT NOT NULL,
+  node_key TEXT NOT NULL,
+  chain_id TEXT NOT NULL,
+  genesis_hash TEXT NOT NULL,
+  from_address TEXT NOT NULL,
+  to_address TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  value_hex TEXT NOT NULL,
+  nonce_hex TEXT NOT NULL,
+  gas_hex TEXT NOT NULL,
+  gas_price_hex TEXT,
+  max_fee_per_gas_hex TEXT,
+  max_priority_fee_per_gas_hex TEXT,
+  estimated_fee TEXT NOT NULL,
+  tx_hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('unknown', 'submitted', 'included', 'complete', 'failed')),
+  finality_supported INTEGER CHECK (finality_supported IN (0, 1)),
+  block_number TEXT,
+  actual_fee TEXT,
+  error_code TEXT,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_cypher_transfers_node_created
+  ON cypher_transfers(node_key, created_at_ms DESC, request_id);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
   meta_key TEXT NOT NULL PRIMARY KEY,
   role TEXT NOT NULL,

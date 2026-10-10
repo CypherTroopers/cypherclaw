@@ -26,6 +26,10 @@ import type {
   CronRunRecoveryReadCommand,
   CronRunRecoveryObservation,
 } from "../cron/store/run-recovery-read.types.js";
+import type {
+  CypherTransferReadCommand,
+  CypherTransferReadResult,
+} from "../cypher/transfer-store.contract.js";
 import type { FleetCellRecord } from "../fleet/registry.types.js";
 import type {
   ListTerminalOperatorApprovalsInput,
@@ -124,6 +128,7 @@ export type OpenClawStateReadAuthority = {
 };
 
 export type OpenClawStateReadCommand =
+  | CypherTransferReadCommand
   | TuiLastSessionReadCommand
   | ChannelIngressReadCommand
   | { type: "capture.readOnlyEvents"; sessionId: string; limit?: number }
@@ -232,6 +237,7 @@ export type OpenClawStateReadRequest = {
 type ReadResult<Reply> = Reply extends { ok: true } ? Omit<Reply, "ok" | "sourceAdmitted"> : never;
 
 export type OpenClawStateReadResult =
+  | CypherTransferReadResult
   | {
       type: "tui.lastSession.read";
       row: Pick<Selectable<ConfigMachineState>, "value_json" | "updated_at_ms"> | undefined;

@@ -60,7 +60,16 @@ export type CypherRpcParams = {
   eth_syncing: [];
   net_peerCount: [];
   eth_getBalance: [address: string, block: "latest"];
-  eth_getBlockByNumber: [block: "latest", fullTransactions: boolean];
+  eth_getBlockByNumber: [block: "latest" | "0x0", fullTransactions: boolean];
+  personal_listWallets: [];
+  eth_getTransactionCount: [address: string, block: "pending"];
+  eth_fillTransaction: [transaction: CypherTransactionArgs];
+  personal_signTransaction: [transaction: CypherTransactionArgs, password: string];
+  eth_sendRawTransaction: [raw: string];
+  eth_getTransactionByHash: [hash: string];
+  eth_getTransactionReceipt: [hash: string];
+  eth_getTransactionFinality: [hash: string];
+  reconfig_fhsStatus: [];
   miner_start: [threads: number | null, signer: string, password: string];
   miner_stop: [];
   miner_status: [];
@@ -70,6 +79,19 @@ export type CypherRpcParams = {
   personal_lockAccount: [signer: string];
   personal_setCommonRPCRewardAddress: [signer: string, recipient: string, password: string];
   personal_getCommonRPCRewardAddress: [signer: string];
+};
+
+export type CypherTransactionArgs = {
+  from: string;
+  to: string;
+  value: string;
+  chainId: string;
+  nonce?: string;
+  gas?: string;
+  gasPrice?: string;
+  maxFeePerGas?: string;
+  maxPriorityFeePerGas?: string;
+  type?: string;
 };
 
 export type CypherRpcMethod = keyof CypherRpcParams;
@@ -87,6 +109,15 @@ const parameterCounts = {
   net_peerCount: 0,
   eth_getBalance: 2,
   eth_getBlockByNumber: 2,
+  personal_listWallets: 0,
+  eth_getTransactionCount: 2,
+  eth_fillTransaction: 1,
+  personal_signTransaction: 2,
+  eth_sendRawTransaction: 1,
+  eth_getTransactionByHash: 1,
+  eth_getTransactionReceipt: 1,
+  eth_getTransactionFinality: 1,
+  reconfig_fhsStatus: 0,
   miner_start: 3,
   miner_stop: 0,
   miner_status: 0,
@@ -115,6 +146,7 @@ export class CypherIpcError extends Error {
   constructor(
     message: string,
     readonly code: string | number,
+    readonly requestSent = false,
   ) {
     super(message);
     this.name = "CypherIpcError";
@@ -122,7 +154,7 @@ export class CypherIpcError extends Error {
 }
 
 function protocolError(): CypherIpcError {
-  return new CypherIpcError("Cypher returned an invalid IPC response.", "IPC_PROTOCOL");
+  return new CypherIpcError("ColossusX returned an invalid IPC response.", "IPC_PROTOCOL");
 }
 
 export async function callCypherIpc<M extends CypherRpcMethod>(
@@ -136,14 +168,14 @@ export async function callCypherIpc<M extends CypherRpcMethod>(
     !Array.isArray(params) ||
     params.length !== parameterCounts[method]
   ) {
-    throw new CypherIpcError("The Cypher IPC operation is not supported.", "IPC_PROTOCOL");
+    throw new CypherIpcError("The ColossusX IPC operation is not supported.", "IPC_PROTOCOL");
   }
   const timeoutMs = options.timeoutMs ?? 10_000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-    throw new CypherIpcError("The Cypher IPC timeout is invalid.", "IPC_PROTOCOL");
+    throw new CypherIpcError("The ColossusX IPC timeout is invalid.", "IPC_PROTOCOL");
   }
   if (options.signal?.aborted) {
-    throw new CypherIpcError("The Cypher IPC operation was canceled.", "IPC_CANCELLED");
+    throw new CypherIpcError("The ColossusX IPC operation was canceled.", "IPC_CANCELLED");
   }
 
   const id = randomUUID();
@@ -154,6 +186,7 @@ export async function callCypherIpc<M extends CypherRpcMethod>(
     let responseBytes = 0;
     let responseText = "";
     let settled = false;
+    let requestSent = false;
 
     const finish = (error: CypherIpcError | null, result?: unknown) => {
       if (settled) {
@@ -167,7 +200,7 @@ export async function callCypherIpc<M extends CypherRpcMethod>(
       socket.removeListener("end", onEnd);
       socket.destroy();
       if (error) {
-        reject(error);
+        reject(new CypherIpcError(error.message, error.code, requestSent));
       } else {
         resolve(result);
       }
@@ -207,9 +240,24 @@ export async function callCypherIpc<M extends CypherRpcMethod>(
           return;
         }
         // Node error messages/data can echo credentials from the request.
+        if (
+          "message" in error &&
+          typeof error.message === "string" &&
+          error.message.includes(
+            "Fair HotStuff transactions must be submitted through an admission-enabled common RPC node",
+          )
+        ) {
+          finish(
+            new CypherIpcError(
+              "This FHS node cannot admit transfers. Use an admission-enabled Common node with its signing account configured.",
+              "CYPHER_ADMISSION_REQUIRED",
+            ),
+          );
+          return;
+        }
         finish(
           new CypherIpcError(
-            `Cypher rejected the operation (RPC ${error.code}). Check the operation settings and node log.`,
+            `ColossusX rejected the operation (RPC ${error.code}). Check the operation settings and node log.`,
             error.code,
           ),
         );
@@ -225,19 +273,20 @@ export async function callCypherIpc<M extends CypherRpcMethod>(
         options.signal?.throwIfAborted();
         options.assertCurrent?.();
       } catch {
-        finish(new CypherIpcError("The Cypher IPC operation was canceled.", "IPC_CANCELLED"));
+        finish(new CypherIpcError("The ColossusX IPC operation was canceled.", "IPC_CANCELLED"));
         return;
       }
       try {
         socket.write(request);
+        requestSent = true;
       } catch {
-        finish(new CypherIpcError("Could not send the Cypher IPC operation.", "IPC_CONNECTION"));
+        finish(new CypherIpcError("Could not send the ColossusX IPC operation.", "IPC_CONNECTION"));
       }
     };
     const onData = (chunk: Buffer) => {
       responseBytes += chunk.length;
       if (responseBytes > MAX_RESPONSE_BYTES) {
-        finish(new CypherIpcError("Cypher IPC response exceeded 128 KiB.", "IPC_PROTOCOL"));
+        finish(new CypherIpcError("ColossusX IPC response exceeded 128 KiB.", "IPC_PROTOCOL"));
         return;
       }
       responseText += decoder.write(chunk);
@@ -252,30 +301,32 @@ export async function callCypherIpc<M extends CypherRpcMethod>(
         consumeResponse(responseText);
       } else {
         finish(
-          new CypherIpcError("Cypher IPC closed before a response arrived.", "IPC_CONNECTION"),
+          new CypherIpcError("ColossusX IPC closed before a response arrived.", "IPC_CONNECTION"),
         );
       }
     };
     const onError = (error: NodeJS.ErrnoException) => {
       finish(
         new CypherIpcError(
-          "Could not communicate with Cypher IPC. Check the node status and IPC access.",
+          "Could not communicate with ColossusX IPC. Check the node status and IPC access.",
           error.code && connectionCodes.has(error.code) ? error.code : "IPC_CONNECTION",
         ),
       );
     };
     const onClose = () => {
-      finish(new CypherIpcError("Cypher IPC closed before a response arrived.", "IPC_CONNECTION"));
+      finish(
+        new CypherIpcError("ColossusX IPC closed before a response arrived.", "IPC_CONNECTION"),
+      );
       socket.removeListener("error", onError);
       socket.removeListener("close", onClose);
     };
     const onAbort = () => {
-      finish(new CypherIpcError("The Cypher IPC operation was canceled.", "IPC_CANCELLED"));
+      finish(new CypherIpcError("The ColossusX IPC operation was canceled.", "IPC_CANCELLED"));
     };
     const timer = setTimeout(() => {
       finish(
         new CypherIpcError(
-          "Cypher IPC timed out. Check the node status before trying the operation again.",
+          "ColossusX IPC timed out. Check the node status before trying the operation again.",
           "IPC_TIMEOUT",
         ),
       );
@@ -292,7 +343,7 @@ export async function callCypherIpc<M extends CypherRpcMethod>(
     try {
       socket.connect(endpoint);
     } catch {
-      finish(new CypherIpcError("Could not open the Cypher IPC endpoint.", "IPC_CONNECTION"));
+      finish(new CypherIpcError("Could not open the ColossusX IPC endpoint.", "IPC_CONNECTION"));
     }
   });
 }

@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { callCypherIpc, CypherIpcError } from "./ipc.js";
 
@@ -80,6 +83,48 @@ describe("Cypher IPC adapter", () => {
     expect(sockets.every((socket) => socket.destroy.mock.calls.length === 1)).toBe(true);
   });
 
+  it("distinguishes cancellation before a write from an uncertain outcome after a write", async () => {
+    const before = new AbortController();
+    const canceled = callCypherIpc("/owned/cypher.ipc", "eth_sendRawTransaction", ["0xabcd"], {
+      signal: before.signal,
+    });
+    before.abort();
+    await expect(canceled).rejects.toMatchObject({ code: "IPC_CANCELLED", requestSent: false });
+    expect(sockets[0]!.write).not.toHaveBeenCalled();
+    const after = new AbortController();
+    const uncertain = callCypherIpc("/owned/cypher.ipc", "eth_sendRawTransaction", ["0xabcd"], {
+      signal: after.signal,
+    });
+    sockets[1]!.request();
+    after.abort();
+    await expect(uncertain).rejects.toMatchObject({ code: "IPC_CANCELLED", requestSent: true });
+  });
+
+  it("reports the native Common admission requirement without copying error secrets", async () => {
+    const operation = callCypherIpc("/owned/cypher.ipc", "eth_sendRawTransaction", ["0xabcd"]);
+    const socket = sockets[0]!;
+    const { id } = socket.request();
+    socket.emit(
+      "data",
+      Buffer.from(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          error: {
+            code: -32000,
+            message:
+              "Fair HotStuff transactions must be submitted through an admission-enabled common RPC node: fixture-private-value",
+          },
+        }) + "\n",
+      ),
+    );
+    await expect(operation).rejects.toMatchObject({
+      code: "CYPHER_ADMISSION_REQUIRED",
+      requestSent: true,
+    });
+    await expect(operation).rejects.not.toThrow("fixture-private-value");
+  });
+
   it.each([
     ["wrong request ID", (id: string) => ({ jsonrpc: "2.0", id: `${id}-wrong`, result: true })],
     ["wrong version", (id: string) => ({ jsonrpc: "1.0", id, result: true })],
@@ -129,12 +174,34 @@ describe("Cypher IPC adapter", () => {
       const result = callCypherIpc("/owned/cypher.ipc", "web3_clientVersion", []);
       const socket = sockets[0]!;
       socket.emit("error", Object.assign(new Error("secret server text"), { code }));
-      await expect(result).rejects.toMatchObject({ code });
+      await expect(result).rejects.toMatchObject({ code, requestSent: false });
       await expect(result).rejects.not.toThrow("secret server text");
       expect(socket.destroy).toHaveBeenCalledOnce();
       expect(netMock.Socket).toHaveBeenCalledOnce();
     },
   );
+
+  it("reports a nonexistent native IPC endpoint as a proven pre-write failure", async () => {
+    const native = await vi.importActual<typeof import("node:net")>("node:net");
+    const socket = new native.Socket();
+    const write = vi.spyOn(socket, "write");
+    netMock.Socket.mockImplementationOnce(function () {
+      return socket;
+    });
+    const endpoint =
+      process.platform === "win32"
+        ? `\\\\.\\pipe\\cypherclaw-missing-${randomUUID()}`
+        : path.join(os.tmpdir(), `cypherclaw-missing-${randomUUID()}.sock`);
+    const result = callCypherIpc(endpoint, "eth_sendRawTransaction", ["0xabcd"]);
+    const error: unknown = await result.catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(CypherIpcError);
+    expect(error).toMatchObject({
+      code: expect.stringMatching(/^(ENOENT|ECONNREFUSED)$/),
+      requestSent: false,
+    });
+    expect(write).not.toHaveBeenCalled();
+    expect(socket.destroyed).toBe(true);
+  });
 
   it("rejects responses above the byte budget even when they arrive in fragments", async () => {
     const result = callCypherIpc("/owned/cypher.ipc", "eth_accounts", []);
@@ -148,7 +215,10 @@ describe("Cypher IPC adapter", () => {
 
   it("closes a timed-out mutation without reconnecting or retrying it", async () => {
     const result = callCypherIpc("/owned/cypher.ipc", "miner_stop", []);
-    const rejected = expect(result).rejects.toMatchObject({ code: "IPC_TIMEOUT" });
+    const rejected = expect(result).rejects.toMatchObject({
+      code: "IPC_TIMEOUT",
+      requestSent: true,
+    });
     sockets[0]!.request();
     await vi.advanceTimersByTimeAsync(10_000);
     await rejected;

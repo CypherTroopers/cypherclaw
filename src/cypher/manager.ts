@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -12,32 +11,33 @@ import {
   type CypherRpcMethod,
   type CypherRpcParams,
 } from "./ipc.js";
-import type { CypherNodeSnapshot, CypherRewardRegistration, CypherStatus } from "./types.js";
+import {
+  booleanResult,
+  CypherOperationError,
+  isCypherAddress,
+  type CypherAuthority,
+} from "./operations-contract.js";
+import {
+  launchCypherProcess,
+  type CypherProcess,
+  type CypherLaunchOptions as LaunchOptions,
+} from "./process.js";
+import type {
+  CypherNodeSnapshot,
+  CypherRewardRegistration,
+  CypherStatus,
+  CypherTransferStore,
+} from "./types.js";
+import { CypherWalletOperations } from "./wallet-operations.js";
 
-export type CypherAuthority = { assertCurrent: () => void; signal?: AbortSignal };
-export class CypherOperationError extends Error {
-  constructor(
-    message: string,
-    readonly code = "CYPHER_OPERATION",
-  ) {
-    super(message);
-    this.name = "CypherOperationError";
-  }
-}
+export type { CypherProcess } from "./process.js";
 
-export type CypherProcess = {
-  pid: number;
-  onData(listener: (data: string) => void): void;
-  onExit(listener: (code: number | null) => void): void;
-  interrupt(): void;
-};
-type LaunchOptions = {
-  platform: string;
-  script: string;
-  rootDir: string;
-  env: Record<string, string>;
-  assertCurrent: () => void;
-};
+export {
+  CypherOperationError,
+  isCypherAddress,
+  type CypherAuthority,
+} from "./operations-contract.js";
+
 type ManagerOptions = {
   platform?: string;
   arch?: string;
@@ -47,88 +47,24 @@ type ManagerOptions = {
   preflight?: () => Promise<void>;
   endpointExists?: () => Promise<boolean>;
   stopTimeoutMs?: number;
+  transferStore?: CypherTransferStore;
 };
 const targets: Record<string, { binary: string; script: string }> = {
   "linux/x64": { binary: "cypher-linux-amd64", script: "colossusX_linux.sh" },
   "darwin/arm64": { binary: "cypher-darwin-arm64", script: "colossusX_mac.sh" },
   "win32/x64": { binary: "cypher.exe", script: "colossusX_windows.ps1" },
 };
-const addressPattern = /^0x[0-9a-fA-F]{40}$/;
-export function isCypherAddress(value: unknown): value is string {
-  return typeof value === "string" && addressPattern.test(value) && !/^0x0{40}$/i.test(value);
-}
+
 function safeError(error: unknown): string {
   return error instanceof CypherOperationError || error instanceof CypherIpcError
     ? error.message
-    : "The Cypher operation failed. Check the node and its local IPC endpoint.";
+    : "The ColossusX operation failed. Check the node and its local IPC endpoint.";
 }
 function stringResult(value: unknown): string {
   if (typeof value !== "string" || value.length > 1024) {
-    throw new CypherOperationError("Cypher returned an invalid result.");
+    throw new CypherOperationError("ColossusX returned an invalid result.");
   }
   return value;
-}
-function booleanResult(value: unknown): boolean {
-  if (typeof value !== "boolean") {
-    throw new CypherOperationError("Cypher returned an invalid result.");
-  }
-  return value;
-}
-async function launchProcess(options: LaunchOptions): Promise<CypherProcess> {
-  if (options.platform === "win32") {
-    // A Windows pipe child cannot receive a graceful SIGINT via child.kill().
-    // ConPTY delivers Ctrl+C to the console running the supplied PowerShell script.
-    const { spawnTerminalPty } = await import("../process/terminal-pty.js");
-    const terminal = await spawnTerminalPty(
-      {
-        file: "powershell.exe",
-        args: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", options.script],
-        cwd: options.rootDir,
-        env: options.env,
-        cols: 120,
-        rows: 30,
-      },
-      { assertCurrent: options.assertCurrent },
-    );
-    return {
-      pid: terminal.pid,
-      onData: (listener) => {
-        terminal.onData(listener);
-      },
-      onExit: (listener) => {
-        terminal.onExit(({ exitCode }) => listener(exitCode));
-      },
-      interrupt: () => terminal.write("\x03"),
-    };
-  }
-  options.assertCurrent();
-  const child = spawn("bash", [options.script], {
-    cwd: options.rootDir,
-    env: options.env,
-    detached: true,
-    // Keep stdin open: the launchers' default console closes the node on EOF.
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  await new Promise<void>((resolve, reject) => {
-    child.once("spawn", resolve);
-    child.once("error", () =>
-      reject(new CypherOperationError("The Cypher launch script could not be started.")),
-    );
-  });
-  return {
-    pid: child.pid!,
-    onData: (listener) => {
-      child.stdout.setEncoding("utf8").on("data", listener);
-      child.stderr.setEncoding("utf8").on("data", listener);
-    },
-    onExit: (listener) => {
-      child.once("close", (code) => listener(code));
-    },
-    interrupt: () => {
-      // The initialization binary runs before Bash execs the long-lived node.
-      process.kill(-child.pid!, "SIGINT");
-    },
-  };
 }
 
 /** One process/endpoint owner for one Gateway lifetime. No startup or IPC dialing at construction. */
@@ -151,11 +87,26 @@ export class CypherNodeManager {
   #closed = false;
   #close: Promise<void> | undefined;
   readonly #lifetime = new AbortController();
+  readonly #walletOperations: CypherWalletOperations;
 
   constructor(options: ManagerOptions = {}) {
     this.#options = options;
     this.#env = mergeProcessEnv([process.env], this.#platform === "win32" ? "win32" : "linux");
     this.#rpc = options.rpc ?? callCypherIpc;
+    this.#walletOperations = new CypherWalletOperations(
+      {
+        call: (method, params, authority) => this.#call(method, params, authority),
+        serialize: (task) => this.#serialize(task),
+        operation: (authority, task) => this.#operation(authority, task),
+        assert: (authority) => this.#assert(authority),
+        requireAccount: (address, authority) => this.#requireAccount(address, authority),
+        requireConnected: (authority) => this.#requireConnected(authority),
+        resolvePaths: () => this.#resolvePaths(),
+        isConnected: () => this.#connected,
+        isClosed: () => this.#closed,
+      },
+      options.transferStore,
+    );
   }
   get #platform() {
     return this.#options.platform ?? process.platform;
@@ -175,7 +126,7 @@ export class CypherNodeManager {
         const { resolveOpenClawPackageRoot } = await import("../infra/openclaw-root.js");
         const root = await resolveOpenClawPackageRoot({ moduleUrl: import.meta.url });
         if (!root) {
-          throw new CypherOperationError("The Cypher package directory could not be found.");
+          throw new CypherOperationError("The ColossusX package directory could not be found.");
         }
         packageRoot = path.join(root, "cypher");
       }
@@ -186,7 +137,7 @@ export class CypherNodeManager {
           if (hasErrnoCode(error, "ENOENT")) {
             return rootDir;
           }
-          throw new CypherOperationError("The Cypher package directory could not be resolved.");
+          throw new CypherOperationError("The ColossusX package directory could not be resolved.");
         });
       }
       return resolveCypherIpcPaths(rootDir, this.#env, platform);
@@ -199,10 +150,17 @@ export class CypherNodeManager {
   }
   #assert(authority: CypherAuthority) {
     if (this.#closed) {
-      throw new CypherOperationError("The Cypher Gateway owner has closed.");
+      throw new CypherOperationError("The ColossusX Gateway owner has closed.");
     }
-    authority.signal?.throwIfAborted();
-    authority.assertCurrent();
+    try {
+      authority.signal?.throwIfAborted();
+      authority.assertCurrent();
+    } catch {
+      throw new CypherOperationError(
+        "The ColossusX operation failed because its caller is no longer authorized.",
+        "CYPHER_AUTHORITY_REVOKED",
+      );
+    }
   }
   async #call<M extends CypherRpcMethod>(
     method: M,
@@ -211,12 +169,13 @@ export class CypherNodeManager {
   ) {
     const paths = await this.#resolvePaths();
     if (this.#closed) {
-      throw new CypherOperationError("The Cypher Gateway owner has closed.");
+      throw new CypherOperationError("The ColossusX Gateway owner has closed.");
     }
     if (authority) {
       this.#assert(authority);
     }
     return await this.#rpc(paths.ipcPath, method, params, {
+      timeoutMs: method === "personal_signTransaction" ? 120_000 : undefined,
       signal: authority?.signal
         ? AbortSignal.any([authority.signal, this.#lifetime.signal])
         : this.#lifetime.signal,
@@ -235,12 +194,12 @@ export class CypherNodeManager {
         this.#call("eth_accounts", [], authority),
       ]);
     if (!Array.isArray(accounts) || accounts.length > 1024 || !accounts.every(isCypherAddress)) {
-      throw new CypherOperationError("Cypher returned an invalid account list.");
+      throw new CypherOperationError("ColossusX returned an invalid account list.");
     }
     // A fresh node has no etherbase until its first account exists.
     const signer = accounts.length ? await this.#call("eth_coinbase", [], authority) : null;
     if (this.#closed) {
-      throw new CypherOperationError("The Cypher Gateway owner has closed.");
+      throw new CypherOperationError("The ColossusX Gateway owner has closed.");
     }
     if (authority) {
       this.#assert(authority);
@@ -296,12 +255,13 @@ export class CypherNodeManager {
     };
   }
   status() {
+    this.#walletOperations.startTracking();
     return this.#serialize(() => this.#status());
   }
   async #requireConnected(authority: CypherAuthority) {
     this.#assert(authority);
     if (!this.#connected) {
-      throw new CypherOperationError("Connect to Cypher IPC before performing this operation.");
+      throw new CypherOperationError("Connect to ColossusX IPC before performing this operation.");
     }
   }
   #operation<T>(authority: CypherAuthority, task: () => Promise<T>) {
@@ -321,12 +281,12 @@ export class CypherNodeManager {
     return this.#operation(authority, async () => {
       if (!this.#target) {
         throw new CypherOperationError(
-          "This Gateway OS and architecture have no bundled Cypher binary.",
+          "This Gateway OS and architecture have no bundled ColossusX binary.",
         );
       }
       if (this.#process || this.#connected) {
         throw new CypherOperationError(
-          "Cypher is already owned or connected. Stop or disconnect it before starting another node.",
+          "ColossusX is already owned or connected. Stop or disconnect it before starting another node.",
         );
       }
       const paths = await this.#resolvePaths();
@@ -335,14 +295,14 @@ export class CypherNodeManager {
       if (this.#options.endpointExists) {
         if (await this.#options.endpointExists()) {
           throw new CypherOperationError(
-            "A Cypher IPC endpoint already exists. Use Connect IPC for that node.",
+            "A ColossusX IPC endpoint already exists. Use Connect IPC for that node.",
           );
         }
       } else if (this.#platform === "win32") {
         try {
           await this.#call("web3_clientVersion", [], authority);
           throw new CypherOperationError(
-            "A Cypher IPC endpoint already exists. Use Connect IPC for that node.",
+            "A ColossusX IPC endpoint already exists. Use Connect IPC for that node.",
           );
         } catch (error) {
           if (
@@ -359,12 +319,12 @@ export class CypherNodeManager {
             if (hasErrnoCode(error, "ENOENT")) {
               return false;
             }
-            throw new CypherOperationError("The Cypher IPC endpoint could not be inspected.");
+            throw new CypherOperationError("The ColossusX IPC endpoint could not be inspected.");
           },
         )
       ) {
         throw new CypherOperationError(
-          "A Cypher IPC endpoint already exists. Use Connect IPC for that node.",
+          "A ColossusX IPC endpoint already exists. Use Connect IPC for that node.",
         );
       }
       if (this.#options.preflight) {
@@ -381,7 +341,7 @@ export class CypherNodeManager {
           ]);
         } catch {
           throw new CypherOperationError(
-            "Cypher binaries or launch files are missing or not executable. Install this fork with its bundled Cypher files.",
+            "ColossusX binaries or launch files are missing or not executable. Install this fork with its bundled ColossusX files.",
           );
         }
       }
@@ -399,7 +359,7 @@ export class CypherNodeManager {
       this.#refreshAllowed = true;
       this.#stopRequested = false;
       try {
-        const owned = await (this.#options.launch ?? launchProcess)({
+        const owned = await (this.#options.launch ?? launchCypherProcess)({
           platform: this.#platform,
           script,
           rootDir: paths.rootDir,
@@ -432,7 +392,7 @@ export class CypherNodeManager {
                   this.#refreshAllowed = false;
                   this.#state = "error";
                   this.#error =
-                    "The Windows launcher exited. Cypher shutdown has not been confirmed; check IPC before starting another node.";
+                    "The Windows launcher exited. ColossusX shutdown has not been confirmed; check IPC before starting another node.";
                 }
                 resolve();
                 return;
@@ -445,7 +405,7 @@ export class CypherNodeManager {
               this.#state = stopped ? "stopped" : "error";
               this.#error = stopped
                 ? null
-                : "The Cypher process exited. Check its node logs and binary dependencies.";
+                : "The ColossusX process exited. Check its node logs and binary dependencies.";
             }
             resolve();
           });
@@ -461,7 +421,7 @@ export class CypherNodeManager {
   async #stop(authority?: CypherAuthority) {
     const owned = this.#process;
     if (!owned) {
-      throw new CypherOperationError("This Gateway does not own the connected Cypher process.");
+      throw new CypherOperationError("This Gateway does not own the connected ColossusX process.");
     }
     if (authority) {
       this.#assert(authority);
@@ -476,7 +436,7 @@ export class CypherNodeManager {
       this.#stopRequested = false;
       this.#state = "error";
       this.#error =
-        "Cypher could not receive the graceful stop request. Its process has been left running.";
+        "ColossusX could not receive the graceful stop request. Its process has been left running.";
       throw new CypherOperationError(this.#error);
     }
     const exited = await new Promise<boolean>((resolve) => {
@@ -490,7 +450,7 @@ export class CypherNodeManager {
     if (!exited) {
       this.#state = "error";
       this.#error =
-        "Cypher did not finish its graceful shutdown. Its process has been left running; check the node before retrying Stop.";
+        "ColossusX did not finish its graceful shutdown. Its process has been left running; check the node before retrying Stop.";
       throw new CypherOperationError(this.#error);
     }
     if (this.#platform === "win32") {
@@ -505,7 +465,7 @@ export class CypherNodeManager {
           assertCurrent: authority ? () => this.#assert(authority) : undefined,
         });
         throw new CypherOperationError(
-          "Cypher IPC still responds after the Windows launcher exited. Its node has been left running; check it before retrying Stop.",
+          "ColossusX IPC still responds after the Windows launcher exited. Its node has been left running; check it before retrying Stop.",
         );
       } catch (error) {
         if (
@@ -578,7 +538,7 @@ export class CypherNodeManager {
         (item) => typeof item === "string" && item.toLowerCase() === address.toLowerCase(),
       )
     ) {
-      throw new CypherOperationError("Select an account in this Cypher node's local keystore.");
+      throw new CypherOperationError("Select an account in this ColossusX node's local keystore.");
     }
   }
   createAccount(password: string, authority: CypherAuthority) {
@@ -586,7 +546,7 @@ export class CypherNodeManager {
       await this.#requireConnected(authority);
       const address = await this.#call("personal_newAccount", [password], authority);
       if (!isCypherAddress(address)) {
-        throw new CypherOperationError("Cypher returned an invalid new account address.");
+        throw new CypherOperationError("ColossusX returned an invalid new account address.");
       }
       return { address };
     });
@@ -599,7 +559,7 @@ export class CypherNodeManager {
       }
       await this.#requireAccount(address, authority);
       if (!booleanResult(await this.#call("miner_setEtherbase", [address], authority))) {
-        throw new CypherOperationError("Cypher did not select the signing account.");
+        throw new CypherOperationError("ColossusX did not select the signing account.");
       }
       return await this.#status();
     });
@@ -642,13 +602,13 @@ export class CypherNodeManager {
       !isCypherAddress(value.signer) ||
       value.signer.toLowerCase() !== signer.toLowerCase()
     ) {
-      throw new CypherOperationError("Cypher returned an invalid reward registration.");
+      throw new CypherOperationError("ColossusX returned an invalid reward registration.");
     }
     if (
       value.configured &&
       (!("rewardRecipient" in value) || !isCypherAddress(value.rewardRecipient))
     ) {
-      throw new CypherOperationError("Cypher returned an invalid reward recipient.");
+      throw new CypherOperationError("ColossusX returned an invalid reward recipient.");
     }
     return {
       configured: value.configured,
@@ -691,6 +651,24 @@ export class CypherNodeManager {
       return await this.#reward(params.signer, authority);
     });
   }
+  wallets(options: { offset?: number; limit?: number } = {}) {
+    return this.#walletOperations.wallets(options);
+  }
+  prepareTransfer(
+    params: { from: string; to: string; amount: string },
+    authority: CypherAuthority,
+  ) {
+    return this.#walletOperations.prepareTransfer(params, authority);
+  }
+  sendTransfer(
+    params: { requestId: string; quoteId: string; password: string },
+    authority: CypherAuthority,
+  ) {
+    return this.#walletOperations.sendTransfer(params, authority);
+  }
+  transfers(options: { limit?: number } = {}) {
+    return this.#walletOperations.transfers(options);
+  }
   close() {
     if (this.#close) {
       return this.#close;
@@ -698,7 +676,8 @@ export class CypherNodeManager {
     // Cancel active IPC before joining its queue. Shutdown retains ownership of its process handle.
     this.#closed = true;
     this.#lifetime.abort();
-    this.#close = this.#serialize(async () => {
+    const tracking = this.#walletOperations.close();
+    const stopped = this.#serialize(async () => {
       try {
         if (this.#process) {
           await this.#stop();
@@ -709,6 +688,15 @@ export class CypherNodeManager {
         this.#node = null;
       }
     });
+    // Tracking publications can join this queue, so join tracking outside its stop callback.
+    this.#close = (async () => {
+      const outcomes = await Promise.allSettled([stopped, tracking]);
+      for (const outcome of outcomes) {
+        if (outcome.status === "rejected") {
+          throw outcome.reason;
+        }
+      }
+    })();
     return this.#close;
   }
 }

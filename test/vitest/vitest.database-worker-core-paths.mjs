@@ -1,5 +1,6 @@
 // These consumers need the host-owned SQLite broker, which runs in forked processes.
 export const databaseWorkerCoreTestFiles = [
+  "src/cypher/transfer-store.test.ts",
   "src/agents/embedded-agent-runner/run-orchestrator.rooted-proof.test.ts",
   "src/infra/update-run-reconciliation.worker.test.ts",
   "src/infra/update-run-interruption.worker.test.ts",

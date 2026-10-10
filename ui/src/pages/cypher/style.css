@@ -44,3 +44,76 @@ openclaw-cypher-page .cypher-logs {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+openclaw-cypher-page .cypher-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+openclaw-cypher-page .cypher-panel[hidden] {
+  display: none;
+}
+
+openclaw-cypher-page .cypher-connection-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-block-end: var(--space-4);
+}
+
+openclaw-cypher-page .cypher-wallet-list,
+openclaw-cypher-page .cypher-transfer-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+openclaw-cypher-page .cypher-wallet-row,
+openclaw-cypher-page .cypher-transfer {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-block-end: 1px solid var(--border);
+}
+
+openclaw-cypher-page .cypher-wallet-details,
+openclaw-cypher-page .cypher-transfer-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+openclaw-cypher-page .cypher-address {
+  overflow-wrap: anywhere;
+}
+
+openclaw-cypher-page .cypher-explorer-link {
+  cursor: pointer;
+}
+
+openclaw-cypher-page .cypher-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+openclaw-cypher-page .cypher-details {
+  margin-block: var(--space-4);
+}
+
+openclaw-cypher-page .cypher-details summary {
+  padding-block: var(--space-3);
+}
+
+@media (max-width: 640px) {
+  openclaw-cypher-page .cypher-hub-tabs::part(tabs) {
+    gap: var(--space-1);
+  }
+
+  openclaw-cypher-page .cypher-hub-tabs .hub-tab::part(base) {
+    min-height: 36px;
+    padding-inline: var(--space-1);
+  }
+}

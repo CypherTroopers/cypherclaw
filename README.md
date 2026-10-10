@@ -19,7 +19,7 @@ See [CypherClaw stable-source maintenance](CYPHERCLAW_UPSTREAM.md) for the pinne
 
 ## Install CypherClaw and use the Cypher node
 
-CypherClaw adds Cypher directly to the Gateway and Control UI. The `openclaw` CLI command, package name, configuration paths, and environment variable names are retained for compatibility; the displayed product name is CypherClaw. The official installer URLs and published `openclaw` package below install upstream OpenClaw. This fork has a separate [GitHub Releases build and installer](CYPHERCLAW_DISTRIBUTION.md), including a `cypherclaw` launcher and the existing setup wizard. Its one-line install commands become usable after the first GitHub Release is actually published. Until then, use the source checkout or an isolated local candidate.
+CypherClaw adds ColossusX node controls directly to the Gateway and Control UI. The native executable remains `cypher`. The `openclaw` CLI command, package name, configuration paths, and environment variable names are retained for compatibility; the displayed assistant product name is CypherClaw. The official installer URLs and published `openclaw` package below install upstream OpenClaw. This fork has a separate [GitHub Releases build and installer](CYPHERCLAW_DISTRIBUTION.md), including a `cypherclaw` launcher and the existing setup wizard. Its one-line install commands use the latest published CypherClaw release.
 
 Install Node 24.16+ (below 25) or Node 26.1+, and pnpm 12.5.1. From the root of **this fork's checkout**, run the following commands on Linux, macOS, or native Windows PowerShell:
 
@@ -30,7 +30,7 @@ pnpm openclaw onboard
 pnpm openclaw gateway run
 ```
 
-Keep the Gateway running. In a second terminal, run `pnpm openclaw dashboard` to open the authenticated Control UI, then select **Cypher** in the sidebar. The included prebuilt Cypher binaries do not need a Go build:
+Keep the Gateway running. In a second terminal, run `pnpm openclaw dashboard` to open the authenticated Control UI, then select **ColossusX** in the sidebar. The included prebuilt Cypher binaries do not need a Go build:
 
 | Gateway host              | Binary                                 | Launcher                       | Requirements for the included binary               |
 | ------------------------- | -------------------------------------- | ------------------------------ | -------------------------------------------------- |
@@ -42,7 +42,22 @@ Cypher source and original command documentation are available in [Cypher FHS-D]
 
 The node runs on the **Gateway host**, which may differ from the device displaying the browser. To use `cypher.exe`, run the Gateway on native Windows. A Gateway running in WSL uses the Linux binary. Intel Macs, Linux arm64, and Windows arm64 do not have a matching bundled node binary.
 
-In the Cypher page, start the node, create or select a local account, unlock it with its password, and configure mining. The **signing account (A)** identifies the local node; the **reward address (B)** receives the configured Common RPC rewards. They are separate settings. Start and stop mining explicitly, and use **Stop node** to end the node process managed by this Gateway. Account creation, unlocking, reward changes, mining changes, and node lifecycle operations require a Gateway operator with admin permission.
+The ColossusX page has six tabs, each with a short explanation of its purpose:
+
+| Tab          | What you can do                                                                                                            |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| **Overview** | Check the connection, network, block height, peers, and mining state.                                                      |
+| **Node**     | Start or stop the managed node, connect to local IPC, and inspect logs.                                                    |
+| **Wallets**  | List node accounts, read exact CLX balances and lock state, create an account, and unlock or lock it.                      |
+| **Send**     | Select a wallet, review the recipient, amount and maximum fee, sign with its password, and track the original transaction. |
+| **Mining**   | Select the node signer, start or stop mining, and configure Common RPC rewards.                                            |
+| **Explorer** | Open an address, transaction, or block in the ColossusX explorer when both the chain ID and genesis hash match.            |
+
+Wallet and transfer selection is separate from mining configuration. The **signing account (A)** identifies the local node; the **reward address (B)** receives the configured Common RPC rewards. Start and stop mining explicitly, and use **Stop node** to end the node process managed by this Gateway. Account creation, unlocking, sending, reward changes, mining changes, and node lifecycle operations require a Gateway operator with admin permission. Reading balances and transfer history requires read permission.
+
+Sending uses the node's local keystore and IPC. Review the exact amount, recipient, and maximum fee before entering the wallet password. **Accepted** means the node accepted submission; **Included** means a receipt is available; **Complete** requires successful execution and the canonical FHS finalized-transaction index. A timeout keeps the original hash under confirmation and never triggers an automatic replacement or rebroadcast. An FHS transfer needs an admission-enabled Common node with a configured signing account; the submission response confirms whether admission is available.
+
+This UI's outgoing transfer metadata is retained in the selected profile's canonical `state/openclaw.sqlite`, through its database workers. It survives page reloads and Gateway restarts, has no automatic expiration, and contains no password, private key, or signed raw transaction. Older software ignores the additional feature table. This is a history of transfers initiated through this UI, not a complete account ledger. Older node binaries without the [`eth_getTransactionFinality` IPC API](cypher/patches/README.md) display finality as unavailable and cannot promote a receipt to **Complete**.
 
 UI-managed and manual launches use the same OS-specific launch scripts. The Gateway passes its inherited environment to the launcher; the scripts own RPC, relay, and console defaults. Source installs default to chain data in `cypher/chaindbname` beside the scripts. Marked GitHub release packages default to persistent data under the selected profile's state directory and preserve explicit overrides. HTTP JSON-RPC listens on `0.0.0.0:8000`, WebSocket JSON-RPC listens on `0.0.0.0:9251`, Browser relay is enabled, and the interactive console remains enabled. UI operations use the local Cypher IPC socket or Windows named pipe. Browser relay is not required for the Cypher UI.
 
@@ -54,11 +69,11 @@ For a local source-package tarball, use the repository's supported packaging com
 node scripts/package-openclaw-for-docker.mjs --allow-unreleased-changelog
 ```
 
-The command builds package artifacts and writes the tarball under `.artifacts/docker-e2e-package` by default. The package allowlist includes the three Cypher launchers, genesis and peer configuration, the public relay configuration and Unix helper, the three target node binaries, and Windows DLLs. The node's build record, checksum ledger, licenses, provenance, and source archive live under CypherClaw's `cypher/` directory and are included in the package, along with the six standalone wallet generators and their provenance, licenses, and corresponding source archive. Chain data, keystores, and private relay configurations are outside that allowlist. This local packaging command does not publish a package. Use the [fork release builder](CYPHERCLAW_DISTRIBUTION.md#build-a-reviewed-stable-commit) for a sealed CypherClaw installer package and its publication status.
+The command builds package artifacts and writes the tarball under `.artifacts/docker-e2e-package` by default. The package allowlist includes the three Cypher launchers, genesis and peer configuration, the public relay configuration and Unix helper, the three target node binaries, and Windows DLLs. The node's build record, checksum ledger, licenses, provenance, source archive, and finality patch with its source metadata and native build wrapper live under CypherClaw's `cypher/` directory and are included in the package, along with the six standalone wallet generators and their provenance, licenses, and corresponding source archive. Chain data, keystores, and private relay configurations are outside that allowlist. This local packaging command does not publish a package. Use the [fork release builder](CYPHERCLAW_DISTRIBUTION.md#build-a-reviewed-stable-commit) for a sealed CypherClaw installer package and its publication status.
 
 ## Generate a wallet
 
-The **Wallet generator** panel at the bottom of the Cypher page creates a new EVM wallet independently of node management. Select **Generate wallet** to run the bundled generator on the Gateway host and display the address and private key in the UI. The node can be stopped or disconnected from IPC. Generating a wallet requires a Gateway operator with admin permission.
+The **Independent wallet generator** details panel in the **Wallets** tab creates a new EVM wallet independently of node management. Select **Generate wallet** to run the bundled generator on the Gateway host and display the address and private key in the UI. The node can be stopped or disconnected from IPC. Generating a wallet requires a Gateway operator with admin permission.
 
 The generator supports Linux, macOS, and Windows on x64 and ARM64. Selection follows the Gateway host's OS and CPU, even when the browser runs on another device. The UI shows the selected target and command. The fixed executable is verified against its pinned SHA-256 before use; no command or executable path is accepted from the browser. See the [bundled generator's provenance and licenses](wallet-generator/README.md).
 

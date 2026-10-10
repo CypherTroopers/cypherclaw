@@ -425,6 +425,32 @@ export interface CurrentConversationBindings {
   updated_at: number;
 }
 
+export interface CypherTransfers {
+  actual_fee: string | null;
+  amount: string;
+  block_number: string | null;
+  chain_id: string;
+  created_at_ms: number;
+  error_code: string | null;
+  estimated_fee: string;
+  finality_supported: number | null;
+  from_address: string;
+  gas_hex: string;
+  gas_price_hex: string | null;
+  genesis_hash: string;
+  max_fee_per_gas_hex: string | null;
+  max_priority_fee_per_gas_hex: string | null;
+  node_key: string;
+  nonce_hex: string;
+  quote_id: string;
+  request_id: string;
+  status: string;
+  to_address: string;
+  tx_hash: string;
+  updated_at_ms: number;
+  value_hex: string;
+}
+
 export interface DeliveryQueueEntries {
   account_id: string | null;
   channel: string | null;
@@ -1817,6 +1843,7 @@ export interface DB {
   cron_run_receipts: CronRunReceipts;
   cron_run_trigger_state_retirements: CronRunTriggerStateRetirements;
   current_conversation_bindings: CurrentConversationBindings;
+  cypher_transfers: CypherTransfers;
   delivery_queue_entries: DeliveryQueueEntries;
   device_auth_tokens: DeviceAuthTokens;
   device_bootstrap_tokens: DeviceBootstrapTokens;
