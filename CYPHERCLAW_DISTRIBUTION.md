@@ -2,7 +2,7 @@
 
 CypherClaw uses GitHub Releases for a prebuilt package containing the CLI, Gateway, Control UI, and bundled Cypher assets. Maintainers build a reviewed commit from `cypherclaw-stable`; users install the sealed package and complete the existing OpenClaw onboarding wizard. The technical package name remains `openclaw`, with a `cypherclaw` launcher selecting an isolated profile.
 
-**Publication status:** production preparation from a clean reviewed commit verifies the bundled Cypher release materials and records `publication.ready=true`. Local candidates record `publication.ready=false` and cannot be published by the workflow. The public commands below become usable after the first GitHub Release is actually published; preparing assets alone does not make those URLs available.
+**Publication status:** production preparation requires a clean reviewed commit, verifies the bundled Cypher release materials, and requires matching finality-patch provenance for all three native targets before recording `publication.ready=true`. Local candidates record `publication.ready=false` and can retain older binaries with explicit limitations. The public commands install the latest published release; preparing these changes does not update that release.
 
 ## Install a published release
 
@@ -61,7 +61,20 @@ node scripts/build-cypherclaw-release.mjs \
 
 The builder reuses the canonical package build, including the Control UI, verifies the bundled node's build and source records in this repository's `cypher/` directory, adds fork distribution metadata only in package staging, and checks the resulting tarball again. No manual UI build or user-side source checkout is required. Use a new empty output directory for each preparation.
 
-CypherClaw packages the node's build record in [cypher/BUILDINFO.txt](cypher/BUILDINFO.txt), its checksum ledger in [cypher/SHA256SUMS](cypher/SHA256SUMS), licenses in `cypher/licenses/`, provenance in `cypher/provenance/`, and the source archive `cypher/cypher-source-60b8164-with-go-dependencies.tar.gz`. The builder verifies these retained materials and the bundled binaries against the checksum ledger.
+CypherClaw packages the node's build record in [cypher/BUILDINFO.txt](cypher/BUILDINFO.txt), its checksum ledger in [cypher/SHA256SUMS](cypher/SHA256SUMS), licenses in `cypher/licenses/`, provenance in `cypher/provenance/`, and the source archive `cypher/cypher-source-60b8164-with-go-dependencies.tar.gz`. The [finality patch and native build instructions](cypher/patches/README.md) accompany that archive. Their metadata pins the FHS-D base commit, source-archive hash, patch hash, and IPC method. The builder verifies the retained materials and binaries against the checksum ledger.
+
+The Actions workflow builds the patch on Linux x64, macOS ARM64, and Windows x64 using `cypher/patches/build-finality-node.sh` on each native host. Local builds use the same wrapper with Go 1.26.2. Its staged output includes the binary, native manifest, embedded Go build information, and checksums; Windows also includes its five runtime DLLs. Arrange the three target directories beneath one directory, then pass them to the package builder:
+
+```sh
+node scripts/build-cypherclaw-release.mjs \
+  --source-sha "$(git rev-parse HEAD)" \
+  --native-artifacts-dir /path/to/native-artifacts \
+  --output-dir .artifacts/cypherclaw-release
+```
+
+The native input directory must contain exactly `linux-amd64/`, `darwin-arm64/`, and `windows-amd64/`. The builder checks every artifact checksum, target, Go version, dependency reference, source commit, patch checksum, and IPC method before replacing assets in its extracted package staging directory. It preserves the clean source checkout and the reviewed CypherClaw SHA. The five Windows DLLs must match the retained MSYS2 package provenance; the workflow installs the corresponding compiler and runtime packages instead of silently changing those DLLs. Staged build records and checksums are refreshed, and the historical bundle description is retained with its original verification limits.
+
+All three native manifests must bind `source_sha` to the metadata's `baseCommit`, `source_patch_sha256` to `patchSha256`, and `ipc_transaction_finality_method` to the declared method; their binary hashes must match the package ledger. A Linux candidate alone does not qualify macOS or Windows. Production preparation and `--check` of a publishable package reject missing or mismatched bindings. A local candidate can retain older binaries, records that limitation, and remains unpublishable.
 
 The output contains:
 
@@ -96,8 +109,20 @@ Use an isolated account/state for candidate verification. `--no-onboard` skips s
 
 ## Prepare and publish through GitHub Actions
 
-The fork-only [CypherClaw Release workflow](.github/workflows/cypherclaw-release.yml) accepts `source_sha` and `publish`. It checks out the full SHA, builds/seals the assets, and uploads an Actions artifact. `publish` defaults to false. Preparation can be inspected without a public release.
+The fork-only [CypherClaw Release workflow](.github/workflows/cypherclaw-release.yml) accepts `source_sha` and `publish` through manual dispatch. It validates that the selected full SHA belongs to `cypherclaw-stable`, then checks out the native Cypher source at the finality metadata's pinned base commit. Three native jobs run with `max-parallel: 3` and Go 1.26.2:
 
-Publication is a separate explicit operation. The optional job has release write permission and requires `publication.ready=true`. It verifies sealed checksums and binds the immutable release tag to the selected full source SHA before creating the Release in `CypherTroopers/cypherclaw`. It refuses a tag pointing to another commit and verifies the tag again after publication. Validate the exact release on each supported platform before the first public install promise.
+| Target              | GitHub-hosted runner | Native environment                                    |
+| ------------------- | -------------------- | ----------------------------------------------------- |
+| Linux x64 / WSL2    | `ubuntu-24.04`       | GCC, GMP, OpenSSL                                     |
+| Apple Silicon macOS | `macos-15`           | ARM64, system Bash, GMP, OpenSSL                      |
+| Windows x64         | `windows-2022`       | MSYS2 MINGW64 with retained compiler/runtime packages |
+
+Each native build runs the existing builder's checks, including the registered IPC finality query and core finality contract. Only after all three jobs succeed does the package job build the CLI, Gateway, and Control UI, verify and assemble the native artifacts, seal the assets, and upload an Actions artifact. There is no binary commit-back job. `publish` defaults to false, allowing inspection without a public release. Pushing a branch alone does not publish a release.
+
+GitHub requires the manual workflow to exist on the repository's default branch. This repository uses `cypherclaw-stable` as its default branch, so the release workflow runs directly from that branch. No dispatch wrapper on `main` is needed. Push the reviewed workflow and its build scripts to `cypherclaw-stable` before the first run of the three-platform pipeline.
+
+Choose **Actions → CypherClaw Release → Run workflow**, use `cypherclaw-stable` as the workflow branch, enter the reviewed full SHA, and leave `publish` unchecked for preparation. Checking `publish` runs the same build followed by publication; no local macOS or Windows machine is needed to build the native node artifacts.
+
+Publication is a separate explicit operation. The optional job has release write permission and requires `publication.ready=true`. It verifies sealed checksums and binds the immutable release tag to the selected full source SHA before creating a draft Release in `CypherTroopers/cypherclaw`. It downloads the uploaded assets again, compares the exact asset inventory and checksums, and only then publishes the draft and promotes it to `latest`. A failure before promotion leaves the existing latest release available. Runs share one stable release concurrency group to prevent simultaneous promotion. It refuses a tag pointing to another commit, preserves existing releases instead of overwriting them, and verifies the tag again after publication. Re-running a failed publish job resumes an identical complete draft; an identical already published release succeeds without moving `latest` again. Incomplete or conflicting assets are preserved for inspection and require a new reviewed commit rather than replacement. Validate the exact release on each supported platform before the first public install promise.
 
 Build/installer checks do not prove macOS, native Windows, WSL2 service behavior, interactive provider authentication, or live Cypher network operation. Track those boundaries in the release's actual validation evidence.

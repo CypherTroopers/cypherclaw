@@ -18,13 +18,164 @@ permissions:
   contents: read
 
 concurrency:
-  group: cypherclaw-release-${{ inputs.source_sha }}
+  group: cypherclaw-stable-release
   cancel-in-progress: false
 
 jobs:
-  prepare:
+  validate:
     if: github.repository == 'CypherTroopers/cypherclaw'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      native_source_sha: ${{ steps.native-source.outputs.sha }}
+    steps:
+      - name: Validate source identity
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'A full lowercase source SHA is required.' >&2; exit 1; }
+
+      - name: Checkout reviewed source metadata
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout: cypher/patches
+
+      - name: Verify stable membership and pinned native source
+        id: native-source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/cypherclaw-stable
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re
+          root = pathlib.Path('cypher/patches')
+          metadata = json.loads((root / 'transaction-finality-source.json').read_text())
+          sha = metadata['baseCommit']
+          if not re.fullmatch('[0-9a-f]{40}', sha):
+              raise SystemExit('A pinned native source SHA is required')
+          if metadata['patch'] != 'transaction-finality-ipc.patch' or hashlib.sha256((root / metadata['patch']).read_bytes()).hexdigest() != metadata['patchSha256']:
+              raise SystemExit('Native source patch identity mismatch')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'sha={sha}\n')
+          PY
+
+  build-native:
+    name: Native ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+          - target: darwin-arm64
+            runner: macos-15
+            goos: darwin
+            goarch: arm64
+          - target: windows-amd64
+            runner: windows-2022
+            goos: windows
+            goarch: amd64
+    env:
+      TARGET_OS: ${{ matrix.goos }}
+      TARGET_ARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: "1"
+    steps:
+      - name: Configure Windows checkout
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          git config --global core.autocrlf false
+
+      - name: Checkout exact CypherClaw build inputs
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            cypher/patches
+            cypher/provenance/msys2
+            scripts
+
+      - name: Checkout pinned Cypher source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CypherTroopers/cypher
+          ref: ${{ needs.validate.outputs.native_source_sha }}
+          path: .artifacts/cypher-source
+          persist-credentials: false
+
+      - name: Setup retained Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.2"
+          cache: false
+
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential ca-certificates file libgmp-dev libssl-dev python3
+
+      - name: Install macOS native dependencies
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install openssl@3 gmp
+
+      - name: Setup Windows native environment
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
+        with:
+          msystem: MINGW64
+          update: false
+          path-type: inherit
+          install: file git make python
+
+      - name: Install pinned Windows compiler and runtime packages
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: python3 scripts/setup-cypherclaw-msys2.py
+
+      - name: Build and test Linux node
+        if: runner.os == 'Linux'
+        run: bash cypher/patches/build-finality-node.sh --source-dir .artifacts/cypher-source --output-dir .artifacts/native-build
+
+      - name: Build and test macOS node
+        if: runner.os == 'macOS'
+        shell: /bin/bash --noprofile --norc -eo pipefail {0}
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "15.0"
+        run: /bin/bash cypher/patches/build-finality-node.sh --source-dir .artifacts/cypher-source --output-dir .artifacts/native-build
+
+      - name: Build and test Windows node
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash cypher/patches/build-finality-node.sh --source-dir .artifacts/cypher-source --output-dir .artifacts/native-build
+
+      - name: Upload native build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cypherclaw-native-${{ matrix.target }}-${{ inputs.source_sha }}
+          path: .artifacts/native-build/stage/${{ matrix.target }}/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  prepare:
+    needs: build-native
+    if: github.repository == 'CypherTroopers/cypherclaw'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     outputs:
       release_tag: ${{ steps.identity.outputs.release_tag }}
       publication_ready: ${{ steps.identity.outputs.publication_ready }}
@@ -49,10 +200,28 @@ jobs:
           install-bun: "true"
           frozen-lockfile: "true"
 
+      - name: Download Linux native build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cypherclaw-native-linux-amd64-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/cypherclaw-native/linux-amd64
+
+      - name: Download macOS native build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cypherclaw-native-darwin-arm64-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/cypherclaw-native/darwin-arm64
+
+      - name: Download Windows native build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cypherclaw-native-windows-amd64-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/cypherclaw-native/windows-amd64
+
       - name: Build and seal release assets
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
-        run: node scripts/build-cypherclaw-release.mjs --source-sha "$SOURCE_SHA" --output-dir .artifacts/cypherclaw-release
+        run: node scripts/build-cypherclaw-release.mjs --source-sha "$SOURCE_SHA" --native-artifacts-dir "$RUNNER_TEMP/cypherclaw-native" --output-dir .artifacts/cypherclaw-release
 
       - name: Record release identity
         id: identity
@@ -76,6 +245,7 @@ jobs:
     needs: prepare
     if: github.repository == 'CypherTroopers/cypherclaw' && inputs.publish
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -125,8 +295,29 @@ jobs:
               --raw-field "ref=refs/tags/$RELEASE_TAG" --raw-field "sha=$SOURCE_SHA" >/dev/null
           fi
           [[ "$(tag_commit)" == "$SOURCE_SHA" ]] || { echo 'Cannot verify the selected tag before publication.' >&2; exit 1; }
-          gh release create "$RELEASE_TAG" release/* \
-            --repo CypherTroopers/cypherclaw --verify-tag --latest \
-            --title "CypherClaw $RELEASE_TAG" \
-            --notes "Built from cypherclaw-stable commit $SOURCE_SHA. SHA256SUMS binds the installer, runtime, manifest, and package assets."
+          release_state="$(gh release list --repo CypherTroopers/cypherclaw --limit 1000 --json tagName,isDraft \
+            | jq -r --arg tag "$RELEASE_TAG" '.[] | select(.tagName == $tag) | if .isDraft then "draft" else "published" end')"
+          if [[ -z "$release_state" ]]; then
+            gh release create "$RELEASE_TAG" release/* \
+              --repo CypherTroopers/cypherclaw --verify-tag --draft \
+              --title "CypherClaw $RELEASE_TAG" \
+              --notes "Built from cypherclaw-stable commit $SOURCE_SHA. SHA256SUMS binds the installer, runtime, manifest, and package assets."
+            release_state=draft
+          fi
+          verification_dir="$(mktemp -d "$RUNNER_TEMP/cypherclaw-release-verify.XXXXXXXX")"
+          trap 'rm -rf -- "$verification_dir"' EXIT
+          gh release download "$RELEASE_TAG" --repo CypherTroopers/cypherclaw --dir "$verification_dir"
+          if ! diff <(find release -maxdepth 1 -type f -printf '%f\n' | sort) \
+            <(find "$verification_dir" -maxdepth 1 -type f -printf '%f\n' | sort) \
+            || ! cmp release/SHA256SUMS "$verification_dir/SHA256SUMS" \
+            || ! (cd "$verification_dir" && sha256sum --check SHA256SUMS); then
+            echo 'The retained release does not match these complete sealed assets. Preserve it for inspection; use a new reviewed commit rather than replacing assets.' >&2
+            exit 1
+          fi
+          [[ "$(tag_commit)" == "$SOURCE_SHA" ]] || { echo 'The draft tag changed; preserve the draft for investigation.' >&2; exit 1; }
+          if [[ "$release_state" == draft ]]; then
+            gh release edit "$RELEASE_TAG" --repo CypherTroopers/cypherclaw --draft=false --latest
+          else
+            echo 'The identical immutable release is already published; no assets or latest pointer were changed.'
+          fi
           [[ "$(tag_commit)" == "$SOURCE_SHA" ]] || { echo 'The published release tag changed; preserve the release for investigation.' >&2; exit 1; }

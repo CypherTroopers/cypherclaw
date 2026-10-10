@@ -15,6 +15,7 @@ import {
   validateCypherClawReleaseManifest,
   verifyAsset,
 } from "./lib/cypherclaw-contract.mjs";
+import { applyCypherClawNativeArtifacts } from "./lib/cypherclaw-native-overlay.mjs";
 import { assertRealOutputRoot } from "./lib/output-root-guard.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -46,16 +47,22 @@ const NATIVE_MATERIALS = [
   "provenance/linux-amd64/manifest.txt",
   "provenance/darwin-arm64/manifest.txt",
   "provenance/windows-amd64/manifest.txt",
+  "patches/README.md",
+  "patches/build-finality-node.sh",
+  "patches/transaction-finality-ipc.patch",
+  "patches/transaction-finality-source.json",
 ];
+const NATIVE_TARGETS = ["linux-amd64", "darwin-arm64", "windows-amd64"];
 
 function usage() {
   return [
-    "Usage: node scripts/build-cypherclaw-release.mjs --source-sha <40-character SHA> --output-dir <directory> [--candidate] [--skip-build]",
+    "Usage: node scripts/build-cypherclaw-release.mjs --source-sha <40-character SHA> --output-dir <directory> [--native-artifacts-dir <directory>] [--candidate] [--skip-build]",
     "       node scripts/build-cypherclaw-release.mjs --check --output-dir <directory>",
     "",
     "The default build requires a clean checkout and a commit on cypherclaw-stable.",
     "--candidate prepares local worktree proof and records it as unpublishable.",
     "--skip-build is candidate-only and requires existing dist/build-info.json bound to the selected SHA.",
+    "--native-artifacts-dir replaces native assets only inside package staging after all three targets are verified.",
     "--check verifies the sealed assets and package source identity without rebuilding.",
   ].join("\n");
 }
@@ -91,7 +98,7 @@ async function describeFile(directory, file) {
   return { file, ...(await hashFile(filename)) };
 }
 
-async function verifyNativeProvenance(root = ROOT) {
+async function verifyNativeProvenance(root = ROOT, { requireFinality = false } = {}) {
   const source = path.join(root, "cypher");
   const ledger = new Map();
   for (const line of (await fs.readFile(path.join(source, "SHA256SUMS"), "utf8"))
@@ -123,9 +130,61 @@ async function verifyNativeProvenance(root = ROOT) {
       throw new Error(`Cypher file differs from its retained provenance: cypher/${relative}`);
     }
   }
+  const finality = JSON.parse(
+    await fs.readFile(path.join(source, "patches/transaction-finality-source.json"), "utf8"),
+  );
+  if (
+    !/^[a-f0-9]{40}$/u.test(finality.baseCommit) ||
+    finality.patch !== "transaction-finality-ipc.patch" ||
+    finality.patchSha256 !== ledger.get(`patches/${finality.patch}`) ||
+    finality.method !== "eth_getTransactionFinality" ||
+    finality.transport !== "ipc" ||
+    finality.result !== "boolean" ||
+    finality.baseSourceArchive?.file !== "cypher-source-60b8164-with-go-dependencies.tar.gz" ||
+    finality.baseSourceArchive.sha256 !== ledger.get(finality.baseSourceArchive.file) ||
+    !Array.isArray(finality.targets) ||
+    finality.targets.length !== NATIVE_TARGETS.length ||
+    !NATIVE_TARGETS.every((target) => finality.targets.includes(target))
+  ) {
+    throw new Error(
+      "Cypher transaction finality metadata does not bind the retained source and patch",
+    );
+  }
+  const limitations = [];
+  for (const target of NATIVE_TARGETS) {
+    const entries = (
+      await fs.readFile(path.join(source, "provenance", target, "manifest.txt"), "utf8")
+    )
+      .trim()
+      .split(/\r?\n/u)
+      .map((line) => {
+        const separator = line.indexOf("=");
+        return [line.slice(0, separator), line.slice(separator + 1)];
+      });
+    const manifest = new Map(entries);
+    const binary = target === "windows-amd64" ? "cypher.exe" : `cypher-${target}`;
+    if (
+      manifest.size !== entries.length ||
+      manifest.get("source_sha") !== finality.baseCommit ||
+      manifest.get("source_patch_sha256") !== finality.patchSha256 ||
+      manifest.get("ipc_transaction_finality_method") !== finality.method ||
+      manifest.get("binary") !== binary ||
+      manifest.get("binary_sha256") !== ledger.get(`build/bin/${binary}`)
+    ) {
+      limitations.push(
+        `Bundled ${target} node provenance does not bind the transaction finality patch.`,
+      );
+    }
+  }
+  if (requireFinality && limitations.length) {
+    throw new Error(
+      `Cypher publication requires patched native binaries on all targets: ${limitations.join(" ")}`,
+    );
+  }
+  return limitations;
 }
 
-async function readStagedPackage(directory, tarball) {
+async function readStagedPackage(directory, tarball, options) {
   extractTar({ file: tarball, cwd: directory, strict: true, sync: true });
   const packageRoot = path.join(directory, "package");
   const packageJson = JSON.parse(await fs.readFile(path.join(packageRoot, "package.json"), "utf8"));
@@ -134,7 +193,7 @@ async function readStagedPackage(directory, tarball) {
   );
   await fs.access(path.join(packageRoot, "dist/control-ui/index.html"));
   await fs.access(path.join(packageRoot, "cypher/config/browser-relay/common-mine.json"));
-  await verifyNativeProvenance(packageRoot);
+  await verifyNativeProvenance(packageRoot, options);
   return { packageRoot, packageJson, buildInfo };
 }
 
@@ -158,6 +217,7 @@ async function checkRelease(outputDir) {
     const { packageJson, buildInfo } = await readStagedPackage(
       stage,
       path.join(outputDir, PACKAGE),
+      { requireFinality: manifest.publication.ready },
     );
     const distribution = packageJson.openclaw?.distribution;
     if (
@@ -187,7 +247,15 @@ async function checkRelease(outputDir) {
 async function main() {
   const options = parseFlagArgs(
     process.argv.slice(2),
-    { candidate: false, check: false, help: false, outputDir: "", skipBuild: false, sourceSha: "" },
+    {
+      candidate: false,
+      check: false,
+      help: false,
+      nativeArtifactsDir: "",
+      outputDir: "",
+      skipBuild: false,
+      sourceSha: "",
+    },
     [
       booleanFlag("--candidate", "candidate"),
       booleanFlag("--check", "check"),
@@ -195,6 +263,7 @@ async function main() {
       booleanFlag("--skip-build", "skipBuild"),
       stringFlag("--output-dir", "outputDir"),
       stringFlag("--source-sha", "sourceSha"),
+      stringFlag("--native-artifacts-dir", "nativeArtifactsDir"),
     ],
   );
   if (options.help) {
@@ -207,7 +276,7 @@ async function main() {
   const outputDir = path.resolve(options.outputDir);
   assertRealOutputRoot(outputDir);
   if (options.check) {
-    if (options.candidate || options.skipBuild || options.sourceSha) {
+    if (options.candidate || options.skipBuild || options.sourceSha || options.nativeArtifactsDir) {
       throw new Error("--check accepts only --output-dir");
     }
     await checkRelease(outputDir);
@@ -236,7 +305,9 @@ async function main() {
     }
     await run("git", ["merge-base", "--is-ancestor", sourceCommit, `origin/${SOURCE_BRANCH}`]);
   }
-  await verifyNativeProvenance();
+  let nativeLimitations = await verifyNativeProvenance(ROOT, {
+    requireFinality: !options.candidate && !options.nativeArtifactsDir,
+  });
   await fs.mkdir(outputDir, { recursive: true });
   if ((await fs.readdir(outputDir)).length) {
     throw new Error("Use an empty output directory; existing release artifacts are preserved");
@@ -282,7 +353,15 @@ async function main() {
     const { packageRoot, packageJson, buildInfo } = await readStagedPackage(
       stage,
       path.join(outputDir, PACKAGE),
+      { requireFinality: !options.candidate && !options.nativeArtifactsDir },
     );
+    if (options.nativeArtifactsDir) {
+      await applyCypherClawNativeArtifacts({
+        packageRoot,
+        artifactsDir: path.resolve(options.nativeArtifactsDir),
+      });
+      nativeLimitations = await verifyNativeProvenance(packageRoot, { requireFinality: true });
+    }
     if (buildInfo.commit !== sourceCommit || buildInfo.version !== version) {
       throw new Error("Package build metadata does not match the selected source SHA and version");
     }
@@ -345,7 +424,10 @@ async function main() {
     publication: {
       ready: !options.candidate,
       limitations: options.candidate
-        ? ["Local candidate proof; worktree bytes are not an immutable reviewed release commit."]
+        ? [
+            "Local candidate proof; worktree bytes are not an immutable reviewed release commit.",
+            ...nativeLimitations,
+          ]
         : [],
     },
   };

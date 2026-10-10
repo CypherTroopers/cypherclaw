@@ -1,0 +1,26 @@
+{
+  "repository": "https://github.com/CypherTroopers/cypher",
+  "branch": "FHS-D",
+  "baseCommit": "e9c56c2e9095aafc05dcfa31c85959049e24254c",
+  "patch": "transaction-finality-ipc.patch",
+  "patchSha256": "587da1352062da15ff813228f2d196eae1f448042a59a66e42a7a2b88d4355c6",
+  "method": "eth_getTransactionFinality",
+  "params": [
+    "transactionHash"
+  ],
+  "result": "boolean",
+  "transport": "ipc",
+  "nonIpcErrorCode": -32601,
+  "owner": "core.BlockChain.IsFinalizedTransaction",
+  "targets": [
+    "linux-amd64",
+    "darwin-arm64",
+    "windows-amd64"
+  ],
+  "baseSourceArchive": {
+    "file": "cypher-source-60b8164-with-go-dependencies.tar.gz",
+    "commit": "60b8164405a4d5531c65f778e5661b9272cedbc2",
+    "sha256": "884ba41ad79bc7264ca2fffe6e5c0a40ca00e138b8f21550b464da7bb9374291",
+    "relationship": "Native Go and build source is unchanged between the archive commit and baseCommit; differences are built artifact trees, .gitignore, and browser-llm-lab/searxng/config/settings.example.yml."
+  }
+}
