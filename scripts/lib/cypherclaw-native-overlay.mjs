@@ -387,4 +387,5 @@ export async function applyCypherClawNativeArtifacts({
     path.join(source, "SHA256SUMS"),
     [...ledger].map(([file, hash]) => `${hash}  ${file}\n`).join(""),
   );
+  return { sourceArchive: sourceBundle ? `cypher/${sourceBundle.file}` : undefined };
 }

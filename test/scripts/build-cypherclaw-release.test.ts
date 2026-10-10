@@ -10,8 +10,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { create as createTar, extract as extractTar } from "tar";
+import { create as createTar, extract as extractTar, list as listTar } from "tar";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  collectNpmPackInventory,
+  compareNpmPackInventory,
+} from "../../scripts/lib/npm-pack-inventory.mts";
 import { runNodeScript } from "../helpers/run-node-script.js";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
@@ -109,6 +113,17 @@ describe("CypherClaw release builder CLI", () => {
         version: "2026.9.9",
         type: "module",
         engines: { node: ">=24.21.0" },
+        files: [
+          "dist/",
+          "cypher/build/bin/",
+          "cypher/BUILDINFO.txt",
+          "cypher/SHA256SUMS",
+          "cypher/licenses/",
+          "cypher/provenance/",
+          "cypher/patches/",
+          "cypher/config/",
+          `cypher/${SOURCE_ARCHIVE}`,
+        ],
         openclaw: { schemaVersions: { state: 19, agent: 19 } },
       }),
     );
@@ -521,6 +536,25 @@ if (process.env.CYPHERCLAW_FIXTURE_MUTATE_SOURCE === "1") {
     mkdirSync(stage);
     extractTar({ file: path.join(output, "cypherclaw.tgz"), cwd: stage, strict: true, sync: true });
     const packageRoot = path.join(stage, "package");
+    const tarFiles: string[] = [];
+    listTar({
+      file: path.join(output, "cypherclaw.tgz"),
+      sync: true,
+      onReadEntry(entry) {
+        if (entry.type === "File") {
+          tarFiles.push(entry.path.replace(/^package\//u, ""));
+        }
+      },
+    });
+    writeFixtureFile(packageRoot, "cypher/cypher-source-unselected.tar.gz", "Unselected source\n");
+    const npmInventory = collectNpmPackInventory(packageRoot, {
+      sourceEnv: fixtureEnv,
+      timeoutMs: 30_000,
+    });
+    expect(compareNpmPackInventory(tarFiles, npmInventory.files)).toEqual({
+      extra: [],
+      missing: [],
+    });
     const finality = JSON.parse(
       readFileSync(
         path.join(packageRoot, "cypher/patches/transaction-finality-source.json"),

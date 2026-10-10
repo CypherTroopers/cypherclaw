@@ -435,7 +435,7 @@ async function main() {
       { requireFinality: !options.candidate && !options.nativeArtifactsDir },
     );
     if (options.nativeArtifactsDir) {
-      await applyCypherClawNativeArtifacts({
+      const { sourceArchive } = await applyCypherClawNativeArtifacts({
         packageRoot,
         artifactsDir: path.resolve(options.nativeArtifactsDir),
         ...(options.nativeSourceSha
@@ -446,6 +446,9 @@ async function main() {
             }
           : {}),
       });
+      if (sourceArchive && !packageJson.files.includes(sourceArchive)) {
+        packageJson.files.push(sourceArchive);
+      }
       nativeLimitations = await verifyNativeProvenance(packageRoot, { requireFinality: true });
     }
     if (buildInfo.commit !== sourceCommit || buildInfo.version !== version) {
