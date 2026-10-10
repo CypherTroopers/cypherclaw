@@ -945,9 +945,9 @@ describe("applySystemAgentSetup transaction boundaries", () => {
   });
 
   it.each([
-    { platform: "linux", action: "installed", deadlineMs: 45_000, probeTimeoutMs: 10_000 },
-    { platform: "win32", action: "installed", deadlineMs: 90_000, probeTimeoutMs: 15_000 },
-    { platform: "linux", action: "restarted", deadlineMs: 45_000, probeTimeoutMs: 10_000 },
+    { platform: "linux", action: "installed", deadlineMs: 120_000, probeTimeoutMs: 10_000 },
+    { platform: "win32", action: "installed", deadlineMs: 120_000, probeTimeoutMs: 15_000 },
+    { platform: "linux", action: "restarted", deadlineMs: 120_000, probeTimeoutMs: 10_000 },
   ] as const)(
     "uses the $platform readiness budget after service $action",
     async ({ platform, action, deadlineMs, probeTimeoutMs }) => {

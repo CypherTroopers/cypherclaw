@@ -8,6 +8,7 @@ import type { SpawnResult } from "../process/exec-result.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { withMockedPlatform } from "../test-utils/vitest-spies.js";
+import { resolveGatewayStartupTiming } from "./gateway-startup-timing.js";
 import {
   formatControlUiSshHint,
   handleReset,
@@ -508,6 +509,29 @@ describe("formatControlUiSshHint", () => {
 });
 
 describe("waitForGatewayReachable", () => {
+  it("accepts a managed Gateway whose cold start takes 61 seconds", async () => {
+    await withMockedPlatform("linux", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      try {
+        mocks.probeGateway.mockImplementation(async () => ({
+          ok: Date.now() >= 61_000,
+          error: "connect failed: Gateway is still starting",
+        }));
+
+        const waiting = waitForGatewayReachable({
+          url: "ws://127.0.0.1:56817",
+          ...resolveGatewayStartupTiming(),
+        });
+        await vi.runAllTimersAsync();
+
+        expect(await waiting).toEqual({ ok: true });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it("keeps oversized poll intervals within the overall deadline", async () => {
     mocks.probeGateway.mockResolvedValue({
       ok: false,

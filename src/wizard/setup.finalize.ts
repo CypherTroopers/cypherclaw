@@ -763,7 +763,10 @@ export async function finalizeSetupWizard(
     );
 
     let launchedTui = false;
-    const shouldLaunchTui = !opts.skipUi;
+    const shouldLaunchTui =
+      !opts.skipUi &&
+      (gatewayProbe.ok ||
+        (gateway.status === "skipped" && gateway.reason !== "external" && !sessionGateway));
 
     if (shouldLaunchTui) {
       if (hasBootstrap) {
