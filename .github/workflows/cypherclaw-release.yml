@@ -1,12 +1,12 @@
 name: CypherClaw Release
-run-name: CypherClaw stable ${{ inputs.source_sha }} ${{ inputs.publish && 'publish' || 'prepare' }}
+run-name: CypherClaw latest FHS-D ${{ inputs.publish && 'publish' || 'prepare' }}
 
 on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Reviewed full 40-character commit SHA on cypherclaw-stable
-        required: true
+        description: Optional reviewed stable SHA; blank selects this run's cypherclaw-stable commit
+        required: false
         type: string
       publish:
         description: Publish the prepared release only if its manifest has no publication blockers
@@ -27,30 +27,35 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
-      native_source_sha: ${{ steps.native-source.outputs.sha }}
+      source_sha: ${{ steps.source.outputs.sha }}
+      native_distribution_sha: ${{ steps.native-source.outputs.sha }}
     steps:
       - name: Validate source identity
+        id: source
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          REQUESTED_SHA: ${{ inputs.source_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
         run: |
+          SOURCE_SHA="${REQUESTED_SHA:-$WORKFLOW_SHA}"
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'A full lowercase source SHA is required.' >&2; exit 1; }
+          printf 'sha=%s\n' "$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Checkout reviewed source metadata
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ steps.source.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
           sparse-checkout: cypher/patches
 
-      - name: Verify stable membership and pinned native source
+      - name: Verify stable membership and resolve latest FHS-D once
         id: native-source
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           git merge-base --is-ancestor "$SOURCE_SHA" origin/cypherclaw-stable
           python3 - <<'PY'
-          import hashlib, json, os, pathlib, re
+          import hashlib, json, pathlib, re
           root = pathlib.Path('cypher/patches')
           metadata = json.loads((root / 'transaction-finality-source.json').read_text())
           sha = metadata['baseCommit']
@@ -58,140 +63,105 @@ jobs:
               raise SystemExit('A pinned native source SHA is required')
           if metadata['patch'] != 'transaction-finality-ipc.patch' or hashlib.sha256((root / metadata['patch']).read_bytes()).hexdigest() != metadata['patchSha256']:
               raise SystemExit('Native source patch identity mismatch')
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write(f'sha={sha}\n')
           PY
+          NATIVE_SHA="$(git ls-remote https://github.com/CypherTroopers/cypher.git refs/heads/FHS-D | awk '$2 == "refs/heads/FHS-D" {print $1}')"
+          [[ "$NATIVE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Cannot resolve the latest FHS-D commit.' >&2; exit 1; }
+          printf 'sha=%s\n' "$NATIVE_SHA" >> "$GITHUB_OUTPUT"
+          printf 'Selected CypherClaw `%s` and current FHS-D `%s`. All targets use these exact commits.\n' "$SOURCE_SHA" "$NATIVE_SHA" >> "$GITHUB_STEP_SUMMARY"
 
-  build-native:
-    name: Native ${{ matrix.target }}
+  acquire-native:
+    name: Acquire official FHS-D node outputs
     needs: validate
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix:
-        include:
-          - target: linux-amd64
-            runner: ubuntu-24.04
-            goos: linux
-            goarch: amd64
-          - target: darwin-arm64
-            runner: macos-15
-            goos: darwin
-            goarch: arm64
-          - target: windows-amd64
-            runner: windows-2022
-            goos: windows
-            goarch: amd64
-    env:
-      TARGET_OS: ${{ matrix.goos }}
-      TARGET_ARCH: ${{ matrix.goarch }}
-      CGO_ENABLED: "1"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      native_source_sha: ${{ steps.native.outputs.source_sha }}
+      native_distribution_sha: ${{ steps.native.outputs.distribution_sha }}
     steps:
-      - name: Configure Windows checkout
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          git config --global core.longpaths true
-          git config --global core.autocrlf false
-
-      - name: Checkout exact CypherClaw build inputs
+      - name: Checkout reviewed CypherClaw intake tools
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ needs.validate.outputs.source_sha }}
           persist-credentials: false
-          sparse-checkout: |
-            cypher/patches
-            cypher/provenance/msys2
-            scripts
+          sparse-checkout: scripts
 
-      - name: Checkout pinned Cypher source
+      - name: Checkout exact FHS-D distribution
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: CypherTroopers/cypher
-          ref: ${{ needs.validate.outputs.native_source_sha }}
+          ref: ${{ needs.validate.outputs.native_distribution_sha }}
+          fetch-depth: 0
           path: .artifacts/cypher-source
           persist-credentials: false
 
-      - name: Setup retained Go toolchain
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26.2"
-          cache: false
-
-      - name: Install Linux native dependencies
-        if: runner.os == 'Linux'
+      - name: Import unchanged official node files
+        id: native
+        env:
+          DISTRIBUTION_SHA: ${{ needs.validate.outputs.native_distribution_sha }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential ca-certificates file libgmp-dev libssl-dev python3
+          node scripts/import-cypherclaw-native.mjs --source-dir .artifacts/cypher-source --distribution-sha "$DISTRIBUTION_SHA" --output-dir "$RUNNER_TEMP/cypherclaw-official" > "$RUNNER_TEMP/cypherclaw-official.json"
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const identity = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/cypherclaw-official.json`, 'utf8'));
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `source_sha=${identity.nativeSourceCommit}\ndistribution_sha=${identity.nativeDistributionCommit}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Official FHS-D build source: ${identity.nativeSourceCommit}\n\nDistribution commit: ${identity.nativeDistributionCommit}\n`);
+          NODE
 
-      - name: Install macOS native dependencies
-        if: runner.os == 'macOS'
+      - name: Export matching repository source
         env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-        run: brew install openssl@3 gmp
+          SOURCE_SHA: ${{ steps.native.outputs.source_sha }}
+        run: |
+          git -C .artifacts/cypher-source checkout --detach "$SOURCE_SHA"
+          python3 scripts/export-cypherclaw-native-source.py --source-dir .artifacts/cypher-source --source-sha "$SOURCE_SHA" --output-dir "$RUNNER_TEMP/cypherclaw-native-source"
 
-      - name: Setup Windows native environment
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
-        with:
-          msystem: MINGW64
-          update: false
-          path-type: inherit
-          install: file git make python
-
-      - name: Install pinned Windows compiler and runtime packages
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: python3 scripts/setup-cypherclaw-msys2.py
-
-      - name: Build and test Linux node
-        if: runner.os == 'Linux'
-        run: bash cypher/patches/build-finality-node.sh --source-dir .artifacts/cypher-source --output-dir .artifacts/native-build
-
-      - name: Build and test macOS node
-        if: runner.os == 'macOS'
-        shell: /bin/bash --noprofile --norc -eo pipefail {0}
-        env:
-          MACOSX_DEPLOYMENT_TARGET: "15.0"
-        run: /bin/bash cypher/patches/build-finality-node.sh --source-dir .artifacts/cypher-source --output-dir .artifacts/native-build
-
-      - name: Build and test Windows node
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: bash cypher/patches/build-finality-node.sh --source-dir .artifacts/cypher-source --output-dir .artifacts/native-build
-
-      - name: Upload native build
+      - name: Upload admitted node outputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: cypherclaw-native-${{ matrix.target }}-${{ inputs.source_sha }}
-          path: .artifacts/native-build/stage/${{ matrix.target }}/*
+          name: cypherclaw-native-${{ needs.validate.outputs.native_distribution_sha }}
+          path: ${{ runner.temp }}/cypherclaw-official/native
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload matching source archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cypherclaw-source-${{ needs.validate.outputs.native_distribution_sha }}
+          path: ${{ runner.temp }}/cypherclaw-native-source/*
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
 
   prepare:
-    needs: build-native
+    needs: [validate, acquire-native]
     if: github.repository == 'CypherTroopers/cypherclaw'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     outputs:
+      source_sha: ${{ steps.snapshot.outputs.sha }}
       release_tag: ${{ steps.identity.outputs.release_tag }}
       publication_ready: ${{ steps.identity.outputs.publication_ready }}
     steps:
-      - name: Validate source identity
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-        run: |
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'A full lowercase source SHA is required.' >&2; exit 1; }
-
       - name: Checkout exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ needs.validate.outputs.source_sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Create immutable release source snapshot
+        id: snapshot
+        env:
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+          NATIVE_SOURCE_SHA: ${{ needs.acquire-native.outputs.native_source_sha }}
+          NATIVE_DISTRIBUTION_SHA: ${{ needs.acquire-native.outputs.native_distribution_sha }}
+        run: |
+          node scripts/prepare-cypherclaw-release-source.mjs --source-sha "$SOURCE_SHA" --native-source-sha "$NATIVE_SOURCE_SHA" --native-distribution-sha "$NATIVE_DISTRIBUTION_SHA" --output-dir "$RUNNER_TEMP/cypherclaw-release-source" > "$RUNNER_TEMP/cypherclaw-release-source.json"
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const identity = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/cypherclaw-release-source.json`, 'utf8'));
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `sha=${identity.sourceCommit}\n`);
+          NODE
 
       - name: Setup pinned package toolchain
         uses: ./.github/actions/setup-node-env
@@ -200,28 +170,24 @@ jobs:
           install-bun: "true"
           frozen-lockfile: "true"
 
-      - name: Download Linux native build
+      - name: Download official node outputs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: cypherclaw-native-linux-amd64-${{ inputs.source_sha }}
-          path: ${{ runner.temp }}/cypherclaw-native/linux-amd64
+          name: cypherclaw-native-${{ needs.acquire-native.outputs.native_distribution_sha }}
+          path: ${{ runner.temp }}/cypherclaw-native
 
-      - name: Download macOS native build
+      - name: Download matching source archive
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: cypherclaw-native-darwin-arm64-${{ inputs.source_sha }}
-          path: ${{ runner.temp }}/cypherclaw-native/darwin-arm64
-
-      - name: Download Windows native build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: cypherclaw-native-windows-amd64-${{ inputs.source_sha }}
-          path: ${{ runner.temp }}/cypherclaw-native/windows-amd64
+          name: cypherclaw-source-${{ needs.acquire-native.outputs.native_distribution_sha }}
+          path: ${{ runner.temp }}/cypherclaw-native-source
 
       - name: Build and seal release assets
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-        run: node scripts/build-cypherclaw-release.mjs --source-sha "$SOURCE_SHA" --native-artifacts-dir "$RUNNER_TEMP/cypherclaw-native" --output-dir .artifacts/cypherclaw-release
+          SOURCE_SHA: ${{ steps.snapshot.outputs.sha }}
+          NATIVE_SOURCE_SHA: ${{ needs.acquire-native.outputs.native_source_sha }}
+          NATIVE_DISTRIBUTION_SHA: ${{ needs.acquire-native.outputs.native_distribution_sha }}
+        run: node scripts/build-cypherclaw-release.mjs --source-sha "$SOURCE_SHA" --native-artifacts-dir "$RUNNER_TEMP/cypherclaw-native" --native-source-sha "$NATIVE_SOURCE_SHA" --native-distribution-sha "$NATIVE_DISTRIBUTION_SHA" --native-source-bundle-dir "$RUNNER_TEMP/cypherclaw-native-source" --output-dir .artifacts/cypherclaw-release
 
       - name: Record release identity
         id: identity
@@ -230,25 +196,64 @@ jobs:
           import fs from 'node:fs';
           const manifest = JSON.parse(fs.readFileSync('.artifacts/cypherclaw-release/cypherclaw-release.json', 'utf8'));
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `release_tag=${manifest.releaseTag}\npublication_ready=${manifest.publication.ready}\n`);
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Prepared ${manifest.releaseTag} from ${manifest.sourceCommit}.\n\n${manifest.publication.limitations.map((entry) => `- ${entry}`).join('\n')}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Prepared ${manifest.releaseTag}.\n\nReviewed CypherClaw: ${manifest.reviewedSourceCommit}\n\nFHS-D build source: ${manifest.nativeSourceCommit}\n\nFHS-D distribution: ${manifest.nativeDistributionCommit}\n\nRelease snapshot: ${manifest.sourceCommit}\n\n${manifest.publication.limitations.map((entry) => `- ${entry}`).join('\n')}\n`);
           NODE
 
       - name: Upload prepared release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: cypherclaw-release-${{ inputs.source_sha }}
+          name: cypherclaw-release-${{ steps.snapshot.outputs.sha }}
           path: .artifacts/cypherclaw-release/*
           if-no-files-found: error
           compression-level: 0
 
+      - name: Upload release source objects
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cypherclaw-release-source-${{ steps.snapshot.outputs.sha }}
+          path: ${{ runner.temp }}/cypherclaw-release-source/cypherclaw-source.bundle
+          if-no-files-found: error
+          compression-level: 0
+
   publish:
-    needs: prepare
+    needs: [validate, acquire-native, prepare]
     if: github.repository == 'CypherTroopers/cypherclaw' && inputs.publish
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: write
     steps:
+      - name: Checkout reviewed source for tag verification
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: source
+
+      - name: Download release source objects
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cypherclaw-release-source-${{ needs.prepare.outputs.source_sha }}
+          path: ${{ runner.temp }}/cypherclaw-release-source
+
+      - name: Import and verify exact source snapshot
+        working-directory: source
+        env:
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+          REVIEWED_SHA: ${{ needs.validate.outputs.source_sha }}
+          NATIVE_SHA: ${{ needs.acquire-native.outputs.native_source_sha }}
+          NATIVE_DISTRIBUTION_SHA: ${{ needs.acquire-native.outputs.native_distribution_sha }}
+        run: |
+          git bundle verify "$RUNNER_TEMP/cypherclaw-release-source/cypherclaw-source.bundle"
+          git fetch --no-tags "$RUNNER_TEMP/cypherclaw-release-source/cypherclaw-source.bundle" refs/heads/cypherclaw-release-snapshot:refs/heads/cypherclaw-release-snapshot
+          git checkout --detach "$SOURCE_SHA"
+          node scripts/prepare-cypherclaw-release-source.mjs --verify --source-sha "$SOURCE_SHA" > "$RUNNER_TEMP/cypherclaw-publish-source.json"
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const identity = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/cypherclaw-publish-source.json`, 'utf8'));
+          if (identity.reviewedSourceCommit !== process.env.REVIEWED_SHA || identity.nativeSourceCommit !== process.env.NATIVE_SHA || identity.nativeDistributionCommit !== process.env.NATIVE_DISTRIBUTION_SHA) throw new Error('Release source selection changed.');
+          NODE
       - name: Reject publication blockers
         env:
           PUBLICATION_READY: ${{ needs.prepare.outputs.publication_ready }}
@@ -261,7 +266,7 @@ jobs:
       - name: Download exact prepared assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: cypherclaw-release-${{ inputs.source_sha }}
+          name: cypherclaw-release-${{ needs.prepare.outputs.source_sha }}
           path: release
 
       - name: Verify sealed bytes
@@ -272,7 +277,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+          REVIEWED_SHA: ${{ needs.validate.outputs.source_sha }}
+          NATIVE_SHA: ${{ needs.acquire-native.outputs.native_source_sha }}
+          NATIVE_DISTRIBUTION_SHA: ${{ needs.acquire-native.outputs.native_distribution_sha }}
         run: |
           set -euo pipefail
           tag_commit() {
@@ -289,10 +297,8 @@ jobs:
             exit 1
           fi
           if [[ -z "$selected_tag_commit" ]]; then
-            # Creating the exact ref first gives release creation a checked tag.
-            # GitHub refuses a concurrent creator; uncertain writes are preserved.
-            gh api --method POST repos/CypherTroopers/cypherclaw/git/refs \
-              --raw-field "ref=refs/tags/$RELEASE_TAG" --raw-field "sha=$SOURCE_SHA" >/dev/null
+            gh auth setup-git
+            git -C source push --no-follow-tags origin "$SOURCE_SHA:refs/tags/$RELEASE_TAG"
           fi
           [[ "$(tag_commit)" == "$SOURCE_SHA" ]] || { echo 'Cannot verify the selected tag before publication.' >&2; exit 1; }
           release_state="$(gh release list --repo CypherTroopers/cypherclaw --limit 1000 --json tagName,isDraft \
@@ -301,7 +307,7 @@ jobs:
             gh release create "$RELEASE_TAG" release/* \
               --repo CypherTroopers/cypherclaw --verify-tag --draft \
               --title "CypherClaw $RELEASE_TAG" \
-              --notes "Built from cypherclaw-stable commit $SOURCE_SHA. SHA256SUMS binds the installer, runtime, manifest, and package assets."
+              --notes "Reviewed cypherclaw-stable commit $REVIEWED_SHA; FHS-D build source $NATIVE_SHA; FHS-D distribution $NATIVE_DISTRIBUTION_SHA; immutable release snapshot $SOURCE_SHA. SHA256SUMS binds the installer, runtime, manifest, and package assets."
             release_state=draft
           fi
           verification_dir="$(mktemp -d "$RUNNER_TEMP/cypherclaw-release-verify.XXXXXXXX")"

@@ -1,4 +1,19 @@
-# IPC transaction finality patch
+# IPC transaction finality source records
+
+Production releases import the official FHS-D node binaries and Windows DLLs
+without rebuilding or patching them in CypherClaw. FHS-D owns the API addition,
+native build, tests, and persisted `build/provenance/<target>/` records.
+`scripts/import-cypherclaw-native.mjs` admits one immutable distribution commit
+and its recorded build-source commit. Source changes newer than the completed
+build are rejected until FHS-D publishes their matching outputs.
+
+The package includes a matching `cypher-source-<build-source-SHA>.tar.gz` and
+records both the build-source and distribution commits. That archive contains
+repository source, including the integrated IPC API and its tests; it does not
+establish current Go module or external native dependency source completeness.
+
+The patch and wrapper below are retained historical source material for the
+original bundle. They are not called by the production release workflow.
 
 `transaction-finality-source.json` pins the FHS-D base commit and patch SHA256.
 The patch adds `eth_getTransactionFinality(transactionHash) -> boolean` to the
@@ -6,7 +21,7 @@ full-node API and delegates to `BlockChain.IsFinalizedTransaction`. Only the
 IPC transport may call it; HTTP, WebSocket, and in-process calls return JSON-RPC
 error `-32601`. Receipt availability alone does not establish finality.
 
-Build on each target's native host using the existing Cypher native builder:
+To reproduce the historical patched bundle, build on each target's native host:
 
 ```sh
 bash cypher/patches/build-finality-node.sh \
@@ -29,12 +44,10 @@ Its native Go and build source matches the pinned FHS-D base; the intervening
 changes affect built artifacts, ignore rules, and an example SearXNG config.
 Keep that source archive, this patch, metadata, native manifests, checksums,
 dependency notices, and licenses together when preparing the updated bundle.
-The CypherClaw release workflow uses Go 1.26.2 on all three native hosts and
-passes their target directories to the package builder's
-`--native-artifacts-dir` input. Assembly updates package staging without
-changing the clean reviewed source checkout. Windows compiler and runtime
-packages are installed from the retained checksummed package identities so
-the existing five runtime DLLs and their provenance remain consistent.
+FHS-D's official build records identify the actual Go toolchain, dependency
+references, and output checksums. Assembly copies all admitted binaries and
+DLLs into package staging and refreshes its active provenance, while retaining
+the original bundle's records and their verification limits.
 
 Run the focused API and existing core finality contract checks in the patched
 source tree with its native libraries installed:

@@ -43,7 +43,7 @@ metadata = json.loads((root / "transaction-finality-source.json").read_text())
 patch = root / metadata["patch"]
 if hashlib.sha256(patch.read_bytes()).hexdigest() != metadata["patchSha256"]:
     raise SystemExit("Transaction finality patch checksum mismatch")
-print(metadata["baseCommit"])
+print(metadata.get("reviewedBaseCommit", metadata["baseCommit"]))
 PY
 )"
 git -C "${SOURCE_DIR}" cat-file -e "${BASE_COMMIT}^{commit}" ||

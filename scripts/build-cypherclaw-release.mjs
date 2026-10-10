@@ -16,6 +16,7 @@ import {
   verifyAsset,
 } from "./lib/cypherclaw-contract.mjs";
 import { applyCypherClawNativeArtifacts } from "./lib/cypherclaw-native-overlay.mjs";
+import { verifyCypherClawReleaseSource } from "./lib/cypherclaw-release-source.mjs";
 import { assertRealOutputRoot } from "./lib/output-root-guard.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -63,6 +64,7 @@ function usage() {
     "--candidate prepares local worktree proof and records it as unpublishable.",
     "--skip-build is candidate-only and requires existing dist/build-info.json bound to the selected SHA.",
     "--native-artifacts-dir replaces native assets only inside package staging after all three targets are verified.",
+    "--native-source-sha, --native-distribution-sha, and --native-source-bundle-dir bind official FHS-D outputs and their source.",
     "--check verifies the sealed assets and package source identity without rebuilding.",
   ].join("\n");
 }
@@ -140,7 +142,11 @@ async function verifyNativeProvenance(root = ROOT, { requireFinality = false } =
     finality.method !== "eth_getTransactionFinality" ||
     finality.transport !== "ipc" ||
     finality.result !== "boolean" ||
-    finality.baseSourceArchive?.file !== "cypher-source-60b8164-with-go-dependencies.tar.gz" ||
+    !(
+      finality.baseSourceArchive?.file === "cypher-source-60b8164-with-go-dependencies.tar.gz" ||
+      (finality.baseSourceArchive?.file === `cypher-source-${finality.baseCommit}.tar.gz` &&
+        finality.baseSourceArchive.commit === finality.baseCommit)
+    ) ||
     finality.baseSourceArchive.sha256 !== ledger.get(finality.baseSourceArchive.file) ||
     !Array.isArray(finality.targets) ||
     finality.targets.length !== NATIVE_TARGETS.length ||
@@ -151,6 +157,10 @@ async function verifyNativeProvenance(root = ROOT, { requireFinality = false } =
     );
   }
   const limitations = [];
+  const officialSource = finality.sourceIntegration === "FHS-D";
+  if (officialSource && !/^[a-f0-9]{40}$/u.test(finality.distributionCommit)) {
+    throw new Error("Official FHS-D provenance is missing its distribution commit");
+  }
   for (const target of NATIVE_TARGETS) {
     const entries = (
       await fs.readFile(path.join(source, "provenance", target, "manifest.txt"), "utf8")
@@ -166,19 +176,20 @@ async function verifyNativeProvenance(root = ROOT, { requireFinality = false } =
     if (
       manifest.size !== entries.length ||
       manifest.get("source_sha") !== finality.baseCommit ||
-      manifest.get("source_patch_sha256") !== finality.patchSha256 ||
+      (!officialSource && manifest.get("source_patch_sha256") !== finality.patchSha256) ||
+      (officialSource && manifest.get("ipc_transaction_finality_transport") !== "ipc") ||
       manifest.get("ipc_transaction_finality_method") !== finality.method ||
       manifest.get("binary") !== binary ||
       manifest.get("binary_sha256") !== ledger.get(`build/bin/${binary}`)
     ) {
       limitations.push(
-        `Bundled ${target} node provenance does not bind the transaction finality patch.`,
+        `Bundled ${target} node provenance does not bind the transaction finality API.`,
       );
     }
   }
   if (requireFinality && limitations.length) {
     throw new Error(
-      `Cypher publication requires patched native binaries on all targets: ${limitations.join(" ")}`,
+      `Cypher publication requires transaction finality support on all native targets: ${limitations.join(" ")}`,
     );
   }
   return limitations;
@@ -198,9 +209,8 @@ async function readStagedPackage(directory, tarball, options) {
 }
 
 async function checkRelease(outputDir) {
-  const manifest = validateCypherClawReleaseManifest(
-    JSON.parse(await fs.readFile(path.join(outputDir, MANIFEST), "utf8")),
-  );
+  const recordedManifest = JSON.parse(await fs.readFile(path.join(outputDir, MANIFEST), "utf8"));
+  const manifest = validateCypherClawReleaseManifest(recordedManifest);
   const entries = [manifest.package, ...manifest.assets];
   for (const entry of entries) {
     await verifyAsset(path.join(outputDir, entry.file), entry);
@@ -220,6 +230,38 @@ async function checkRelease(outputDir) {
       { requireFinality: manifest.publication.ready },
     );
     const distribution = packageJson.openclaw?.distribution;
+    const finality = JSON.parse(
+      await fs.readFile(
+        path.join(stage, "package/cypher/patches/transaction-finality-source.json"),
+        "utf8",
+      ),
+    );
+    if (
+      recordedManifest.reviewedSourceCommit ||
+      recordedManifest.nativeSourceCommit ||
+      recordedManifest.nativeDistributionCommit ||
+      finality.releaseInputs
+    ) {
+      if (
+        !/^[a-f0-9]{40}$/u.test(recordedManifest.reviewedSourceCommit) ||
+        !/^[a-f0-9]{40}$/u.test(recordedManifest.nativeSourceCommit) ||
+        !/^[a-f0-9]{40}$/u.test(recordedManifest.nativeDistributionCommit) ||
+        distribution?.reviewedSourceCommit !== recordedManifest.reviewedSourceCommit ||
+        distribution?.nativeSourceCommit !== recordedManifest.nativeSourceCommit ||
+        distribution?.nativeDistributionCommit !== recordedManifest.nativeDistributionCommit ||
+        finality.releaseInputs?.reviewedSourceCommit !== recordedManifest.reviewedSourceCommit ||
+        finality.releaseInputs?.nativeSourceCommit !== recordedManifest.nativeSourceCommit ||
+        finality.releaseInputs?.nativeDistributionCommit !==
+          recordedManifest.nativeDistributionCommit ||
+        finality.baseCommit !== recordedManifest.nativeSourceCommit ||
+        finality.distributionCommit !== recordedManifest.nativeDistributionCommit ||
+        finality.baseSourceArchive?.commit !== recordedManifest.nativeSourceCommit
+      ) {
+        throw new Error(
+          "Release source selection, packaged native source, and distribution provenance disagree",
+        );
+      }
+    }
     if (
       packageJson.name !== manifest.package.name ||
       packageJson.version !== manifest.version ||
@@ -252,6 +294,9 @@ async function main() {
       check: false,
       help: false,
       nativeArtifactsDir: "",
+      nativeSourceSha: "",
+      nativeDistributionSha: "",
+      nativeSourceBundleDir: "",
       outputDir: "",
       skipBuild: false,
       sourceSha: "",
@@ -264,6 +309,9 @@ async function main() {
       stringFlag("--output-dir", "outputDir"),
       stringFlag("--source-sha", "sourceSha"),
       stringFlag("--native-artifacts-dir", "nativeArtifactsDir"),
+      stringFlag("--native-source-sha", "nativeSourceSha"),
+      stringFlag("--native-distribution-sha", "nativeDistributionSha"),
+      stringFlag("--native-source-bundle-dir", "nativeSourceBundleDir"),
     ],
   );
   if (options.help) {
@@ -276,7 +324,15 @@ async function main() {
   const outputDir = path.resolve(options.outputDir);
   assertRealOutputRoot(outputDir);
   if (options.check) {
-    if (options.candidate || options.skipBuild || options.sourceSha || options.nativeArtifactsDir) {
+    if (
+      options.candidate ||
+      options.skipBuild ||
+      options.sourceSha ||
+      options.nativeArtifactsDir ||
+      options.nativeSourceSha ||
+      options.nativeDistributionSha ||
+      options.nativeSourceBundleDir
+    ) {
       throw new Error("--check accepts only --output-dir");
     }
     await checkRelease(outputDir);
@@ -290,6 +346,18 @@ async function main() {
   if (!/^[a-f0-9]{40}$/u.test(options.sourceSha)) {
     throw new Error("--source-sha must be a full lowercase 40-character Git commit SHA");
   }
+  if (
+    Boolean(options.nativeSourceSha) !== Boolean(options.nativeSourceBundleDir) ||
+    Boolean(options.nativeSourceSha) !== Boolean(options.nativeDistributionSha) ||
+    (options.nativeSourceSha &&
+      (!/^[a-f0-9]{40}$/u.test(options.nativeSourceSha) ||
+        !/^[a-f0-9]{40}$/u.test(options.nativeDistributionSha) ||
+        !options.nativeArtifactsDir))
+  ) {
+    throw new Error(
+      "Official native source requires --native-source-sha, --native-distribution-sha, --native-source-bundle-dir, and --native-artifacts-dir together",
+    );
+  }
   const sourceCommit = await run("git", ["rev-parse", "HEAD"], { capture: true });
   if (sourceCommit !== options.sourceSha) {
     throw new Error("The selected source SHA is not the current checkout HEAD");
@@ -297,13 +365,24 @@ async function main() {
   const sourceDirty = Boolean(
     await run("git", ["status", "--porcelain", "--untracked-files=normal"], { capture: true }),
   );
+  let releaseSource = null;
   if (!options.candidate) {
     if (sourceDirty) {
       throw new Error(
         "Release preparation requires a clean checkout; use --candidate for local proof",
       );
     }
-    await run("git", ["merge-base", "--is-ancestor", sourceCommit, `origin/${SOURCE_BRANCH}`]);
+    releaseSource = await verifyCypherClawReleaseSource({ root: ROOT, sourceCommit });
+    if (
+      releaseSource &&
+      (releaseSource.nativeSourceCommit !== options.nativeSourceSha ||
+        releaseSource.nativeDistributionCommit !== options.nativeDistributionSha)
+    ) {
+      throw new Error("Native source selection must match the verified release snapshot");
+    }
+    if (options.nativeSourceSha && !releaseSource) {
+      throw new Error("Current native source requires a verified release snapshot");
+    }
   }
   let nativeLimitations = await verifyNativeProvenance(ROOT, {
     requireFinality: !options.candidate && !options.nativeArtifactsDir,
@@ -359,6 +438,13 @@ async function main() {
       await applyCypherClawNativeArtifacts({
         packageRoot,
         artifactsDir: path.resolve(options.nativeArtifactsDir),
+        ...(options.nativeSourceSha
+          ? {
+              nativeSourceSha: options.nativeSourceSha,
+              nativeDistributionSha: options.nativeDistributionSha,
+              sourceBundleDir: path.resolve(options.nativeSourceBundleDir),
+            }
+          : {}),
       });
       nativeLimitations = await verifyNativeProvenance(packageRoot, { requireFinality: true });
     }
@@ -372,6 +458,13 @@ async function main() {
       sourceBranch: SOURCE_BRANCH,
       sourceCommit,
       releaseTag,
+      ...(releaseSource
+        ? {
+            reviewedSourceCommit: releaseSource.reviewedSourceCommit,
+            nativeSourceCommit: releaseSource.nativeSourceCommit,
+            nativeDistributionCommit: releaseSource.nativeDistributionCommit,
+          }
+        : {}),
     };
     await fs.writeFile(
       path.join(packageRoot, "package.json"),
@@ -410,6 +503,13 @@ async function main() {
     channel: "stable",
     sourceBranch: SOURCE_BRANCH,
     sourceCommit,
+    ...(releaseSource
+      ? {
+          reviewedSourceCommit: releaseSource.reviewedSourceCommit,
+          nativeSourceCommit: releaseSource.nativeSourceCommit,
+          nativeDistributionCommit: releaseSource.nativeDistributionCommit,
+        }
+      : {}),
     version,
     releaseTag,
     nodeVersion: NODE_VERSION,
