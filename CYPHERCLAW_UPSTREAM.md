@@ -6,16 +6,16 @@ This file owns the fork's source provenance and intake procedure. Update the ups
 
 ## Pinned source
 
-| Source                  | Pin                                                                        |
-| ----------------------- | -------------------------------------------------------------------------- |
-| Official repository     | `https://github.com/openclaw/openclaw.git`                                 |
-| Official stable release | [`v2026.9.9`](https://github.com/openclaw/openclaw/releases/tag/v2026.9.9) |
-| Official peeled commit  | `bcfc88812a35243893585dbeca87ca41b48272ca`                                 |
-| Fork repository         | `https://github.com/CypherTroopers/cypherclaw.git`                         |
+| Source                  | Pin                                                                          |
+| ----------------------- | ---------------------------------------------------------------------------- |
+| Official repository     | `https://github.com/openclaw/openclaw.git`                                   |
+| Official stable release | [`v2026.10.1`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.1) |
+| Official peeled commit  | `e178c39e9aae3fa440735217f9aef9574f286677`                                   |
+| Fork repository         | `https://github.com/CypherTroopers/cypherclaw.git`                           |
 
 ### Initial stable migration
 
-The initial candidate applies the aggregate changes from nine fork commits onto the pinned stable release:
+The initial `v2026.9.9` candidate applied the aggregate changes from nine fork commits onto that stable release:
 
 - Previous fork head: `4ec3b02f83e6e7b6d60def9006aa95026cf74dea`.
 - Previous official development base: `12dd488dfeffcc6529e9a02e8ffe99920358ffe4`.
@@ -23,7 +23,13 @@ The initial candidate applies the aggregate changes from nine fork commits onto 
 
 The development commits between the stable release and the previous development base are excluded. The original fork history remains on the existing `main`; the candidate has stable ancestry and is not its descendant. Adoption requires choosing a fork branch publication and default-branch transition explicitly. Preparing this source does not change remote branches, publish a release, or replace a running Gateway.
 
-The candidate declares shared state schema **19** and agent schema **24**. The previous development-based source declares state schema **20**. A source version does not prove which schema an operator's databases contain. Use isolated state for candidate verification. Before switching an existing installation, verify its actual schemas and choose a supported recovery or separate-state path. Never lower database schema markers or edit SQL to make newer state open in this candidate. See the [database recovery contract](docs/reference/database-schemas/integrity-and-recovery.md).
+The initial `v2026.9.9` candidate declared shared state schema **19** and agent schema **24**. The previous development-based source declared state schema **20**. A source version does not prove which schema an operator's databases contain. Use isolated state for candidate verification. Before switching an existing installation, verify its actual schemas and choose a supported recovery or separate-state path. Never lower database schema markers or edit SQL to make newer state open in an older release. See the [database recovery contract](docs/reference/database-schemas/integrity-and-recovery.md).
+
+### October stable intake
+
+The `v2026.10.1` intake uses the official source pinned above and the reviewed fork delta through `d6ed2b8ee9975da15558419fc4982b351aba2eb7`. The September and October stable lines diverge, so the candidate tree reapplies the fork delta relative to `bcfc88812a35243893585dbeca87ca41b48272ca` onto the October release. Its merge commit preserves the existing fork history and records the new official commit as a parent; it does not replay September-only upstream changes onto October.
+
+This source declares shared state schema **20** and agent schema **24**. Existing migration, backup, admission, and rollback owners control the upgrade. The additive Cypher transfer table remains in the profile's canonical state database, and the node data and IPC paths retain their existing contracts. Upstream build-time generation owns Kysely declarations and native localization outputs; retired generated source files are not restored.
 
 ## Prepare the next stable intake
 
@@ -32,7 +38,7 @@ Start with a clean checkout of the reviewed fork branch and verify `origin` is t
 Fetch only the selected tag into a private reference. Replace the example tag with the release selected for this intake:
 
 ```sh
-cypherclaw_tag=v2026.9.9
+cypherclaw_tag=v2026.10.1
 git fetch --no-tags --no-write-fetch-head https://github.com/openclaw/openclaw.git \
   "refs/tags/${cypherclaw_tag}:refs/cypherclaw/upstream/${cypherclaw_tag}"
 git rev-parse "refs/cypherclaw/upstream/${cypherclaw_tag}^{commit}"

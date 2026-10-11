@@ -135,8 +135,6 @@ describe("runtime postbuild static assets", () => {
     `);
 
     expect(payload.outputs).toEqual([
-      "dist/extensions/acpx/mcp-command-line.mjs",
-      "dist/extensions/acpx/mcp-proxy.mjs",
       "dist/extensions/apple-fm/assets/AppleFoundationModels.swift",
       "dist/extensions/code-mode-quickjs/assets/encoding.so",
       "dist/extensions/code-mode-quickjs/assets/quickjs.wasm",
@@ -758,7 +756,6 @@ describe("runtime postbuild static assets", () => {
       path.join(distDir, "install.runtime-Aaa111.mjs"),
       [
         "export const scanPackageInstallSource = true;",
-        "export const scanFileInstallSource = true;",
         "export const scanInstalledPackageDependencyTree = true;",
         "export const scanBundleInstallSource = true;",
         "",
@@ -1006,7 +1003,6 @@ describe("runtime postbuild static assets", () => {
       path.join(distDir, "install.runtime-Aaa111.mjs"),
       [
         "export const scanPackageInstallSource = true;",
-        "export const scanFileInstallSource = true;",
         "export const scanInstalledPackageDependencyTree = true;",
         "export const scanBundleInstallSource = true;",
         "",
@@ -1239,30 +1235,6 @@ describe("previous release update compatibility", () => {
     };
     return { root, inventory };
   }
-
-  it("records deferred plugin migration imports that a shipped updater can execute after swap", () => {
-    const { inventory } = recordImportedFixture(
-      '(await import("./state-worker-abcdefgh.mjs")).runOpenClawStateWorkerOperation',
-      {
-        "state-worker-abcdefgh.mjs":
-          "//#region src/state/openclaw-state-worker-store.ts\nexport function runOpenClawStateWorkerOperation() {}\n",
-      },
-      undefined,
-      "src/infra/deferred-plugin-migrations.ts",
-    );
-
-    expect(inventory.releases[0]?.chunks).toMatchObject([
-      {
-        path: "state-worker-abcdefgh.mjs",
-        imports: [
-          {
-            owner: "src/infra/deferred-plugin-migrations.ts",
-            exports: ["runOpenClawStateWorkerOperation"],
-          },
-        ],
-      },
-    ]);
-  });
 
   it.each([
     "generated",
@@ -1802,47 +1774,6 @@ describe("previous release update compatibility", () => {
       expect(calls).toEqual([npmArgs]);
     },
   );
-
-  it("keeps stable upgrade coverage independent of a newer beta tag", () => {
-    const output = writeWindowInventory(createTempDir("update-compat-newer-beta-"));
-    const npmArgs = ["view", "openclaw", "dist-tags", "--json"];
-    const { result, calls } = runInventoryCli(
-      ["--check", "--output", output],
-      [{ args: npmArgs, value: { latest: "2026.9.3", beta: "2026.10.1-beta.2" } }],
-    );
-    expect(result.status, result.stderr).toBe(0);
-    expect(calls).toEqual([npmArgs]);
-  });
-
-  it.each(["generate", "check"])("refuses newer-release downgrade inventory during %s", (mode) => {
-    const root = createTempDir("update-compat-newer-source-");
-    const output = writeWindowInventory(root);
-    const original = fsSync.readFileSync(output, "utf8");
-    const version = "2026.10.1-beta.2";
-    let args: string[];
-    if (mode === "generate") {
-      const packageDir = path.join(root, version);
-      write(packageDir, "package.json", JSON.stringify({ name: "openclaw", version }));
-      write(
-        packageDir,
-        "dist/build-info.json",
-        JSON.stringify({ version, buildId: version, commit: "0".repeat(40) }),
-      );
-      write(packageDir, "dist/entry.js", "export {};\n");
-      args = ["--output", output, "--release", `${packageDir}=${integrity}`];
-    } else {
-      const inventory = JSON.parse(original);
-      inventory.releases.push({ ...inventory.releases[0], version, chunks: [] });
-      write(root, path.basename(output), JSON.stringify(inventory));
-      args = ["--check", "--output", output];
-    }
-    const before = fsSync.readFileSync(output, "utf8");
-    const { result, calls } = runInventoryCli(args);
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("source 2026.10.1-beta.2 is newer than target 2026.9.9");
-    expect(fsSync.readFileSync(output, "utf8")).toBe(before);
-    expect(calls).toEqual([]);
-  });
 
   it.each([
     { latest: "2026.9.3", beta: "2026.9.4-beta.1", missing: "2026.9.4-beta.1" },

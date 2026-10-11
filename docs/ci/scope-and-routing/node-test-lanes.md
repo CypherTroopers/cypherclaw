@@ -42,7 +42,7 @@ The slowest Node test families are split or balanced so each job stays small wit
 - The sixteen tooling stripes use measured file weights to keep the Git owner, managed-process, worker-artifact, and transform-cache proofs in separate jobs. Go setup follows explicit selected files first. For whole-config tooling plans, only the ordinary tooling config owns the docs i18n Go tests; isolated and Docker catalogs do not. Unknown historical configs retain their original Go setup. The shard containing the unified declaration compiler fixture retains the existing larger runner; hosted splits carry that placement through each child's selected files before packing. Its synthetic compiler graph uses the existing 1,024 MB heap override, while production full builds keep their resource guard. Git owner cases each own an isolated checkout and process tree, so their real timeout and cleanup checks overlap at most two cases per runner. Worker transform proofs use a separate suite with its own fixture lifetime; late child cleanup cannot remove another suite's inputs. These changes preserve the test cases, deadlines, and process isolation; measured admission determines the job count within the existing hybrid row cap.
 - Blacksmith numbered tooling bins request the 32-vCPU class after packing while retaining their logical runner classes, names, file inventory, serial project execution and two-worker pins. Tooling files use the shared worker scheduler; Docker helper fixtures retain their separate serial config. In run 33689551111, the three slowest tooling bins received two CPUs and 8 GB of memory; their 314–342-second bodies set an eight-minute non-Windows wall. The larger request addresses that host-capacity mismatch without adding shards. Hosted and hybrid tooling placement is unchanged; the request needs native timing proof before claiming the eight-minute target.
 - For ordinary UI jobs, `RELEASE_ONLY_UI_TEST_FILES` defers nine exhaustive Control UI matrices and tours from ordinary canonical PR and main plans: `app-sidebar.stress.browser.test.ts`, `board-fixture.e2e.test.ts`, `chat-attachment-menu.e2e.test.ts`, `chat-mobile-bubble-margin.e2e.test.ts`, `chat-session-entry.e2e.test.ts`, `github-link-hovercard.e2e.test.ts`, `native-embed-settings.e2e.test.ts`, `settings-layout.e2e.test.ts`, and `theme-muted-contrast.e2e.test.ts`. A directly changed file stays selected on its own PR or push; source-owner and directory changes do not widen this tier. Full manual CI and Full Release Validation keep the complete canonical UI configs. Forks, unknown changed-path inventories, and historical compatibility targets also retain complete coverage. Focused board, composer, media-spacing, hovercard, settings, and contrast siblings stay in ordinary CI. The planner narrows discovery before the existing three UI shards and eight weighted Control UI E2E shards. Ordinary E2E rows use three parallel workers while private-server and runtime-budget projects keep one; complete manual inventories retain twelve rows and two parallel workers. The separate real-Gateway and browser-extension jobs keep their own coverage and scheduling.
-- The same `RELEASE_ONLY_UI_TEST_FILES` selection also feeds the separate real-Gateway job: `cron-duration-save`, `desktop-resize`, `control-ui-automation-management` (QA Lab), `quota-reset-status`, `chat-collaborator-scroll`, `mcp-app-conformance`, `usage-sessions-owner-attribution`, and QA Lab's `control-ui-openclaw-delegation`, `control-ui-media-transcript`, and `session-host-command-state` run in full manual CI and Full Release Validation's `normal_ci` child. Their complete browser/Gateway compositions remain in the canonical prebuilt config, with unchanged assertions and per-project worker policies; faster mocked and owner-boundary siblings stay in ordinary CI. The shared path inventory preserves all other real-Gateway and QA Lab files. The desktop transport bootstrap retains its separate proof; historical targets without the prebuilt config keep their original explicit file list. Proof-job admission is unchanged: ordinary PRs already omit the real-Gateway job, and main-shaped plans retain directly edited test files. Browser-extension routing is unchanged. Real-Gateway preparation uses the existing runtime-only full build (`OPENCLAW_BUILD_PRIVATE_QA=1 OPENCLAW_RUN_NODE_SKIP_DTS_BUILD=1 pnpm build`); `build-artifacts` retains SDK declaration generation and validation. Keeping preparation independent avoids waiting for that job's later artifact checks. The current planner emits two real-Gateway rows from that same selected inventory: existing serial fixtures plus selected standalone companions, and the remaining audited parallel fixtures. The companions share the existing two-worker phase after serial execution, without another bundled preview. Prebuilt invocation previews and the platform-family fixture reuse the validated canonical Control UI bytes. Default mocked Gateway hellos receive that artifact identity, preserving explicit overrides and build-skew validation; ordinary local previews still build private assets. The real node/SSH desktop resize bootstrap is release-only and follows the same selected inventory; full manual/release runs and direct desktop-spec edits execute both carriers once, while frequent resizing and security-owner tests stay in ordinary CI. The planner owns placement and consumes the same parallel-eligibility allowlist as Vitest scheduling. Frozen targets and older planners retain one complete row; ordinary UI shard counts and runner labels stay unchanged.
+- The same `RELEASE_ONLY_UI_TEST_FILES` selection also feeds the separate real-Gateway job: `cron-duration-save`, `desktop-resize`, `control-ui-automation-management` (QA Lab), `quota-reset-status`, `session-pr-reader-lifetime`, `chat-collaborator-scroll`, `mcp-app-conformance`, `usage-sessions-owner-attribution`, and QA Lab's `control-ui-openclaw-delegation`, `control-ui-media-transcript`, and `session-host-command-state` run in full manual CI and Full Release Validation's `normal_ci` child. Their complete browser/Gateway compositions remain in the canonical prebuilt config, with unchanged assertions and per-project worker policies; faster mocked and owner-boundary siblings stay in ordinary CI. The shared path inventory preserves all other real-Gateway and QA Lab files. The desktop transport bootstrap retains its separate proof; historical targets without the prebuilt config keep their original explicit file list. Proof-job admission is unchanged: ordinary PRs already omit the real-Gateway job, and main-shaped plans retain directly edited test files. Browser-extension routing is unchanged. Real-Gateway preparation uses the existing runtime-only full build (`OPENCLAW_BUILD_PRIVATE_QA=1 OPENCLAW_RUN_NODE_SKIP_DTS_BUILD=1 pnpm build`); `build-artifacts` retains SDK declaration generation and validation. Keeping preparation independent avoids waiting for that job's later artifact checks. The current planner emits two real-Gateway rows from that same selected inventory: existing serial fixtures plus selected standalone companions, and the remaining audited parallel fixtures. The companions share the existing two-worker phase after serial execution, without another bundled preview. Prebuilt invocation previews and the platform-family fixture reuse the validated canonical Control UI bytes. Default mocked Gateway hellos receive that artifact identity, preserving explicit overrides and build-skew validation; ordinary local previews still build private assets. The real node/SSH desktop resize bootstrap is release-only and follows the same selected inventory; full manual/release runs and direct desktop-spec edits execute both carriers once, while frequent resizing and security-owner tests stay in ordinary CI. The planner owns placement and consumes the same parallel-eligibility allowlist as Vitest scheduling. Frozen targets and older planners retain one complete row; ordinary UI shard counts and runner labels stay unchanged.
 - Control UI browser projects greedily pack discovered test files using committed per-file timings, then cold-start basename hints, then source byte size. Bundled files default to at most two workers, bounded by the shared worker limit and local throttling; explicit Vitest CLI worker overrides remain available. Private source servers, real Gateways, and runtime-budget tests stay in a single-worker project; local whole-suite runs finish bundled work before starting that project. Per-file overhead is refitted from serial invocations; parallel invocations still update their file weights. Timing keys supply weights only: discovery still determines the complete test inventory, including new files and files without measurements.
 - Broad browser, QA, media, and miscellaneous plugin tests use their dedicated Vitest configs instead of the shared plugin catch-all. Include-pattern shards record timing entries using the CI shard name, so `.artifacts/vitest-shard-timings.json` can distinguish a whole config from a filtered shard.
 - The browser-extension Chromium bootstrap command prepares `qaRuntime`. It builds the native-host and relay JavaScript and runtime assets; the separate artifact job owns Control UI and plugin SDK declaration validation. The real Chromium flow and its assertions are unchanged.
@@ -81,22 +81,13 @@ isolation, worker policy, and group timing. The release-only switch controls the
 full plugin sweep, not the availability of its owner metadata; unrelated PRs
 still do not acquire that sweep.
 
-The fixed PR smoke inventory lives in `PR_SMOKE_TEST_FILES` in
-`scripts/lib/ci-changed-node-test-plan.mts`. It selects six complete existing files:
-
-- `test/gateway-rpc-exporters.test.ts`: Gateway boot, readiness, and authenticated WebSocket/RPC/HTTP serving.
-- `src/config/io.load-async.test.ts`: cold configuration loading and metadata admission.
-- `src/config/io.compat.test.ts`: compatible configuration reads and migration guidance.
-- `src/config/utility-model-separation-migration.io.test.ts`: configuration migration through I/O.
-- `src/plugins/loader.runtime-registry.test.ts`: plugin loading and registry lifecycle.
-- `test/qa-channel-message-tool-delivery.test.ts`: message-tool delivery to a channel conversation.
-
-The smoke files keep their canonical configs and assertions. They supplement
-changed-owner tests and do not opt unrelated Windows or browser jobs into a PR.
-Linux Testbox checks passed all 92 cases in these six files with 161.01 seconds
-of summed wrapper time. That is focused smoke evidence against the three-minute
-budget, not a measured GitHub job wall; CI setup, queueing, and runner contention
-remain separate costs.
+The aggressive PR smoke selects two complete existing files:
+`src/config/io.load-async.test.ts` for cold configuration loading and metadata
+admission, and `src/plugins/loader.runtime-registry.test.ts` for plugin loading
+and registry lifecycle. They retain their canonical configs and assertions and
+occupy at most two Node rows. The full-selection kill switch retains the previous
+six-file smoke inventory, including Gateway serving, config compatibility and
+migration, and message-tool delivery. All six still run on hourly main.
 
 The `PR_EXEMPT_RUNTIME_TEST_FILES` inventory in
 `scripts/lib/ci-proof-test-inventory.mts` keeps measured slow integration tests
@@ -134,4 +125,35 @@ and scripts that the import graph cannot discover.
 Explicit policy watches retain their matching tests in PR CI even when the broader
 tooling or runtime suite is deferred. This includes wrapper dependency checks,
 Gateway client callsite scans, and upgrade-survivor package checks. Unrelated
-deferred tests stay excluded.
+deferred tests stay excluded. Changed test files that no Vitest config routes,
+such as skill `node:test` and Python suites, are never direct targets; the watch
+for their Vitest wrapper must cover those test files too, or test-only edits run
+in no PR job.
+
+Aggressive PR selection keeps changed tests and direct runtime import consumers,
+including package and SDK aliases. A changed module with fewer than 20 direct
+importers also selects tests at depth two; hubs stop at direct consumers. Changed
+packages also select direct package-specifier test consumers; that pass does not
+restart traversal through package readers and bypass the module hub cutoff. Erased type
+imports remain owned by typechecking.
+
+Same-directory tests are selected only when the directory contains at most 30
+test files. Larger flat directories use existing explicit owner mappings and
+name-prefix siblings (`foo.ts` selects `foo*.test.ts`), without recursively
+selecting child directories. Existing fixture, generated-input, and non-import
+policy owners remain explicit. Config changes keep their planner/guard owners
+instead of selecting the entire config inventory. Protected/deferred tests follow
+these same rules, rather than opting in entire owner areas.
+
+The preflight job summary lists every selected file and its selection rules.
+Set repository variable `OPENCLAW_CI_NODE_SELECTION=full` to restore the previous
+PR selection immediately. Hourly main and ordinary manual/release plans keep
+their complete inventories regardless of this variable.
+
+Source-module edits also select six explicit non-import guards: PR wrapper source
+closure, wrapper provisioning, eager import closure, updater swap-fixture
+dependencies, type-suppression inventory, and plugin SDK surface reporting. This
+conservative watch covers new, renamed, and deleted modules and new import edges,
+including dependencies missing from the inventory that should have named them.
+The existing required architecture group still checks source diffs for import
+cycles and topology changes.

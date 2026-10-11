@@ -8,9 +8,9 @@ import {
   createCoreGatewayMethodDescriptors,
   createGatewayMethodRegistry,
 } from "../methods/registry.js";
-import { authorizeGatewayRequestPreDispatch } from "../server-methods.js";
 import { createGatewayRequestContext } from "../server-request-context.js";
 import { makeContextParams } from "../server-request-context.test-support.js";
+import { authorizeGatewayRequestPreDispatch } from "./request-authorization.js";
 import type { GatewayClient, GatewayRequestHandlerOptions } from "./types.js";
 import { walletGeneratorHandlers } from "./wallet-generator.js";
 

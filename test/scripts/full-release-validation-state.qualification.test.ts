@@ -90,19 +90,10 @@ describe("candidate-owned frozen qualification coverage", () => {
     expect(() => resolveQualificationCoverage(policy, { ...inputs, ...narrowed })).toThrow();
   });
 
-  it("retains complete qualification coverage with an owner-approved Telegram waiver", () => {
-    const baseline = resolveQualificationCoverage(policy, inputs);
-    expect(
-      resolveQualificationCoverage(policy, {
-        ...inputs,
-        telegram_waiver: "2026.9.9-owner-approved",
-      }),
-    ).toEqual(baseline);
-  });
-
   it("rejects changed or removed admitted children even after an attacker rehashes the plan", () => {
     const coverage = resolveQualificationCoverage(policy, inputs);
-    const baselines = JSON.parse(qualificationBaselinesJson).upgradeSurvivorBaselines.join(" ");
+    const qualificationBaselines = JSON.parse(qualificationBaselinesJson);
+    const baselines = qualificationBaselines.upgradeSurvivorBaselines.join(" ");
     const sourceCoverage = {
       ...sourceFact().coverage,
       coverage_policy: "npm-stable-v1",
@@ -124,6 +115,7 @@ describe("candidate-owned frozen qualification coverage", () => {
         sourceAdmission,
         candidateRequest: canonicalCandidateRequest({
           targetSha: SHA,
+          upgradeSurvivorBaseline: qualificationBaselines.upgradeBaseline,
           upgradeSurvivorBaselines: baselines,
         }),
         coveragePolicy: "npm-stable-v1",
@@ -155,6 +147,7 @@ describe("candidate-owned frozen qualification coverage", () => {
     reused.candidateRequest = canonicalCandidateRequest({
       targetSha: nextSha,
       toolingSha: nextSha,
+      upgradeSurvivorBaseline: qualificationBaselines.upgradeBaseline,
       upgradeSurvivorBaselines: baselines,
     });
     reused.sourceAdmission = sourceFact(

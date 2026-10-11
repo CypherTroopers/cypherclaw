@@ -89,9 +89,9 @@
     <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Perbarui CypherClaw di ponsel dan jam tangan."</string>
     <string name="refresh" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Segarkan"</string>
     <string name="retry" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Coba lagi"</string>
-    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Balasa CypherClaw"</string>
+    <string name="notification_channel_name" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Balasan CypherClaw"</string>
     <string name="notification_reply" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Balas"</string>
-    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Balasa CypherClaw"</string>
+    <string name="notification_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Balasan CypherClaw"</string>
     <string name="notification_reply_failed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Balasan tidak terkirim"</string>
     <string name="notification_reply_failed_text" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Ponsel tidak tersedia. Ketuk Balas untuk mencoba lagi."</string>
     <string name="notification_phone_changed_title" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Buka CypherClaw untuk membalas"</string>

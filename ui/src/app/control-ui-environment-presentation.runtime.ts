@@ -2,6 +2,7 @@ import {
   CONTROL_UI_ENVIRONMENT_ATTRIBUTE,
   type ControlUiEnvironment,
 } from "../../../src/gateway/control-ui-bootstrap-contract.js";
+import { getOrCreatePromise } from "../../../src/shared/lazy-promise.js";
 import { currentThemeBranding, neutralMarkSvg } from "../components/neutral-mark.ts";
 import { applyControlUiOperatorSeamColor } from "./control-ui-presentation.ts";
 import { inferControlUiPublicAssetPath } from "./public-assets.ts";
@@ -216,18 +217,12 @@ async function composeFavicon(
   ring: string,
   environmentColor: string,
 ) {
-  const key = JSON.stringify([href, type]);
-  let pending = faviconSources.get(key);
-  if (!pending) {
-    pending = loadSource(href, type);
-    faviconSources.set(key, pending);
-    void pending.catch(() => {
-      if (faviconSources.get(key) === pending) {
-        faviconSources.delete(key);
-      }
-    });
-  }
-  const source = await pending;
+  const source = await getOrCreatePromise(
+    faviconSources,
+    JSON.stringify([href, type]),
+    () => loadSource(href, type),
+    { cacheRejections: false },
+  );
   const inset = environmentColor ? 2 : 0;
   // Keep status/environment decorations outside the entire resized source image.
   const size = color ? 22 : environmentColor ? 26 : 32;

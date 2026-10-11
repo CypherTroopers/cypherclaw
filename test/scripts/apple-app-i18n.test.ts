@@ -14,6 +14,10 @@ import {
   serializeAppleCatalog,
   verifyAppleAppI18n,
 } from "../../scripts/apple-app-i18n.ts";
+import {
+  type NativeI18nInventoryEntry,
+  parseNativeI18nInventory,
+} from "../../scripts/native-i18n-inventory.ts";
 import { NATIVE_I18N_LOCALES } from "../../scripts/native-i18n-locales.ts";
 
 const probe = vi.hoisted(() => ({
@@ -122,15 +126,9 @@ describe("Apple app i18n catalogs", () => {
   });
 
   it("derives shared discovery status coverage into the iOS catalog", async () => {
-    const inventory = JSON.parse(await readFile("apps/.i18n/native-source.json", "utf8")) as {
-      entries: Array<{
-        id: string;
-        source: string;
-        sites: Array<{ kind: string; path: string }>;
-        surface: string;
-      }>;
-      version: number;
-    };
+    const inventory = parseNativeI18nInventory(
+      await readFile("apps/.i18n/native-source.json", "utf8"),
+    );
     const build = buildIosCatalog(
       { sourceLanguage: "en", strings: {}, version: "1.0" },
       inventory,
@@ -143,15 +141,9 @@ describe("Apple app i18n catalogs", () => {
   });
 
   it("derives broad macOS catalog coverage from the native source inventory", async () => {
-    const inventory = JSON.parse(await readFile("apps/.i18n/native-source.json", "utf8")) as {
-      entries: Array<{
-        id: string;
-        source: string;
-        sites: Array<{ kind: string; path: string }>;
-        surface: string;
-      }>;
-      version: number;
-    };
+    const inventory = parseNativeI18nInventory(
+      await readFile("apps/.i18n/native-source.json", "utf8"),
+    );
     const build = buildMacosCatalog(
       { sourceLanguage: "en", strings: {}, version: "1.0" },
       inventory,
@@ -180,7 +172,7 @@ describe("Apple app i18n catalogs", () => {
   });
 
   it("warns only when obsolete Apple keys are the entire catalog drift", async () => {
-    const inventory: Parameters<typeof buildIosCatalog>[1] = JSON.parse(
+    const inventory = parseNativeI18nInventory(
       await readFile("apps/.i18n/native-source.json", "utf8"),
     );
     const translations = await Promise.all(
@@ -346,7 +338,7 @@ describe("Apple app i18n catalogs", () => {
   });
 
   it("routes merged sites by coupled path and kind while preserving shipped translations", () => {
-    const coveredMacosEntries = [
+    const coveredMacosEntries: NativeI18nInventoryEntry[] = [
       { kind: "ui-call-concatenated", source: "Call concatenated" },
       {
         kind: "ui-localized-call-concatenated",
@@ -362,30 +354,27 @@ describe("Apple app i18n catalogs", () => {
       surface: "apple",
       sites: [{ kind, path: "apps/macos/Sources/OpenClaw/Example.swift" }],
     }));
-    const inventory = {
-      version: 2,
-      entries: [
-        {
-          id: "native.apple.connect",
-          source: "Connect now",
-          surface: "apple",
-          sites: [
-            { kind: "ui-call", path: "apps/ios/Sources/Example.swift" },
-            { kind: "ui-call", path: "apps/macos/Sources/OpenClaw/Example.swift" },
-          ],
-        },
-        {
-          id: "native.apple.decoy",
-          source: "Do not catalog",
-          surface: "apple",
-          sites: [
-            { kind: "plist-string", path: "apps/ios/Sources/Info.plist" },
-            { kind: "ui-call", path: "outside/Example.swift" },
-          ],
-        },
-        ...coveredMacosEntries,
-      ],
-    };
+    const inventory: NativeI18nInventoryEntry[] = [
+      {
+        id: "native.apple.connect",
+        source: "Connect now",
+        surface: "apple",
+        sites: [
+          { kind: "ui-call", path: "apps/ios/Sources/Example.swift" },
+          { kind: "ui-call", path: "apps/macos/Sources/OpenClaw/Example.swift" },
+        ],
+      },
+      {
+        id: "native.apple.decoy",
+        source: "Do not catalog",
+        surface: "apple",
+        sites: [
+          { kind: "plist-string", path: "apps/ios/Sources/Info.plist" },
+          { kind: "ui-call", path: "outside/Example.swift" },
+        ],
+      },
+      ...coveredMacosEntries,
+    ];
     const existing = {
       sourceLanguage: "en",
       strings: {
@@ -426,6 +415,56 @@ describe("Apple app i18n catalogs", () => {
     expect(ios.contradictions).toEqual([]);
   });
 
+  it("brands rendered Apple copy while retaining lookup keys and upstream provenance", () => {
+    const source = "Connect to OpenClaw at %@ (OpenClaw.app)";
+    const provenance = "OpenClaw Foundation";
+    const inventory: NativeI18nInventoryEntry[] = [source, provenance].map((text, index) => ({
+      id: `native.apple.brand.${index}`,
+      source: text,
+      surface: "apple",
+      sites: [{ kind: "ui-localized-call", path: "apps/macos/Sources/OpenClaw/Example.swift" }],
+    }));
+    const build = buildMacosCatalog(
+      {
+        sourceLanguage: "en",
+        strings: {
+          [source]: {
+            localizations: {
+              de: {
+                stringUnit: {
+                  state: "translated",
+                  value: "Mit OpenClaw unter %@ verbinden (OpenClaw.app)",
+                },
+              },
+            },
+          },
+        },
+      },
+      inventory,
+      [
+        {
+          version: 2,
+          locale: "fr",
+          translations: {
+            "native.apple.brand.0": "Connexion à OpenClaw sur %@ (OpenClaw.app)",
+          },
+        },
+      ],
+    );
+
+    expect(Object.keys(build.catalog.strings ?? {})).toEqual([source, provenance]);
+    const copy = build.catalog.strings?.[source]?.localizations;
+    expect(copy?.en?.stringUnit?.value).toBe("Connect to CypherClaw at %@ (OpenClaw.app)");
+    expect(copy?.de?.stringUnit).toEqual({
+      state: "translated",
+      value: "Mit CypherClaw unter %@ verbinden (OpenClaw.app)",
+    });
+    expect(copy?.fr?.stringUnit?.value).toBe("Connexion à CypherClaw sur %@ (OpenClaw.app)");
+    expect(build.catalog.strings?.[provenance]?.localizations?.en?.stringUnit?.value).toBe(
+      provenance,
+    );
+  });
+
   it.each([
     ["iOS", buildIosCatalog, "apps/ios/Sources/Example.swift"],
     ["macOS", buildMacosCatalog, "apps/macos/Sources/OpenClaw/Example.swift"],
@@ -442,23 +481,20 @@ describe("Apple app i18n catalogs", () => {
       const translated = "^[\\(count) Eintrag](inflect: true)";
       const build = buildCatalog(
         { sourceLanguage: "en", strings: {} },
-        {
-          version: 2,
-          entries: [
-            {
-              id: "native.apple.count",
-              source,
-              sites: [{ kind: "ui-localized-call", path: sourcePath }],
-              surface: "apple",
-            },
-            {
-              id: "native.apple.mixed-count",
-              source: "\\(name) has " + source,
-              sites: [{ kind: "ui-localized-call", path: sourcePath }],
-              surface: "apple",
-            },
-          ],
-        },
+        [
+          {
+            id: "native.apple.count",
+            source,
+            sites: [{ kind: "ui-localized-call", path: sourcePath }],
+            surface: "apple",
+          },
+          {
+            id: "native.apple.mixed-count",
+            source: "\\(name) has " + source,
+            sites: [{ kind: "ui-localized-call", path: sourcePath }],
+            surface: "apple",
+          },
+        ],
         [
           {
             version: 2,
@@ -587,7 +623,6 @@ describe("Apple app i18n catalogs", () => {
   });
 
   it("selects InfoPlist candidates by stable ID instead of shared source text", () => {
-    const source = "Use the camera to scan setup codes.";
     const artifact = {
       version: 2,
       locale: "fr",
@@ -597,7 +632,7 @@ describe("Apple app i18n catalogs", () => {
       },
     };
 
-    expect(infoPlistTranslationCandidates(artifact, "native.apple.camera", source)).toEqual([
+    expect(infoPlistTranslationCandidates(artifact, "native.apple.camera")).toEqual([
       "Utilisez l’appareil photo pour scanner les codes de configuration.",
     ]);
   });
@@ -631,7 +666,7 @@ describe("Apple app i18n catalogs", () => {
         "utf8",
       );
       expect(frenchInfoPlist).toContain(
-        '"NSUserNotificationUsageDescription" = "OpenClaw a besoin de l’autorisation d’envoyer des notifications pour afficher des alertes concernant les actions de l’agent.";',
+        '"NSUserNotificationUsageDescription" = "CypherClaw a besoin de l’autorisation d’envoyer des notifications pour afficher des alertes concernant les actions de l’agent.";',
       );
       expect(frenchInfoPlist).toContain('"NSScreenCaptureDescription" = ');
       expect(frenchInfoPlist).toContain('"NSLocationUsageDescription" = ');
