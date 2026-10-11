@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -88,6 +88,7 @@ describe("CypherClaw release builder CLI", () => {
       "scripts/lib/cypherclaw-contract.mjs",
       "scripts/lib/cypherclaw-native-overlay.mjs",
       "scripts/lib/cypherclaw-release-source.mjs",
+      "scripts/lib/standalone-installers.mjs",
       SOURCE_PREPARER,
       NATIVE_IMPORTER,
     ]) {
@@ -202,11 +203,13 @@ describe("CypherClaw release builder CLI", () => {
     for (const relative of [
       "scripts/install-cypherclaw.sh",
       "scripts/install-cypherclaw.ps1",
-      "scripts/install-cli.sh",
       "scripts/install.ps1",
       "scripts/install-cypherclaw.mjs",
     ]) {
       writeFixtureFile(root, relative, "Synthetic installer asset\n");
+    }
+    for (const relative of ["scripts/install-cli.sh", "scripts/install-policy.sh"]) {
+      writeFixtureFile(root, relative, readFileSync(path.resolve(relative), "utf8"));
     }
     // Only expensive build/import validation children are fixtures. The builder
     // still owns Git admission, tar repacking, native hashes, and release sealing.
@@ -963,6 +966,27 @@ console.log(JSON.stringify({ sourceCommit: manifest.sourceCommit, releaseTag: ma
           encoding: "utf8",
         }),
       ).toBe("");
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "runs the published Node installer without neighboring source files",
+    async ({ signal }) => {
+      const output = path.join(root, "output", "standalone-node-installer");
+      const prepared = await runNodeScript(
+        [BUILDER, "--source-sha", sourceCommit, "--output-dir", output],
+        fixtureEnv,
+        undefined,
+        { cwd: root, signal },
+      );
+      expect(prepared.status, prepared.stderr).toBe(0);
+      const installer = spawnSync("/bin/bash", [path.join(output, "install-node.sh"), "--help"], {
+        cwd: output,
+        encoding: "utf8",
+        env: { PATH: process.env.PATH, HOME: output, BASH_ENV: "", ENV: "" },
+      });
+      expect(installer.status, installer.stdout + installer.stderr).toBe(0);
+      expect(installer.stdout).toContain("--node-only");
     },
   );
 

@@ -63,7 +63,7 @@ node scripts/build-cypherclaw-release.mjs \
   --check --output-dir .artifacts/cypherclaw-release
 ```
 
-The builder reuses the canonical package build, including the Control UI, verifies the bundled node's build and source records in this repository's `cypher/` directory, adds fork distribution metadata only in package staging, and checks the resulting tarball again. No manual UI build or user-side source checkout is required. Use a new empty output directory for each preparation.
+The builder reuses the canonical package build, including the Control UI, verifies the bundled node's build and source records in this repository's `cypher/` directory, adds fork distribution metadata only in package staging, and checks the resulting tarball again. The Node shell installer embeds the upstream shared installer policy using the canonical standalone assembly. No manual UI build or user-side source checkout is required. Use a new empty output directory for each preparation.
 
 CypherClaw packages the node's build record in [cypher/BUILDINFO.txt](cypher/BUILDINFO.txt), its checksum ledger in [cypher/SHA256SUMS](cypher/SHA256SUMS), licenses in `cypher/licenses/`, and provenance in `cypher/provenance/`. Actions also includes `cypher/cypher-source-<full-FHS-D-SHA>.tar.gz`, containing the selected repository source, build recipes, `go.mod`, and `go.sum`. The [finality patch and native build instructions](cypher/patches/README.md) accompany that source. The original `cypher-source-60b8164-with-go-dependencies.tar.gz` and its dependency evidence remain historical materials; they do not establish current dependency-source completeness. Active metadata and checksums bind the selected source, patch, and binaries.
 

@@ -18,6 +18,7 @@ import {
 import { applyCypherClawNativeArtifacts } from "./lib/cypherclaw-native-overlay.mjs";
 import { verifyCypherClawReleaseSource } from "./lib/cypherclaw-release-source.mjs";
 import { assertRealOutputRoot } from "./lib/output-root-guard.mjs";
+import { readStandaloneInstaller } from "./lib/standalone-installers.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST = "cypherclaw-release.json";
@@ -487,7 +488,14 @@ async function main() {
   ]);
   const assets = [];
   for (const [destination, source] of ASSETS) {
-    await fs.copyFile(path.join(ROOT, source), path.join(outputDir, destination));
+    if (destination === "install-node.sh") {
+      await fs.writeFile(
+        path.join(outputDir, destination),
+        readStandaloneInstaller(ROOT, "install-cli.sh"),
+      );
+    } else {
+      await fs.copyFile(path.join(ROOT, source), path.join(outputDir, destination));
+    }
     assets.push(await describeFile(outputDir, destination));
   }
   if (!options.candidate) {
