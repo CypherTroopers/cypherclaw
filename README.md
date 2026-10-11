@@ -9,6 +9,16 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License: MIT"></a>
 </p>
 
+
+```bash
+# macOS / Linux / WSL2
+curl -fsSL https://github.com/CypherTroopers/cypherclaw/releases/latest/download/install.sh
+```
+
+```powershell
+# Windows PowerShell
+iwr -useb https://github.com/CypherTroopers/cypherclaw/releases/latest/download/install.ps1 | iex
+```
 CypherClaw is an independent fork of [OpenClaw](https://github.com/openclaw/openclaw), maintained in [CypherTroopers/cypherclaw](https://github.com/CypherTroopers/cypherclaw). It combines a local AI assistant with Gateway and UI controls for a Cypher node. The original messaging integrations, model providers, and device clients remain available in the source tree.
 
 The original OpenClaw code is Copyright (c) 2026 OpenClaw Foundation and licensed under the [MIT License](LICENSE). CypherClaw is not affiliated with or endorsed by the OpenClaw Foundation. Original copyright and third-party notices are retained in [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
