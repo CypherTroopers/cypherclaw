@@ -1,6 +1,7 @@
 // These consumers need the host-owned SQLite broker, which runs in forked processes.
 export const databaseWorkerCoreTestFiles = [
   "src/cypher/transfer-store.test.ts",
+  "src/agents/embedded-agent-runner.prompt-cache.test.ts",
   "src/agents/subagents/spawn/acp-parent-stream-store.sqlite.test.ts",
   "src/state/openclaw-agent-execution-incognito.compute.test.ts",
   "src/state/openclaw-agent-execution-incognito.lifecycle.test.ts",
@@ -495,6 +496,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/embedded-agent-runner/transcript-rewrite.test.ts",
   "src/agents/embedded-agent-runner/tool-result-truncation.test.ts",
   "src/agents/embedded-agent-runner/run/attempt-prompt-submit.test.ts",
+  "src/agents/embedded-agent-runner/run/attempt-prompt-submit.projections.test.ts",
   "src/agents/embedded-agent-runner/run/attempt-prompt-submit.admission.test.ts",
   "src/agents/embedded-agent-runner/run/attempt-session-boundary.test.ts",
   "src/agents/embedded-agent-runner/run/attempt.sessions-yield.test.ts",
@@ -793,6 +795,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/embedded-agent-runner/run/runtime-preparation.thinking.test.ts",
   "src/agents/embedded-agent-runner/run/run-attempt-dispatch.owner.test.ts",
   "src/agents/tools-effective-inventory.cold-provider.test.ts",
+  "src/agents/tools-effective-inventory.gateway-borrow.test.ts",
   "src/agents/models-config.providers.endpoint.test.ts",
   "src/agents/models-config.root-authorship.test.ts",
   "src/agents/models-config.runtime-source-snapshot.test.ts",

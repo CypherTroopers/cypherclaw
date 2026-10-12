@@ -9,6 +9,14 @@ read_when:
 `openclaw doctor --fix` owns the persistent file-to-SQLite migrations. This page
 describes each migration source and what to do when one stays blocked.
 
+For a named channel account no longer present in account discovery, Doctor moves
+its legacy `credentials/<channel>-<account>-allowFrom.json` file to the existing
+`.migrated` archive path (numbered if occupied), reports both paths as a warning,
+and continues later migrations. The original bytes remain available for recovery;
+they are not assigned to a surviving account. Malformed allowlists for configured
+accounts and ambiguous account identities still require repair before migration
+can continue. Update-time Doctor uses the same behavior.
+
 Matrix's one-time inbound dedupe scan applies only when Matrix is configured or
 legacy Matrix state needs inspection. A fresh installation with neither does not
 need a Matrix migration or exclusive Gateway maintenance. Completed scans keep a
@@ -178,6 +186,18 @@ path preserves unknown deletion history; retained external stores still need Doc
 reconstruction before maintenance.
 Verified fresh SQLite setup initializes the journal normally, without a missing-history
 warning. Legacy JSON session files alone do not require journal reconstruction.
+Agent-directory discovery selects `openclaw-agent.sqlite` and the reserved
+`incognito-openclaw-agent.sqlite` name from the agent path owner; custom database
+names need a configured store, registry entry, or recorded deletion path.
+Incognito runtime state stays in memory. An existing file at its reserved path
+is a collision that recovery must inventory and protect, not replace or silently
+activate as an in-memory store. Normal incognito admission still requires moving
+or renaming that file before retrying.
+Sibling reindex locks, captures, and SQLite sidecars are not separate agent stores.
+Canonical database sidecars still preserve evidence of a missing main database.
+Previously recorded coordination-file holds remain preserved in recovery receipts
+but do not produce held-agent warnings. The reindex lock file can remain after
+its SQLite lease is released; its presence does not mean an agent was deleted.
 Session SQLite import and recovery hold existing agent databases and their sidecars
 when deletion history is unavailable, preserving legacy sources without importing
 or archiving them. Recorded deletion and reconstruction holds and retained plugin

@@ -330,10 +330,15 @@ When prompt content changes, a compatible CLI session can resume with an OpenCla
 context note before the current user prompt. Chat history first matches imported
 Claude user turns against the full local text, including any literal quote of the
 note. If that does not match, it ignores one exact context note for comparison, so
-the same turn appears once. Stored transcript text and unmatched imported turns
-remain intact. Native and OpenClaw history share bounded pages and message-anchor
-lookups. The history worker prepares a temporary merged index without modifying
-the canonical transcript. A cold index scans bounded source pages to preserve
+the same turn appears once. Stored OpenClaw and native transcript text remains
+unchanged. For unmatched imported user turns, chat history removes generated
+resume notes and queued system-event prefixes from the display copy only.
+Recognized runtime prompts, such as default heartbeat, exec-completion, restart
+recovery, and native compaction prompts, are hidden rather than shown as human
+messages. Matching canonical user turns and quoted text in later content blocks
+remain unchanged. Native and OpenClaw history share bounded pages and
+message-anchor lookups. The history worker prepares a temporary merged index
+without modifying the canonical transcript. A cold index scans bounded source pages to preserve
 global deduplication; subsequent reads select only their requested window. The
 index is discarded when either transcript changes or its database owner closes.
 Reset-archive fallbacks rebuild the index per request because their source files
@@ -382,6 +387,11 @@ OpenClaw writes base64 images to temp files. If `imageArg` is set, those paths a
 
 JSON examples inside double-quoted banner text are not treated as response or error records.
 For JSONL, banner scanning starts fresh on each line.
+
+Claude streaming limits discount recognized partial-message envelopes while
+counting their text, thinking, and tool-input payloads. Cumulative snapshots and
+tool results still count toward the output budget. Single-line limits and bounded
+frame counts remain active, including for empty or unrecognized events.
 
 Input modes:
 

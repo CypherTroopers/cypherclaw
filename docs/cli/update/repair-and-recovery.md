@@ -84,10 +84,24 @@ the original manager and service identity. This does not start the service or
 rewrite its definition. A later refusal still uses the recorded stop to restore
 the previous Gateway; a service that was already stopped remains stopped.
 
+An already-current installation can still need plugin maintenance. If the update
+parks its Gateway for Doctor and a maintenance step is refused, recovery uses
+the current run's latest stop and restarts the installed package after Doctor's
+writers settle. It records the observed recovery outcome while preserving the
+failed update result. Earlier runs' stop receipts never authorize that restart;
+operator-stopped services and explicit data-risk refusals remain stopped.
+
 After activation succeeds, a failure to read or publish update reporting leaves
 the updated installation in place. Reporting failures do not trigger package
 rollback. The command still exits nonzero when required finalization cannot
-complete; follow its recovery guidance after the owning updater exits.
+complete; follow its recovery guidance after the owning updater exits. If update
+history already records success, a later result-publication error is a warning
+and the command exits successfully without offering recovery.
+
+Repair warns when configured channel accounts remain stopped or suppressed,
+including accounts other than the default. Run `openclaw health --json` to inspect
+them. These warnings do not make a verified Gateway recovery fail, start stopped
+channels, or disable the crash-loop breaker.
 
 Activation Doctor rechecks the chat requester's authority inside its own live
 maintenance scope. This lets it read authorization policy while the state database
@@ -179,8 +193,20 @@ Retention copies plugin manifests and files inspected by plugin safety checks,
 so retaining the updater does not make the checkout's plugins fail hardlink
 validation. Other runtime files remain hardlinked when supported.
 
+When a container or filesystem refuses file cloning, retention and candidate
+snapshot copies warn once per copy operation and continue with a guarded byte
+copy. Native filesystem safeguards, source identity checks, file modes, and
+snapshot verification remain active. Genuine I/O errors still fail the copy.
+This includes Proxmox LXC containers whose seccomp policy denies the `FICLONE`
+ioctl; changing that policy is unnecessary for an updater carrying this fix.
+Do not globally disable native filesystem support to bypass cloning: Doctor's
+state migrations require native safeguards.
+
 These lifecycle and copying changes apply when the installed updater supports
 them; installing a newer candidate cannot change the updater already running.
+For the first hop from 2026.9.7 in an affected container, manually install a
+release containing this fix with npm. Subsequent `openclaw update` runs use the
+repaired copier.
 
 On Windows, interruption before activation still lets the admitted recovery
 owner restore task autostart after pending task operations settle. Cancellation

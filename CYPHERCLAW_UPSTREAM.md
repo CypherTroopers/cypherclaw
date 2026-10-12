@@ -9,8 +9,8 @@ This file owns the fork's source provenance and intake procedure. Update the ups
 | Source                  | Pin                                                                          |
 | ----------------------- | ---------------------------------------------------------------------------- |
 | Official repository     | `https://github.com/openclaw/openclaw.git`                                   |
-| Official stable release | [`v2026.10.1`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.1) |
-| Official peeled commit  | `e178c39e9aae3fa440735217f9aef9574f286677`                                   |
+| Official stable release | [`v2026.10.2`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.2) |
+| Official peeled commit  | `b8952d477f0c932d8ddc6da5c89cab5a169b6ff1`                                   |
 | Fork repository         | `https://github.com/CypherTroopers/cypherclaw.git`                           |
 
 ### Initial stable migration
@@ -27,9 +27,15 @@ The initial `v2026.9.9` candidate declared shared state schema **19** and agent 
 
 ### October stable intake
 
-The `v2026.10.1` intake uses the official source pinned above and the reviewed fork delta through `d6ed2b8ee9975da15558419fc4982b351aba2eb7`. The September and October stable lines diverge, so the candidate tree reapplies the fork delta relative to `bcfc88812a35243893585dbeca87ca41b48272ca` onto the October release. Its merge commit preserves the existing fork history and records the new official commit as a parent; it does not replay September-only upstream changes onto October.
+The `v2026.10.1` intake uses official commit `e178c39e9aae3fa440735217f9aef9574f286677` and the reviewed fork delta through `d6ed2b8ee9975da15558419fc4982b351aba2eb7`. The September and October stable lines diverge, so the candidate tree reapplies the fork delta relative to `bcfc88812a35243893585dbeca87ca41b48272ca` onto the October release. Its merge commit preserves the existing fork history and records the new official commit as a parent; it does not replay September-only upstream changes onto October.
 
 This source declares shared state schema **20** and agent schema **24**. Existing migration, backup, admission, and rollback owners control the upgrade. The additive Cypher transfer table remains in the profile's canonical state database, and the node data and IPC paths retain their existing contracts. Upstream build-time generation owns Kysely declarations and native localization outputs; retired generated source files are not restored.
+
+### October patch intake
+
+The `v2026.10.2` intake merges the pinned official commit above into fork head `0f305c46b627e1dd55246b914967b2df2bdd1365`. The previous official `v2026.10.1` commit is its ancestor, so this intake uses a regular merge and retains both histories. It includes 105 upstream commits across 655 files. The only content conflict is the database-worker test inventory: both the Cypher transfer-store test and the upstream prompt-cache test retain their worker routing.
+
+Shared state schema **20** and agent schema **24** remain unchanged. The intake retains Cypher and wallet operations, node data and IPC paths, CypherClaw branding, fork package inventory, standalone installers, and the packaged fork's GitHub Releases update identity. Source intake does not deploy a Gateway or publish distribution artifacts.
 
 ## Prepare the next stable intake
 
@@ -38,7 +44,7 @@ Start with a clean checkout of the reviewed fork branch and verify `origin` is t
 Fetch only the selected tag into a private reference. Replace the example tag with the release selected for this intake:
 
 ```sh
-cypherclaw_tag=v2026.10.1
+cypherclaw_tag=v2026.10.2
 git fetch --no-tags --no-write-fetch-head https://github.com/openclaw/openclaw.git \
   "refs/tags/${cypherclaw_tag}:refs/cypherclaw/upstream/${cypherclaw_tag}"
 git rev-parse "refs/cypherclaw/upstream/${cypherclaw_tag}^{commit}"
