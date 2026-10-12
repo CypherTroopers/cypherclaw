@@ -22,6 +22,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  upgrade-baseline:
+    name: Capture published CypherClaw upgrade baseline
+    if: github.repository == 'CypherTroopers/cypherclaw'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.baseline.outputs.tag }}
+      source_sha: ${{ steps.baseline.outputs.source_sha }}
+      package_sha256: ${{ steps.baseline.outputs.package_sha256 }}
+      manifest_sha256: ${{ steps.baseline.outputs.manifest_sha256 }}
+    steps:
+      - name: Checkout this run's validation tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pinned validation runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+
+      - name: Resolve and verify one immutable published baseline
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/cypherclaw-release-validation.mjs baseline --output-dir "$RUNNER_TEMP/cypherclaw-baseline"
+
+      - name: Upload verified baseline assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cypherclaw-upgrade-baseline-${{ github.run_id }}
+          path: ${{ runner.temp }}/cypherclaw-baseline
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
   validate:
     if: github.repository == 'CypherTroopers/cypherclaw'
     runs-on: ubuntu-24.04
@@ -215,9 +254,139 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+  upgrade-app:
+    name: Validate app upgrade (${{ matrix.target }})
+    needs: [validate, acquire-native, prepare, upgrade-baseline]
+    if: github.repository == 'CypherTroopers/cypherclaw'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x64
+            timeout: 120
+          - runner: macos-15
+            target: darwin-arm64
+            timeout: 120
+          - runner: windows-2025
+            target: win32-x64
+            timeout: 180
+    env:
+      EXPECTED_CANDIDATE_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      EXPECTED_REVIEWED_SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+      EXPECTED_NATIVE_SOURCE_SHA: ${{ needs.acquire-native.outputs.native_source_sha }}
+      EXPECTED_NATIVE_DISTRIBUTION_SHA: ${{ needs.acquire-native.outputs.native_distribution_sha }}
+      EXPECTED_BASELINE_RELEASE_TAG: ${{ needs.upgrade-baseline.outputs.tag }}
+      EXPECTED_BASELINE_SOURCE_SHA: ${{ needs.upgrade-baseline.outputs.source_sha }}
+      EXPECTED_BASELINE_PACKAGE_SHA256: ${{ needs.upgrade-baseline.outputs.package_sha256 }}
+      EXPECTED_BASELINE_MANIFEST_SHA256: ${{ needs.upgrade-baseline.outputs.manifest_sha256 }}
+    steps:
+      - name: Checkout this run's validation tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pinned validation runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+
+      - name: Download exact prepared candidate assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cypherclaw-release-${{ needs.prepare.outputs.source_sha }}
+          path: ${{ runner.temp }}/cypherclaw-candidate
+
+      - name: Download the pinned published baseline
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cypherclaw-upgrade-baseline-${{ github.run_id }}
+          path: ${{ runner.temp }}/cypherclaw-baseline
+
+      - name: Prove existing-user app update and managed Gateway recovery
+        run: >-
+          node scripts/test-cypherclaw-release.mts
+          --candidate-dir "$RUNNER_TEMP/cypherclaw-candidate"
+          --baseline-dir "$RUNNER_TEMP/cypherclaw-baseline"
+          --output-dir "$RUNNER_TEMP/cypherclaw-upgrade-proof"
+          --target "${{ matrix.target }}"
+
+      - name: Upload sanitized acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cypherclaw-upgrade-proof-${{ matrix.target }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/cypherclaw-upgrade-proof/receipt.json
+          if-no-files-found: error
+          retention-days: 7
+
+  upgrade-acceptance:
+    name: Admit all supported app upgrade targets
+    needs: [validate, acquire-native, prepare, upgrade-baseline, upgrade-app]
+    if: github.repository == 'CypherTroopers/cypherclaw' && needs.upgrade-app.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      EXPECTED_CANDIDATE_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      EXPECTED_REVIEWED_SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+      EXPECTED_NATIVE_SOURCE_SHA: ${{ needs.acquire-native.outputs.native_source_sha }}
+      EXPECTED_NATIVE_DISTRIBUTION_SHA: ${{ needs.acquire-native.outputs.native_distribution_sha }}
+      EXPECTED_BASELINE_RELEASE_TAG: ${{ needs.upgrade-baseline.outputs.tag }}
+      EXPECTED_BASELINE_SOURCE_SHA: ${{ needs.upgrade-baseline.outputs.source_sha }}
+      EXPECTED_BASELINE_PACKAGE_SHA256: ${{ needs.upgrade-baseline.outputs.package_sha256 }}
+      EXPECTED_BASELINE_MANIFEST_SHA256: ${{ needs.upgrade-baseline.outputs.manifest_sha256 }}
+    steps:
+      - name: Checkout this run's validation tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pinned validation runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+
+      - name: Download exact prepared candidate assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cypherclaw-release-${{ needs.prepare.outputs.source_sha }}
+          path: ${{ runner.temp }}/cypherclaw-candidate
+
+      - name: Download the pinned published baseline
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cypherclaw-upgrade-baseline-${{ github.run_id }}
+          path: ${{ runner.temp }}/cypherclaw-baseline
+
+      - name: Download all platform receipts without overwriting filenames
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: cypherclaw-upgrade-proof-*-${{ github.run_id }}
+          path: ${{ runner.temp }}/cypherclaw-upgrade-receipts
+          merge-multiple: false
+
+      - name: Require complete matching acceptance on every target
+        run: >-
+          node scripts/cypherclaw-release-validation.mjs accept
+          --candidate-dir "$RUNNER_TEMP/cypherclaw-candidate"
+          --baseline-dir "$RUNNER_TEMP/cypherclaw-baseline"
+          --receipts-dir "$RUNNER_TEMP/cypherclaw-upgrade-receipts"
+
   publish:
-    needs: [validate, acquire-native, prepare]
-    if: github.repository == 'CypherTroopers/cypherclaw' && inputs.publish
+    needs: [validate, acquire-native, prepare, upgrade-acceptance]
+    if: github.repository == 'CypherTroopers/cypherclaw' && inputs.publish && needs.upgrade-acceptance.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

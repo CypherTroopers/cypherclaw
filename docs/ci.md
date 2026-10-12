@@ -12,6 +12,8 @@ CI continues during Full Release Validation; the legacy release-priority variabl
 does not pause workflow admission. See [deferred CI recovery](https://github.com/openclaw/openclaw/blob/main/.agents/skills/release-openclaw-ci/SKILL.md#deferred-ci-recovery)
 for runs already deferred by older workflow revisions.
 
+The independent CypherClaw Release workflow requires app acceptance on three standard GitHub-hosted runners before publication: Linux x64, macOS ARM64, and Windows x64. Its fixed matrix allows three concurrent jobs and adds no Blacksmith registrations. Each target tests a fresh installation and the captured published fork updater against the same sealed candidate, including managed Gateway readiness, configuration/authentication and SQLite session preservation. Missing or failed target evidence blocks publication. This fork-specific gate does not change the canonical OpenClaw CI planner or run native Cypher nodes.
+
 Native video smoke coverage uses four shards of four providers. Each provider has a ten-minute operation timeout plus 30 seconds of test overhead; each shard has a 50-minute job budget, leaving eight minutes for setup. These shards keep full-mode video testing disabled.
 
 Broad PRs retain their compact selected-owner Node plan when time-based splitting
