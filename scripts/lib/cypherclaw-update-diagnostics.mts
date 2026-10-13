@@ -82,6 +82,23 @@ const stepNames = [
   "openclaw doctor",
   "updater-runtime-retention",
 ];
+const failureSignals = {
+  finalizerTerminalUnconfirmed:
+    "Update finalization did not confirm the admitted run's terminal outcome.",
+  migratedWorkerCleanupFailed: "Update finalization and resource cleanup failed.",
+  terminalCapturedOutcomeLost: "Update terminal publication lost its captured outcome.",
+  terminalPublicationFailed: "Update result publication failed",
+  finalizationProgressFailed: "Update finalization and progress reporting failed",
+  packageBackupCleanupFailed: "Update backup cleanup failed:",
+  retainedWorkerSettlementFailed: "Retained updater workers did not settle",
+  retainedRuntimeCleanupFailed: "Update and retained runtime cleanup failed",
+  succeededPublicationWarning: "Update succeeded, but result publication failed:",
+  moduleMissing: "Cannot find module",
+  packageMissing: "Cannot find package",
+  sqliteContention: "database is locked",
+  circularJson: "Converting circular structure to JSON",
+  bigintJson: "Do not know how to serialize a BigInt",
+};
 function fixed(value: unknown, allowed: readonly string[]) {
   return typeof value === "string" && allowed.includes(value) ? value : undefined;
 }
@@ -150,6 +167,13 @@ export function projectUpdateCommand(
     operation,
     exitCode: result.exitCode,
     jsonObject: isRecord(payload),
+    stdoutNonempty: result.stdout.trim().length > 0,
+    stdoutStartsJson: result.stdout.trimStart().startsWith("{"),
+    outputContainsOkStatus: /"status"\s*:\s*"ok"/u.test(output),
+    outputContainsErrorStatus: /"status"\s*:\s*"error"/u.test(output),
+    failureSignals: Object.fromEntries(
+      Object.entries(failureSignals).map(([name, phrase]) => [name, output.includes(phrase)]),
+    ),
     result: record(payload),
     run: isRecord(payload) ? record(payload.run) : undefined,
     lastRun: isRecord(payload) ? record(payload.lastRun) : undefined,

@@ -163,6 +163,34 @@ describe("CypherClaw publication acceptance", () => {
     expect(JSON.stringify(projected)).not.toContain("private");
   });
 
+  it.each([
+    [
+      "finalizerTerminalUnconfirmed",
+      "Update finalization did not confirm the admitted run's terminal outcome.",
+    ],
+    ["migratedWorkerCleanupFailed", "Update finalization and resource cleanup failed."],
+    ["terminalCapturedOutcomeLost", "Update terminal publication lost its captured outcome."],
+    ["terminalPublicationFailed", "Update result publication failed"],
+    ["packageBackupCleanupFailed", "Update backup cleanup failed:"],
+    ["retainedWorkerSettlementFailed", "Retained updater workers did not settle"],
+  ])("identifies %s in non-JSON output without exposing the error body", (name, phrase) => {
+    const privateText = "synthetic-private-token /private/operator/home";
+    const projected = projectUpdateCommand("installed-update", {
+      exitCode: 1,
+      stdout: `notice ${privateText}\n{"status":"ok"}`,
+      stderr: `${phrase} ${privateText}`,
+    });
+    expect(projected).toMatchObject({
+      exitCode: 1,
+      jsonObject: false,
+      stdoutNonempty: true,
+      stdoutStartsJson: false,
+      outputContainsOkStatus: true,
+      failureSignals: { [name]: true },
+    });
+    expect(JSON.stringify(projected)).not.toContain(privateText);
+  });
+
   it("requires all three OS results for the exact sealed candidate and baseline", () => {
     expect(() => assertAcceptance(receipts(), candidate, baseline)).not.toThrow();
     const cases = [
