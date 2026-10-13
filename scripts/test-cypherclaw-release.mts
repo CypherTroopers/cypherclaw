@@ -318,7 +318,7 @@ async function configure(prefix: string, token: string, port: number) {
 }
 async function cleanup(prefix: string, port: number) {
   assertOwnership();
-  await command(prefix, ["gateway", "stop", "--json"], true, 10 * 60 * 1000);
+  await command(prefix, ["gateway", "stop", "--force", "--json"], true, 10 * 60 * 1000);
   const stopped = await status(prefix);
   assert.equal(stopped.service.runtime?.status, "stopped", "Managed Gateway stop is unverified");
   assert.equal(await canConnectToLoopbackPort(port), false, "Gateway listener survived stop");
