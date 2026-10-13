@@ -27,7 +27,7 @@ type History = { sessionId: string; messages: unknown[] };
 type Probe = {
   targets: Array<{
     url: string;
-    connect: { ok: boolean };
+    connect: { ok: boolean; rpcOk: boolean };
     server?: { version: string; buildId: string };
   }>;
 };
@@ -240,17 +240,32 @@ async function serving(prefix: string, release: Release, token: string, port: nu
     (entry) => entry.url === `ws://127.0.0.1:${port}`,
   );
   assert.equal(targetResult?.connect.ok, true, "Authenticated RPC did not connect");
+  assert.equal(targetResult.connect.rpcOk, true, "Authenticated RPC probe failed");
   assert.equal(targetResult.server?.version, release.version);
   assert.equal(targetResult.server?.buildId, build.buildId);
+  // Probe can retry with a paired device token; this call tests only the supplied shared token.
   const refused = await command(
     prefix,
-    ["gateway", "probe", "--token", `cypherclaw-invalid-${randomUUID()}`, "--json"],
+    [
+      "gateway",
+      "call",
+      "health",
+      "--url",
+      `ws://127.0.0.1:${port}`,
+      "--token",
+      `cypherclaw-invalid-${randomUUID()}`,
+      "--json",
+    ],
     false,
   );
-  const denied = (JSON.parse(refused.stdout) as Probe).targets.find(
-    (entry) => entry.url === `ws://127.0.0.1:${port}`,
-  );
-  assert.equal(denied?.connect.ok, false, "Incorrect token connected to Gateway");
+  assert.equal(refused.exitCode, 1, "Incorrect token did not fail the RPC call");
+  const denied: unknown = JSON.parse(refused.stdout);
+  assert(isRecord(denied) && isRecord(denied.error) && isRecord(denied.error.details));
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error.type, "gateway_request_error");
+  assert.equal(denied.error.code, "INVALID_REQUEST");
+  assert.equal(denied.error.details.code, "AUTH_TOKEN_MISMATCH");
+  assert.equal(denied.error.details.authReason, "token_mismatch");
   const url = `http://127.0.0.1:${port}/`;
   const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
   assert.equal(response.status, 200, "Control UI did not load");
