@@ -358,15 +358,21 @@ export function parseUpdateCompatibilityInventory(
       chunks,
     };
   });
-  const versions = new Set<string>();
+  const identities = new Set<string>();
   for (const release of releases) {
-    if (
-      parseReleaseVersion(release.version)?.version !== release.version ||
-      versions.has(release.version)
-    ) {
-      throw new Error(`Invalid or duplicate release version ${release.version} in ${file}`);
+    if (parseReleaseVersion(release.version)?.version !== release.version) {
+      throw new Error(`Invalid release version ${release.version} in ${file}`);
     }
-    versions.add(release.version);
+    const identity = JSON.stringify([
+      release.version,
+      release.buildId,
+      release.commit,
+      release.integrity,
+    ]);
+    if (identities.has(identity)) {
+      throw new Error(`Invalid or duplicate release identity ${identity} in ${file}`);
+    }
+    identities.add(identity);
   }
   collectRequiredCompatibilityChunks(releases);
   return { schemaVersion: 1, releases };
@@ -407,20 +413,25 @@ function collectRequiredCompatibilityChunks(
   return [...requiredByPath.values()];
 }
 
-const STABLE_10_1_CLEANUP_FACADE = "runtime-cleanup-DlrF_x2c.mjs";
-const STABLE_10_1_CLEANUP_OWNER = "runtime-cleanup-Dowg583v.mjs";
+// Verified facade/owner URLs from the published OpenClaw and CypherClaw 10.1 artifacts.
+const STABLE_10_1_CLEANUP_OWNERS = new Map([
+  ["runtime-cleanup-DlrF_x2c.mjs", "runtime-cleanup-Dowg583v.mjs"],
+  ["runtime-cleanup-C-KosKg2.mjs", "runtime-cleanup-C5Rr8QWt.mjs"],
+]);
 
 export function listUpdateCompatibilityChunkPaths(
   inventory: UpdateCompatibilityInventory,
 ): string[] {
   return [
     ...new Set(
-      inventory.releases.flatMap((release) => [
-        ...release.chunks
+      inventory.releases.flatMap((release) =>
+        release.chunks
           .filter((chunk) => HASHED_CHUNK.test(chunk.path))
-          .map((chunk) => chunk.path),
-        ...(release.version === "2026.10.1" ? [STABLE_10_1_CLEANUP_OWNER] : []),
-      ]),
+          .flatMap((chunk) => {
+            const owner = STABLE_10_1_CLEANUP_OWNERS.get(chunk.path);
+            return owner ? [chunk.path, owner] : [chunk.path];
+          }),
+      ),
     ),
   ].toSorted();
 }
@@ -554,24 +565,25 @@ export function writeUpdateCompatibilityChunks(params: {
       if (!specifier.startsWith(".")) {
         specifier = `./${specifier}`;
       }
-      if (
-        chunk.path === STABLE_10_1_CLEANUP_FACADE &&
+      const cleanupOwner =
         entry.exported === "runCliDisposerAfterPending"
-      ) {
+          ? STABLE_10_1_CLEANUP_OWNERS.get(chunk.path)
+          : undefined;
+      if (cleanupOwner) {
         // Published 10.1 loads the queue owner before updating, then imports this
         // facade after replacement. Resolve through that original URL so Node uses
         // its cached disposer queue, not the candidate's empty queue. Keep the owner
         // path resolver-visible until upgrades from 10.1 are no longer supported.
-        const owner = path.join(distDir, STABLE_10_1_CLEANUP_OWNER);
+        const owner = path.join(distDir, cleanupOwner);
         if (!fs.existsSync(owner) || isUpdateCompatibilityChunk(fs.readFileSync(owner, "utf8"))) {
           outputs.set(
-            STABLE_10_1_CLEANUP_OWNER,
+            cleanupOwner,
             `${UPDATE_COMPATIBILITY_CHUNK_HEADER}\nexport { ${match.exported} as i } from ${JSON.stringify(specifier)};\n`,
           );
         }
         lines.push(
           "// 10.1's already-loaded owner must drain its original pending disposer queue.",
-          `export { i as runCliDisposerAfterPending } from "./${STABLE_10_1_CLEANUP_OWNER}";`,
+          `export { i as runCliDisposerAfterPending } from "./${cleanupOwner}";`,
         );
       } else {
         lines.push(
