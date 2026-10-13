@@ -81,6 +81,8 @@ const inherited = new Set([
   "WINDIR",
   "COMSPEC",
   "PATHEXT",
+  "PROCESSOR_ARCHITECTURE",
+  "PROCESSOR_ARCHITEW6432",
   "USER",
   "LOGNAME",
   "TMP",
@@ -240,10 +242,11 @@ async function serving(prefix: string, release: Release, token: string, port: nu
   assert.equal(targetResult?.connect.ok, true, "Authenticated RPC did not connect");
   assert.equal(targetResult.server?.version, release.version);
   assert.equal(targetResult.server?.buildId, build.buildId);
-  const refused = await command(prefix, ["gateway", "probe", "--json"], false, timeoutMs, {
-    ...env,
-    OPENCLAW_GATEWAY_TOKEN: `wrong-${token}`,
-  });
+  const refused = await command(
+    prefix,
+    ["gateway", "probe", "--token", `cypherclaw-invalid-${randomUUID()}`, "--json"],
+    false,
+  );
   const denied = (JSON.parse(refused.stdout) as Probe).targets.find(
     (entry) => entry.url === `ws://127.0.0.1:${port}`,
   );
@@ -550,9 +553,24 @@ try {
   );
   console.log(`CypherClaw application acceptance passed for ${target}.`);
 } catch (error) {
+  const errorLocations =
+    error instanceof Error
+      ? (error.stack ?? "")
+          .split("\n")
+          .filter((line) => /^\s+at /u.test(line))
+          .flatMap(
+            (line) =>
+              line
+                .replaceAll("\\", "/")
+                .match(
+                  /\b(?:test-cypherclaw-release\.mts|cross-os-release-checks\/process\.ts):\d+:\d+\b/gu,
+                ) ?? [],
+          )
+          .slice(0, 5)
+      : [];
   fs.writeFileSync(
     path.join(outputDir, "receipt.json"),
-    `${JSON.stringify({ schemaVersion: 1, target, status: "failed", phase, errorCategory: error instanceof assert.AssertionError ? "contract-check" : "execution" }, null, 2)}\n`,
+    `${JSON.stringify({ schemaVersion: 1, target, status: "failed", phase, errorCategory: error instanceof assert.AssertionError ? "contract-check" : "execution", errorLocations }, null, 2)}\n`,
     { mode: 0o600, flag: "wx" },
   );
   console.error(
