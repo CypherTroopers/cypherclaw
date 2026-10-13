@@ -20,6 +20,7 @@ import {
   reserveGatewayPortForLane,
   runCommand,
 } from "./lib/cross-os-release-checks/process.ts";
+import { projectUpdateCommand } from "./lib/cypherclaw-update-diagnostics.mts";
 
 type Release = Awaited<ReturnType<typeof verifyReleaseDirectory>>;
 type BuildInfo = { commit: string; version: string; buildId: string };
@@ -70,6 +71,7 @@ fs.mkdirSync(outputDir, { recursive: true, mode: 0o700 });
 let candidate: Release;
 let baseline: Release;
 let phase = "runner-admission";
+const updateDiagnostics: ReturnType<typeof projectUpdateCommand>[] = [];
 const env: NodeJS.ProcessEnv = {};
 const inherited = new Set([
   "PATH",
@@ -436,13 +438,28 @@ async function cell(prefix: string, directory: string, release: Release, upgrade
     let updateRunId: string | undefined;
     if (upgrade) {
       phase = "upgrade.installed-updater";
-      const updated = await json<UpdateResult>(prefix, [
-        "update",
-        "--tag",
-        path.join(candidateDir, "cypherclaw.tgz"),
-        "--yes",
-        "--json",
-      ]);
+      const result = await command(
+        prefix,
+        ["update", "--tag", path.join(candidateDir, "cypherclaw.tgz"), "--yes", "--json"],
+        false,
+      );
+      updateDiagnostics.push(projectUpdateCommand("installed-update", result));
+      if (result.exitCode !== 0) {
+        // Preserve the failed command while reading the public ledger best effort.
+        try {
+          const recorded = await command(
+            prefix,
+            ["update", "status", "--timeout", "10", "--json"],
+            false,
+            2 * 60 * 1000,
+          );
+          updateDiagnostics.push(projectUpdateCommand("update-status", recorded));
+        } catch {
+          // The original update failure remains authoritative if status cannot run.
+        }
+      }
+      assert.equal(result.exitCode, 0, "Installed updater command failed");
+      const updated = JSON.parse(result.stdout) as UpdateResult;
       assert.equal(
         updated.status,
         "ok",
@@ -453,9 +470,13 @@ async function cell(prefix: string, directory: string, release: Release, upgrade
       if (updated.run) {
         assert.equal(updated.runId, updated.run.runId);
       }
-      const recorded = await json<{
+      phase = "upgrade.update-status";
+      const statusResult = await command(prefix, ["update", "status", "--json"], false);
+      updateDiagnostics.push(projectUpdateCommand("update-status", statusResult));
+      assert.equal(statusResult.exitCode, 0, "Update status command failed");
+      const recorded = JSON.parse(statusResult.stdout) as {
         lastRun: { runId: string; status: string; phase: string; reason?: string };
-      }>(prefix, ["update", "status", "--json"]);
+      };
       assert.equal(recorded.lastRun.runId, updated.runId);
       assert.equal(recorded.lastRun.status, "succeeded");
       assert.equal(recorded.lastRun.phase, "finished");
@@ -587,7 +608,7 @@ try {
       : [];
   fs.writeFileSync(
     path.join(outputDir, "receipt.json"),
-    `${JSON.stringify({ schemaVersion: 1, target, status: "failed", phase, errorCategory: error instanceof assert.AssertionError ? "contract-check" : "execution", errorLocations }, null, 2)}\n`,
+    `${JSON.stringify({ schemaVersion: 1, target, status: "failed", phase, errorCategory: error instanceof assert.AssertionError ? "contract-check" : "execution", errorLocations, updateDiagnostics }, null, 2)}\n`,
     { mode: 0o600, flag: "wx" },
   );
   console.error(

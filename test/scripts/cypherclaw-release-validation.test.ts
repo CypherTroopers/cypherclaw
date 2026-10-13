@@ -8,6 +8,7 @@ import {
   assertExpectedIdentities,
   verifyReleaseDirectory,
 } from "../../scripts/cypherclaw-release-validation.mjs";
+import { projectUpdateCommand } from "../../scripts/lib/cypherclaw-update-diagnostics.mts";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -63,6 +64,105 @@ function receipts() {
 }
 
 describe("CypherClaw publication acceptance", () => {
+  it("retains updater failure facts without publishing private command or ledger text", () => {
+    const privateText = "synthetic-private-token /private/operator/home";
+    const failedStep = {
+      name: "package-stage",
+      exitCode: 1,
+      termination: "exit",
+      command: privateText,
+      cwd: privateText,
+      stderrTail: privateText,
+      failureFacts: [
+        { code: "global-install-failed", npmErrorCode: "ENOSPC", message: privateText },
+      ],
+    };
+    const payload = {
+      status: "error",
+      mode: "npm",
+      reason: "global-install-failed",
+      failedStep,
+      run: {
+        status: "failed",
+        phase: "finished",
+        verification: { booted: false, serviceRunning: true, doctorHint: privateText },
+      },
+      lastRun: {
+        status: "failed",
+        phase: "staging",
+        reason: privateText,
+        steps: [{ ...failedStep, name: privateText, status: "failed" }],
+        origin: { requester: privateText },
+      },
+    };
+    const projected = projectUpdateCommand("installed-update", {
+      exitCode: 1,
+      stdout: JSON.stringify(payload),
+      stderr: privateText,
+    });
+    expect(projected).toMatchObject({
+      operation: "installed-update",
+      exitCode: 1,
+      jsonObject: true,
+      run: {
+        status: "failed",
+        phase: "finished",
+        verification: { booted: false, serviceRunning: true },
+      },
+      result: {
+        status: "error",
+        reason: "global-install-failed",
+        failedStep: {
+          name: "package-stage",
+          exitCode: 1,
+          failureFacts: [{ code: "global-install-failed", npmErrorCode: "ENOSPC" }],
+        },
+      },
+      lastRun: {
+        status: "failed",
+        phase: "staging",
+        reason: "redacted",
+        steps: [{ name: "redacted" }],
+      },
+    });
+    expect(JSON.stringify(projected)).not.toContain(privateText);
+    const failed = Object.assign(receipt("linux-x64"), {
+      status: "failed",
+      updateDiagnostics: [projected],
+    });
+    expect(() =>
+      assertAcceptance(
+        [failed, receipt("darwin-arm64"), receipt("win32-x64")],
+        candidate,
+        baseline,
+      ),
+    ).toThrow("OS acceptance did not pass");
+  });
+
+  it.each([
+    "not JSON",
+    "null",
+    "[]",
+    JSON.stringify({
+      status: "private",
+      reason: "private",
+      failedStep: {
+        name: "private",
+        exitCode: "private",
+        failureFacts: [{ code: "private", npmErrorCode: "private", errorName: "private" }],
+      },
+    }),
+  ])("keeps malformed or unknown updater diagnostics private: %s", (stdout) => {
+    const projected = projectUpdateCommand("update-status", {
+      exitCode: 2,
+      stdout,
+      stderr: "private/path: ERR_MODULE_NOT_FOUND",
+    });
+    expect(projected.exitCode).toBe(2);
+    expect(projected.runtimeErrorCodes).toEqual(["ERR_MODULE_NOT_FOUND"]);
+    expect(JSON.stringify(projected)).not.toContain("private");
+  });
+
   it("requires all three OS results for the exact sealed candidate and baseline", () => {
     expect(() => assertAcceptance(receipts(), candidate, baseline)).not.toThrow();
     const cases = [
