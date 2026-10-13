@@ -27,7 +27,7 @@ type History = { sessionId: string; messages: unknown[] };
 type Probe = {
   targets: Array<{
     url: string;
-    connect: { ok: boolean; rpcOk: boolean };
+    connect: { ok: boolean };
     server?: { version: string; buildId: string };
   }>;
 };
@@ -240,9 +240,11 @@ async function serving(prefix: string, release: Release, token: string, port: nu
     (entry) => entry.url === `ws://127.0.0.1:${port}`,
   );
   assert.equal(targetResult?.connect.ok, true, "Authenticated RPC did not connect");
-  assert.equal(targetResult.connect.rpcOk, true, "Authenticated RPC probe failed");
   assert.equal(targetResult.server?.version, release.version);
   assert.equal(targetResult.server?.buildId, build.buildId);
+  // A first-time passive probe has no read scopes; prove RPC access through the normal CLI.
+  const health = await rpc<{ ok: boolean }>(prefix, token, "health");
+  assert.equal(health.ok, true, "Authenticated health RPC failed");
   // Probe can retry with a paired device token; this call tests only the supplied shared token.
   const refused = await command(
     prefix,
