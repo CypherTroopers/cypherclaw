@@ -1,6 +1,8 @@
-/** Assertions for the wizard's user-facing notes. */
+/** Fixtures and assertions for wizard finalization. */
 import { expect, vi } from "vitest";
 import type { createWizardPrompter as buildWizardPrompter } from "../../test/helpers/wizard-prompter.js";
+import type * as AuthChoiceModelCheck from "../commands/auth-choice.model-check.js";
+import type { PluginWebSearchProviderEntry } from "../plugins/types.js";
 
 export function createRuntimeProbeResult(bunVersion = "1.4.3") {
   return {
@@ -50,4 +52,28 @@ export async function withPlatform<T>(platform: NodeJS.Platform, fn: () => Promi
   } finally {
     Object.defineProperty(process, "platform", originalPlatformDescriptor);
   }
+}
+
+export type DefaultModelAuthStatus = ReturnType<
+  typeof AuthChoiceModelCheck.resolveDefaultModelAuthStatus
+>;
+export type DefaultModelCatalogFacts = ReturnType<
+  typeof AuthChoiceModelCheck.resolveDefaultModelCatalogFacts
+>;
+
+export function createWebSearchProviderEntry(
+  provider: Pick<PluginWebSearchProviderEntry, "id" | "label" | "envVars"> &
+    Partial<Pick<PluginWebSearchProviderEntry, "authProviderId" | "requiresCredential">>,
+): PluginWebSearchProviderEntry {
+  return {
+    pluginId: `plugin-${provider.id}`,
+    hint: "",
+    placeholder: "",
+    signupUrl: "https://example.test/search",
+    credentialPath: `plugins.entries.${provider.id}.config.webSearch.apiKey`,
+    getCredentialValue: () => undefined,
+    setCredentialValue: () => {},
+    createTool: () => null,
+    ...provider,
+  };
 }

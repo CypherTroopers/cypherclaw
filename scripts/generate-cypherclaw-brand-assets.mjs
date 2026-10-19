@@ -46,7 +46,9 @@ try {
       transparentPixels.set(maskPixels.subarray(index, index + 3), index);
     }
     // Fully invisible pixels carry no background color into reduced-size edges.
-    if (alpha === 0) transparentPixels.fill(0, index, index + 3);
+    if (alpha === 0) {
+      transparentPixels.fill(0, index, index + 3);
+    }
   }
   const transparent = new PhotonImage(transparentPixels, source.get_width(), source.get_height());
   images.push(transparent);
@@ -55,5 +57,7 @@ try {
     "Encoded the original logo, proportional sizes, and a background-alpha variant retaining subject RGB with backdrop-edge cleanup.",
   );
 } finally {
-  for (const image of images) image.free();
+  for (const image of images) {
+    image.free();
+  }
 }

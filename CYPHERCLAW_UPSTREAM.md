@@ -9,8 +9,8 @@ This file owns the fork's source provenance and intake procedure. Update the ups
 | Source                  | Pin                                                                          |
 | ----------------------- | ---------------------------------------------------------------------------- |
 | Official repository     | `https://github.com/openclaw/openclaw.git`                                   |
-| Official stable release | [`v2026.10.2`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.2) |
-| Official peeled commit  | `b8952d477f0c932d8ddc6da5c89cab5a169b6ff1`                                   |
+| Official stable release | [`v2026.10.5`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.5) |
+| Official peeled commit  | `1b58cb9a1b4f4353e1add63c8506db4d890962e8`                                   |
 | Fork repository         | `https://github.com/CypherTroopers/cypherclaw.git`                           |
 
 ### Initial stable migration
@@ -33,9 +33,25 @@ This source declares shared state schema **20** and agent schema **24**. Existin
 
 ### October patch intake
 
-The `v2026.10.2` intake merges the pinned official commit above into fork head `0f305c46b627e1dd55246b914967b2df2bdd1365`. The previous official `v2026.10.1` commit is its ancestor, so this intake uses a regular merge and retains both histories. It includes 105 upstream commits across 655 files. The only content conflict is the database-worker test inventory: both the Cypher transfer-store test and the upstream prompt-cache test retain their worker routing.
+The `v2026.10.2` intake merges official commit `b8952d477f0c932d8ddc6da5c89cab5a169b6ff1` into fork head `0f305c46b627e1dd55246b914967b2df2bdd1365`. The previous official `v2026.10.1` commit is its ancestor, so this intake uses a regular merge and retains both histories. It includes 105 upstream commits across 655 files. The only content conflict is the database-worker test inventory: both the Cypher transfer-store test and the upstream prompt-cache test retain their worker routing.
 
 Shared state schema **20** and agent schema **24** remain unchanged. The intake retains Cypher and wallet operations, node data and IPC paths, CypherClaw branding, fork package inventory, standalone installers, and the packaged fork's GitHub Releases update identity. Source intake does not deploy a Gateway or publish distribution artifacts.
+
+### October 2026.10.5 intake
+
+The `v2026.10.5` intake reapplies the reviewed fork delta through `1716a4133adbacb2f70fbc1b02c8df4bf7537d4f`, relative to official `v2026.10.2` commit `b8952d477f0c932d8ddc6da5c89cab5a169b6ff1`, onto the official commit above. The official release lines diverge, so older upstream changes are not merged wholesale into this candidate. The integration commit retains the prior fork and new official histories as its two parents.
+
+The ColossusX Overview, Node, Wallets, Send, Mining, and Explorer tabs retain their layout and operations, along with the independent wallet generator and custom logo assets. The intake preserves the packaged fork's GitHub Releases identity and the published CypherClaw 10.1 and 10.2 updaters' compatibility modules, while retaining upstream update recovery and worker admission changes.
+
+Shared state remains schema **20**; agent databases migrate from **24** to **25** through the official migration and backup owners. Preserve a verified pre-upgrade backup before activating this source against existing state. After migration, returning to the previous binary requires restoring its matching backup; a package-only rollback cannot reopen schema 25, and writes made after the backup are not retained. See the [schema migration and recovery contract](docs/reference/database-schemas/agent-schema-history.md#canonical-writer-validation). This source intake does not activate a live Gateway or publish a release.
+
+Validation in the isolated intake checkout included the complete `pnpm build`, core/UI/scripts/extensions type checks, final package-boundary SDK declaration generation, 432 related runtime and update tests across 28 files, 299 theme/UI/favicon tests, and 73 tests after the final lazy-catalog changes. Browser checks exercised the six node tabs, wallet locking and generation, reviewed send/finality, mining signer and reward selection, explorer links, favicon, desktop branding, and 390-pixel layouts with synthetic data. All 181 custom branding assets retain their pre-intake bytes; the native icon generator check also verified 152 resources. The pre-commit UI startup payload measured **373424 B gzip**, within the unchanged **373454 B** hard limit. After the final type/fixture moves, the three affected package-update and wizard files passed all 79 tests. These groups overlap; their counts are not a unique aggregate.
+
+Scoped lint passed all 232 selected source, test, and build-script files after adapting retained scripts to the upstream rules. Database-worker admission, generated Kysely declarations, native localization, and workflow static checks passed. Independent reviews of the integration and subsequent fixes found no actionable P0/P1 findings.
+
+The published CypherClaw `2026.10.2` artifact at `ec944b6de83cb69969388c4b0d19ceae11d2b21b` was seal/source-verified. A narrow published-driver × candidate cleanup probe confirmed the cached owner and pending-disposer ordering survive the compatibility-module replacement, without modifying the released artifact. This proves the cleanup bridge, not a complete installation upgrade.
+
+Inherited static-check findings remain explicit: `check:max-lines-ratchet --staged --base 1b58cb9a1b4f4353e1add63c8506db4d890962e8` rejects the upstream `src/commands/doctor-memory-search.test.ts` suppression (1045 counted lines against its 1000-line cap); that file is byte-identical to the official tag. A full `git diff --cached --check` against the tag also reports whitespace in 28 retained vendor, license, and provenance files, all byte-identical to the previous fork head. No baseline, threshold, or ignore exceptions were added. Native app builds/device behavior, OS-specific installation acceptance, and a live Gateway upgrade were not exercised.
 
 ## Prepare the next stable intake
 
@@ -44,7 +60,7 @@ Start with a clean checkout of the reviewed fork branch and verify `origin` is t
 Fetch only the selected tag into a private reference. Replace the example tag with the release selected for this intake:
 
 ```sh
-cypherclaw_tag=v2026.10.2
+cypherclaw_tag=v2026.10.5
 git fetch --no-tags --no-write-fetch-head https://github.com/openclaw/openclaw.git \
   "refs/tags/${cypherclaw_tag}:refs/cypherclaw/upstream/${cypherclaw_tag}"
 git rev-parse "refs/cypherclaw/upstream/${cypherclaw_tag}^{commit}"

@@ -1,8 +1,10 @@
 import { css, html, LitElement, type PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
 import { inferControlUiPublicAssetPath } from "../app/public-assets.ts";
+import { subscribeThemeBranding } from "../app/theme-branding.ts";
 import type { MascotMood } from "./mascot-pose.ts";
 import { currentThemeBranding, neutralMark } from "./neutral-mark.ts";
+import { renderThemeBrandIcon } from "./theme-brand-icon.ts";
 
 const DEFAULT_SIZE = 120;
 const MASCOT_MOODS = new Set<MascotMood>([
@@ -83,6 +85,7 @@ class OpenClawMascot extends LitElement {
   private reducedMotion = false;
   private intersectionObserver: IntersectionObserver | null = null;
   private themeObserver: MutationObserver | null = null;
+  private stopBranding?: () => void;
   private motionQuery: MediaQueryList | null = null;
 
   private readonly handleVisibilityChange = () => this.syncPlayback();
@@ -94,6 +97,7 @@ class OpenClawMascot extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.setAttribute("aria-hidden", "true");
+    this.stopBranding = subscribeThemeBranding(() => this.requestUpdate());
     document.addEventListener("visibilitychange", this.handleVisibilityChange);
     this.motionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)") ?? null;
     this.reducedMotion = this.motionQuery?.matches ?? false;
@@ -116,6 +120,8 @@ class OpenClawMascot extends LitElement {
 
   override disconnectedCallback(): void {
     this.removeAttribute("data-playing");
+    this.stopBranding?.();
+    this.stopBranding = undefined;
     document.removeEventListener("visibilitychange", this.handleVisibilityChange);
     this.motionQuery?.removeEventListener("change", this.handleMotionChange);
     this.motionQuery = null;
@@ -134,8 +140,10 @@ class OpenClawMascot extends LitElement {
   }
 
   override render() {
-    return currentThemeBranding().mascot === "none"
-      ? html`<span class="openclaw-mascot--neutral">${neutralMark}</span>`
+    return currentThemeBranding().brandIcon !== "claw"
+      ? html`<span class="openclaw-mascot--neutral"
+          >${renderThemeBrandIcon(neutralMark, currentThemeBranding(), neutralMark)}</span
+        >`
       : html`<img
           src=${inferControlUiPublicAssetPath("cypherclaw-mascot.png")}
           alt=""
@@ -154,7 +162,7 @@ class OpenClawMascot extends LitElement {
     this.toggleAttribute(
       "data-playing",
       this.isConnected &&
-        currentThemeBranding().mascot === "claw" &&
+        currentThemeBranding().brandIcon === "claw" &&
         this.visible &&
         !this.reducedMotion &&
         document.visibilityState !== "hidden",

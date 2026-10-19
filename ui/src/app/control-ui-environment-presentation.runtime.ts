@@ -1,11 +1,13 @@
+import type { AgentTabIconShape } from "../../../packages/gateway-protocol/src/schema/tab-icon.ts";
 import {
   CONTROL_UI_ENVIRONMENT_ATTRIBUTE,
   type ControlUiEnvironment,
 } from "../../../src/gateway/control-ui-bootstrap-contract.js";
 import { getOrCreatePromise } from "../../../src/shared/lazy-promise.js";
-import { currentThemeBranding, neutralMarkSvg } from "../components/neutral-mark.ts";
+import { neutralMarkSvg } from "../components/neutral-mark-svg.ts";
 import { applyControlUiOperatorSeamColor } from "./control-ui-presentation.ts";
 import { inferControlUiPublicAssetPath } from "./public-assets.ts";
+import { currentThemeBranding } from "./theme-branding.ts";
 
 export function applyControlUiPresentation(params: {
   environment: ControlUiEnvironment | null;
@@ -56,9 +58,28 @@ export function applyControlUiPresentation(params: {
 type ControlUiFaviconStatus = "attention" | "working" | "done" | "disconnected" | "idle";
 
 let faviconStatus: ControlUiFaviconStatus = "idle";
+let faviconImage: HTMLImageElement | null = null;
+let faviconShape: AgentTabIconShape = "square";
+
+/** Decoded personal artwork is always rasterized here, including when idle. */
+export function applyControlUiFaviconImage(
+  image: HTMLImageElement | null,
+  shape: AgentTabIconShape = "square",
+): void {
+  if (faviconImage === image && faviconShape === shape) {
+    return;
+  }
+  faviconImage = image;
+  faviconShape = shape;
+  // Decoded personal images never enter the cached default-source loader.
+  syncControlUiFavicon();
+}
 let faviconPalette: ReturnType<typeof resolveFaviconPalette> | undefined;
 const faviconSources = new Map<string, Promise<FaviconSource>>();
-const faviconRequests = new WeakMap<HTMLLinkElement, { signature: string }>();
+const faviconRequests = new WeakMap<
+  HTMLLinkElement,
+  { signature: string; image: HTMLImageElement | null }
+>();
 
 export function invalidateControlUiFaviconPalette(): void {
   faviconPalette = undefined;
@@ -96,7 +117,7 @@ function resolveFaviconPalette() {
     ? style.getPropertyValue(`--control-ui-environment-${environment.color}`).trim()
     : "";
   const artwork =
-    currentThemeBranding().mascot === "none"
+    currentThemeBranding().brandIcon !== "claw"
       ? neutralMarkSvg({
           fill: style.getPropertyValue("--primary").trim(),
           glyph: style.getPropertyValue("--primary-foreground").trim(),
@@ -121,6 +142,10 @@ function resolveFaviconPalette() {
   };
 }
 
+export function controlUiFaviconBaseSvg(): string | null {
+  return (faviconPalette ??= resolveFaviconPalette()).baseSvg;
+}
+
 export function syncControlUiFavicon(): void {
   const { baseSvg, color, ring, environmentColor } = (faviconPalette ??= resolveFaviconPalette());
   // Both favicon formats share the self-contained shipped SVG in an environment.
@@ -136,7 +161,7 @@ export function syncControlUiFavicon(): void {
     faviconSources.clear();
   }
   for (const icon of document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]')) {
-    if (!baseSvg && !color && !environmentColor) {
+    if (!faviconImage && !baseSvg && !color && !environmentColor) {
       faviconRequests.delete(icon);
       if (icon.dataset.openclawOriginalFavicon) {
         restoreFavicon(icon, JSON.parse(icon.dataset.openclawOriginalFavicon));
@@ -152,19 +177,22 @@ export function syncControlUiFavicon(): void {
     const original: [string | null, string | null] = JSON.parse(
       icon.dataset.openclawOriginalFavicon,
     );
-    const href = baseSvg ?? environmentSource ?? original[0];
-    const type = baseSvg || environmentSource ? "image/svg+xml" : original[1];
-    const signature = JSON.stringify([href, type, color, ring, environmentColor]);
-    if (faviconRequests.get(icon)?.signature === signature) {
+    const image = faviconImage;
+    const href = image?.src ?? baseSvg ?? environmentSource ?? original[0];
+    const type = image || baseSvg || environmentSource ? "image/svg+xml" : original[1];
+    const shape = image ? faviconShape : "square";
+    const signature = JSON.stringify([href, type, color, ring, shape, environmentColor]);
+    const previous = faviconRequests.get(icon);
+    if (previous?.signature === signature && previous.image === image) {
       continue;
     }
-    const request = { signature };
+    const request = { signature, image };
     faviconRequests.set(icon, request);
-    if ((!color && !environmentColor) || !href) {
+    if ((!color && !image && !environmentColor) || !href) {
       restoreFavicon(icon, [href, type]);
       continue;
     }
-    void composeFavicon(href, type, color, ring, environmentColor).then(
+    void composeFavicon(href, type, color, ring, image, shape, image ? "" : environmentColor).then(
       (result) => {
         // Asset decoding may finish after idle, a palette change, or a context teardown.
         if (icon.isConnected && faviconRequests.get(icon) === request) {
@@ -175,7 +203,11 @@ export function syncControlUiFavicon(): void {
       (error: unknown) => {
         if (faviconRequests.get(icon) === request) {
           faviconRequests.delete(icon);
-          restoreFavicon(icon, [href, type]);
+          if (image) {
+            applyControlUiFaviconImage(null);
+          } else {
+            restoreFavicon(icon, [href, type]);
+          }
           console.warn("[openclaw] favicon status could not be composed", error);
         }
       },
@@ -215,17 +247,21 @@ async function composeFavicon(
   type: string | null,
   color: string,
   ring: string,
+  image: HTMLImageElement | null,
+  shape: AgentTabIconShape,
   environmentColor: string,
 ) {
-  const source = await getOrCreatePromise(
-    faviconSources,
-    JSON.stringify([href, type]),
-    () => loadSource(href, type),
-    { cacheRejections: false },
-  );
+  const source: FaviconSource = image
+    ? { image }
+    : await getOrCreatePromise(
+        faviconSources,
+        JSON.stringify([href, type]),
+        () => loadSource(href, type),
+        { cacheRejections: false },
+      );
   const inset = environmentColor ? 2 : 0;
-  // Keep status/environment decorations outside the entire resized source image.
-  const size = color ? 22 : environmentColor ? 26 : 32;
+  // Default artwork stays whole; personal images retain their selected crop.
+  const size = image ? 32 : color ? 22 : environmentColor ? 26 : 32;
   if ("svg" in source) {
     const svg = new DOMParser().parseFromString(
       `<svg xmlns="${SVG_NAMESPACE}" viewBox="0 0 32 32" width="32" height="32"/>`,
@@ -281,15 +317,40 @@ async function composeFavicon(
   if (!context) {
     throw new Error("Favicon canvas unavailable");
   }
-  context.drawImage(source.image, inset, inset, size, size);
+  context.save();
+  if (shape !== "square") {
+    context.beginPath();
+    context.roundRect(0, 0, 32, 32, shape === "circle" ? 16 : 8);
+    context.clip();
+  }
+  const fit = shape === "square" ? Math.min : Math.max;
+  const scale = fit(size / source.image.naturalWidth, size / source.image.naturalHeight);
+  const width = source.image.naturalWidth * scale;
+  const height = source.image.naturalHeight * scale;
+  context.drawImage(
+    source.image,
+    inset + (size - width) / 2,
+    inset + (size - height) / 2,
+    width,
+    height,
+  );
+  context.restore();
   if (color) {
     context.beginPath();
-    context.arc(28, 28, 3, 0, Math.PI * 2);
+    context.arc(image ? 25.5 : 28, image ? 25.5 : 28, image ? 5 : 3, 0, Math.PI * 2);
     context.fillStyle = color;
     context.fill();
     context.strokeStyle = ring;
-    context.lineWidth = 1.5;
+    context.lineWidth = image ? 2 : 1.5;
     context.stroke();
   }
-  return { href: canvas.toDataURL("image/png"), type: "image/png" };
+  const png = canvas.toDataURL("image/png");
+  if (!image) {
+    return { href: png, type: "image/png" };
+  }
+  // Firefox batches icon candidates and prefers SVG over PNG, even when that
+  // SVG was a default briefly restored before the personal image decoded. Keep
+  // personal artwork SVG-preferred too; only our rasterized bytes are embedded.
+  const svg = `<svg xmlns="${SVG_NAMESPACE}" viewBox="0 0 32 32" width="32" height="32"><image width="32" height="32" href="${png}"/></svg>`;
+  return { href: `data:image/svg+xml,${encodeURIComponent(svg)}`, type: "image/svg+xml" };
 }

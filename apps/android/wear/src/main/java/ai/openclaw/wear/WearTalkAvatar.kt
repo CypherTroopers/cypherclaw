@@ -32,7 +32,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.flow.collect
@@ -257,14 +258,8 @@ internal class AndroidWearAnimatorScaleSource(
         }
       }
     val lifecycleObserver =
-      object : DefaultLifecycleObserver {
-        override fun onStart(owner: LifecycleOwner) {
-          refresh()
-        }
-
-        override fun onResume(owner: LifecycleOwner) {
-          refresh()
-        }
+      LifecycleEventObserver { _, event ->
+        if (event == Lifecycle.Event.ON_START || event == Lifecycle.Event.ON_RESUME) refresh()
       }
 
     context.registerReceiver(receiver, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED))
@@ -428,10 +423,7 @@ internal fun smoothAvatarMouth(
 internal fun scaledAvatarDeltaSeconds(
   deltaSeconds: Float,
   durationScale: Float,
-): Float {
-  if (durationScale <= 0f) return 0f
-  return (deltaSeconds / durationScale).coerceIn(0f, 0.05f)
-}
+): Float = if (durationScale <= 0f) 0f else (deltaSeconds / durationScale).coerceIn(0f, 0.05f)
 
 private fun syntheticSpeechMouth(animationSeconds: Float): Float {
   val tau = 2f * PI.toFloat()

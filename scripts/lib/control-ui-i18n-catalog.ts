@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildBaseHints } from "../../src/config/schema.hints.js";
 import { configHintTranslationKey } from "../../ui/src/i18n/lib/config-hint-translation.ts";
+import { registerAboutEnglish } from "../../ui/src/i18n/locales/en-about.ts";
 import { registerActivityEnglish } from "../../ui/src/i18n/locales/en-activity.ts";
 import { registerAgentsHomeEnglish } from "../../ui/src/i18n/locales/en-agents-home.ts";
 import { registerAppsEnglish } from "../../ui/src/i18n/locales/en-apps.ts";
@@ -15,6 +16,7 @@ import { registerChatMessageMetadataEnglish } from "../../ui/src/i18n/locales/en
 import { registerChatProviderReviewEnglish } from "../../ui/src/i18n/locales/en-chat-provider-review.ts";
 import { registerCodeBlocksEnglish } from "../../ui/src/i18n/locales/en-code-blocks.ts";
 import { registerCommandPaletteEnglish } from "../../ui/src/i18n/locales/en-command-palette.ts";
+import { registerCommunityInviteEnglish } from "../../ui/src/i18n/locales/en-community-invite.ts";
 import { registerCronEnglish } from "../../ui/src/i18n/locales/en-cron.ts";
 import { registerCypherEnglish } from "../../ui/src/i18n/locales/en-cypher.ts";
 import { registerDebugEnglish } from "../../ui/src/i18n/locales/en-debug.ts";
@@ -38,6 +40,7 @@ import { registerPersonalInstructionsEnglish } from "../../ui/src/i18n/locales/e
 import { registerPluginConsentEnglish } from "../../ui/src/i18n/locales/en-plugin-consent.ts";
 import { registerPluginManagementEnglish } from "../../ui/src/i18n/locales/en-plugin-management.ts";
 import { registerPortalsEnglish } from "../../ui/src/i18n/locales/en-portals.ts";
+import { registerProcessesEnglish } from "../../ui/src/i18n/locales/en-processes.ts";
 import { registerProfileEnglish } from "../../ui/src/i18n/locales/en-profile.ts";
 import { registerSessionPeopleEnglish } from "../../ui/src/i18n/locales/en-session-people.ts";
 import { registerSessionPlacementEnglish } from "../../ui/src/i18n/locales/en-session-placement.ts";
@@ -68,6 +71,7 @@ const localesDir = path.resolve(
 const sourceFiles = [
   "en.ts",
   "en-agents.ts",
+  "en-about.ts",
   "en-activity.ts",
   "en-agents-home.ts",
   "en-apps.ts",
@@ -80,12 +84,14 @@ const sourceFiles = [
   "en-chat-provider-review.ts",
   "en-code-blocks.ts",
   "en-command-palette.ts",
+  "en-community-invite.ts",
   "en-cron.ts",
   "en-debug.ts",
   "en-desktop.ts",
   "en-devices.ts",
   "en-dreaming.ts",
   "en-file-preview.ts",
+  "en-processes.ts",
   "en-labs.ts",
   "en-login.ts",
   "en-link-reader.ts",
@@ -156,6 +162,7 @@ export function loadControlUiSourceCatalog(): TranslationMap {
     // Preserve partial-fragment key order while keeping shared labels eager.
     {
       ...en,
+      aboutPage: registerAboutEnglish.catalog.aboutPage,
       custodian: { ...registerPluginManagementEnglish.catalog.custodian, ...en.custodian },
       chat: {
         ...en.chat,
@@ -191,11 +198,13 @@ export function loadControlUiSourceCatalog(): TranslationMap {
     registerChatGoalsEnglish.catalog,
     registerChatProviderReviewEnglish.catalog,
     registerCodeBlocksEnglish.catalog,
+    registerCommunityInviteEnglish.catalog,
     registerCronEnglish.catalog,
     registerCypherEnglish.catalog,
     registerDevicesEnglish.catalog,
     registerDreamingEnglish.catalog,
     registerFilePreviewEnglish.catalog,
+    registerProcessesEnglish.catalog,
     registerLabsEnglish.catalog,
     registerLoginEnglish.catalog,
     registerLinkReaderEnglish.catalog,

@@ -41,5 +41,7 @@ const formatting = spawnSync(
   [path.join(root, "node_modules/oxfmt/bin/oxfmt"), "--write", path.join(root, logoModule)],
   { cwd: root, stdio: "inherit" },
 );
-if (formatting.status !== 0) process.exit(formatting.status ?? 1);
+if (formatting.status !== 0) {
+  process.exit(formatting.status ?? 1);
+}
 console.log("Generated README, browser-lab, and self-contained OAuth logos.");

@@ -34,7 +34,10 @@ extension CritterStatusLabel {
                         let now = Date()
                         let delay = await MainActor.run {
                             self.tick(now)
-                            return self.nextTickDelay(after: now)
+                            return Self.nextAnimationTickDelay(
+                                now: now,
+                                isWorking: self.isWorkingNow,
+                                deadlines: [self.nextBlink, self.nextWiggle, self.nextLegWiggle, self.nextEarWiggle])
                         }
                         try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     }
@@ -98,13 +101,6 @@ extension CritterStatusLabel {
         (self.effectiveAnimationsEnabled ? 1 : 0) |
             (self.earBoostActive ? 2 : 0) |
             (self.isWorkingNow ? 4 : 0)
-    }
-
-    private func nextTickDelay(after now: Date) -> TimeInterval {
-        Self.nextAnimationTickDelay(
-            now: now,
-            isWorking: self.isWorkingNow,
-            deadlines: [self.nextBlink, self.nextWiggle, self.nextLegWiggle, self.nextEarWiggle])
     }
 
     static func nextAnimationTickDelay(

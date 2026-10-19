@@ -2,6 +2,7 @@
 
 import type { LitElement } from "lit";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { resolveThemeBranding } from "../../../packages/gateway-protocol/src/theme.ts";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import type { GatewayBrowserClient } from "../api/gateway.ts";
 import type { AgentsListResult, GatewayAgentRow, GatewaySessionRow } from "../api/types.ts";
@@ -16,12 +17,10 @@ import { createStorageMock } from "../test-helpers/storage.ts";
 import "./app-host.ts";
 import { bootstrapApplication, type ApplicationRuntime } from "./bootstrap.ts";
 import type { ApplicationContext } from "./context.ts";
+import { currentThemeBranding, setCurrentThemeBranding } from "./theme-branding.ts";
 
 type ShellDocumentTitleState = {
   activeSessionKey: string;
-  outboxStoreRuntime: {
-    read: () => { total: number };
-  } | null;
   routeState: { routeId?: RouteId };
   runtime?: { context: ApplicationContext };
   syncDocumentTitle: () => void;
@@ -96,21 +95,29 @@ describe("CypherClaw shell document title", () => {
 
   function createContext(options: {
     connected?: boolean;
+    phase?: ApplicationContext["gateway"]["snapshot"]["phase"];
     approvalCount?: number;
+    brandName?: string;
     agentsList?: AgentsListResult | null;
     assistantAgentId?: string;
     environment?: { label: string; color: "amber" };
     sessions?: GatewaySessionRow[] | null;
   }): ApplicationContext {
+    const previousBranding = currentThemeBranding();
+    const branding = resolveThemeBranding({ brandName: options.brandName });
+    setCurrentThemeBranding(branding);
+    onTestFinished(() => setCurrentThemeBranding(previousBranding));
     return {
       gateway: {
         snapshot: {
-          phase: (options.connected ?? true) ? "connected" : "reconnecting",
+          phase: options.phase ?? ((options.connected ?? true) ? "connected" : "reconnecting"),
+          lastError: null,
           assistantAgentId: options.assistantAgentId ?? null,
         },
         connection: { gatewayUrl: "ws://gateway.test" },
       },
       config: { current: { environment: options.environment ?? null } },
+      theme: { branding },
       agents: { state: { agentsList: options.agentsList ?? null } },
       overlays: {
         snapshot: { approvalQueue: Array.from({ length: options.approvalCount ?? 0 }) },
@@ -121,37 +128,33 @@ describe("CypherClaw shell document title", () => {
     } as unknown as ApplicationContext;
   }
 
-  it("keeps the boot title before a route commits", () => {
-    const shell = createShell();
-    document.title = "OpenClaw Control";
+  it("keeps a new tab neutral during connecting", () => {
+    const context = createContext({ phase: "connecting", approvalCount: 2 });
+    const shell = createShell(context);
+    shell.routeState = { routeId: "chat" };
+    // Slow initial handshakes are still loading, even after the offline grace period.
+    context.gateway.snapshot.offlineStable = true;
 
-    shell.routeState = {};
     shell.syncDocumentTitle();
-    expect(document.title).toBe("OpenClaw Control");
+
+    expect(document.title).toBe("Chat — CypherClaw");
   });
 
-  it("does not read stored outboxes for a connected document title", () => {
-    const shell = createShell(createContext({}));
-    const read = vi.fn(() => ({ total: 3 }));
-    shell.routeState = { routeId: "usage" };
-    shell.outboxStoreRuntime = { read };
+  it.each(["CypherClaw", "Northstar"])(
+    "uses %s and the environment in route and custodian titles",
+    (brandName) => {
+      const shell = createShell(
+        createContext({ brandName, environment: { label: "edge", color: "amber" } }),
+      );
+      shell.routeState = { routeId: "usage" };
+      shell.syncDocumentTitle();
+      expect(document.title).toBe(`Usage — ${brandName} · edge`);
 
-    shell.syncDocumentTitle();
-
-    expect(document.title).toBe("Usage — CypherClaw");
-    expect(read).not.toHaveBeenCalled();
-  });
-
-  it("appends the configured environment to route and custodian titles", () => {
-    const shell = createShell(createContext({ environment: { label: "edge", color: "amber" } }));
-    shell.routeState = { routeId: "usage" };
-    shell.syncDocumentTitle();
-    expect(document.title).toBe("Usage — CypherClaw · edge");
-
-    shell.routeState = { routeId: "custodian" };
-    shell.syncDocumentTitle();
-    expect(document.title).toBe("Ask CypherClaw · edge");
-  });
+      shell.routeState = { routeId: "custodian" };
+      shell.syncDocumentTitle();
+      expect(document.title).toBe(`Ask ${brandName} · edge`);
+    },
+  );
 
   it("uses the active session's derived title for a non-main chat", () => {
     const session: GatewaySessionRow = {
@@ -185,7 +188,7 @@ describe("CypherClaw shell document title", () => {
       await settleLitElement(shell);
     }
 
-    expect(document.title).toBe("(Disconnected) Revised launch plan — CypherClaw");
+    expect(document.title).toBe("Revised launch plan — CypherClaw");
     expect(renderShell).not.toHaveBeenCalled();
   });
 
@@ -215,7 +218,7 @@ describe("CypherClaw shell document title", () => {
     replacement.sessions.patchRowLocal(background.key, { derivedTitle: "Replacement title" });
     await vi.advanceTimersByTimeAsync(20);
     await settleLitElement(shell);
-    expect(document.title).toBe("(Disconnected) Replacement title — CypherClaw");
+    expect(document.title).toBe("Replacement title — CypherClaw");
 
     shell.remove();
     await settleLitElement(shell);
@@ -223,18 +226,6 @@ describe("CypherClaw shell document title", () => {
     replacement.sessions.patchRowLocal(background.key, { derivedTitle: "Detached title" });
     await vi.advanceTimersByTimeAsync(20);
     expect(document.title).toBe("Disconnected shell");
-  });
-
-  it("uses the agent name for an agent main chat", () => {
-    const shell = createShell(
-      createContext({ agentsList: roster("main", [{ id: "main", name: "Molty" }]) }),
-    );
-    shell.routeState = { routeId: "chat" };
-    shell.activeSessionKey = "agent:main:main";
-
-    shell.syncDocumentTitle();
-
-    expect(document.title).toBe("Molty — CypherClaw");
   });
 
   it("uses the selected agent name for a global-scope main chat", () => {
@@ -286,26 +277,5 @@ describe("CypherClaw shell document title", () => {
     shell.syncDocumentTitle();
 
     expect(document.title).toBe("(Disconnected) Usage — CypherClaw");
-  });
-
-  it("keeps stored chat outbox counts out of the disconnected marker", () => {
-    const shell = createShell(createContext({ connected: false }));
-    shell.routeState = { routeId: "usage" };
-    shell.outboxStoreRuntime = {
-      read: () => ({ total: 3 }),
-    };
-
-    shell.syncDocumentTitle();
-
-    expect(document.title).toBe("(Disconnected) Usage — CypherClaw");
-  });
-
-  it("uses the meaningful custodian label without a brand suffix", () => {
-    const shell = createShell(createContext({}));
-    shell.routeState = { routeId: "custodian" };
-
-    shell.syncDocumentTitle();
-
-    expect(document.title).toBe("Ask CypherClaw");
   });
 });

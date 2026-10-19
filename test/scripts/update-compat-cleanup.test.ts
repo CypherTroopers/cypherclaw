@@ -14,34 +14,42 @@ const { createTempDir } = createScriptTestHarness();
 
 it.each([
   {
-    product: "OpenClaw",
+    product: "OpenClaw 10.1",
+    version: "2026.10.1",
     owner: "runtime-cleanup-Dowg583v.mjs",
     facade: "runtime-cleanup-DlrF_x2c.mjs",
   },
   {
-    product: "CypherClaw",
+    product: "CypherClaw 10.1",
+    version: "2026.10.1",
     owner: "runtime-cleanup-C5Rr8QWt.mjs",
     facade: "runtime-cleanup-C-KosKg2.mjs",
   },
+  {
+    product: "CypherClaw 10.2",
+    version: "2026.10.2",
+    owner: "runtime-cleanup-wqb3qv85.mjs",
+    facade: "runtime-cleanup-BP1bw1d2.mjs",
+  },
 ])(
-  "keeps $product 10.1 pending cleanup ahead of shared-state shutdown after replacement",
-  async ({ owner, facade }) => {
+  "keeps $product pending cleanup ahead of shared-state shutdown after replacement",
+  async ({ version, owner, facade }) => {
     const root = createTempDir("update-compat-cleanup-");
     const dist = path.join(root, "dist");
     fs.mkdirSync(dist);
     fs.writeFileSync(
       path.join(root, "package.json"),
-      JSON.stringify({ name: "openclaw", version: "2026.10.1", type: "module" }),
+      JSON.stringify({ name: "openclaw", version, type: "module" }),
     );
     fs.writeFileSync(
       path.join(dist, "build-info.json"),
-      JSON.stringify({ version: "2026.10.1", buildId: "fixture", commit: "0".repeat(40) }),
+      JSON.stringify({ version, buildId: "fixture", commit: "0".repeat(40) }),
     );
     const write = (file: string, source: string) => fs.writeFileSync(path.join(dist, file), source);
     const load = (file: string) => import(pathToFileURL(path.join(dist, file)).href);
     write("observe.mjs", "export const entered = Promise.withResolvers();");
-    // These URLs and export aliases are the published 10.1 ABI. Its run-main
-    // preloads the queue owner, but its cleanup scope first loads the facade at exit.
+    // Each published driver preloads its queue owner, but its cleanup scope first
+    // loads the facade at exit. Preserve those exact URLs and export aliases.
     write(
       owner,
       `

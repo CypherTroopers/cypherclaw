@@ -152,9 +152,9 @@ function snapshotCommit(
 }
 
 /** Admit ordinary stable source or the exact deterministic metadata-only descendant. */
-export async function verifyCypherClawReleaseSource({ root, sourceCommit }) {
+export async function verifyCypherClawReleaseSource({ root: rootDir, sourceCommit }) {
   requireCommit(sourceCommit, "Release source commit");
-  root = path.resolve(root);
+  const root = path.resolve(rootDir);
   await requireCleanHead(root, sourceCommit);
   const metadata = readMetadata(await git(root, ["show", `${sourceCommit}:${METADATA}`]));
   if (!Object.hasOwn(metadata, "releaseInputs")) {
@@ -230,17 +230,17 @@ export async function verifyCypherClawReleaseSource({ root, sourceCommit }) {
 
 /** Build a real release commit without moving the stable branch or committing binaries. */
 export async function createCypherClawReleaseSource({
-  root,
+  root: rootDir,
   sourceCommit,
   nativeSourceCommit,
   nativeDistributionCommit,
-  outputDir,
+  outputDir: outputDirectory,
 }) {
   requireCommit(sourceCommit, "Reviewed CypherClaw source commit");
   requireCommit(nativeSourceCommit, "Native Cypher source commit");
   requireCommit(nativeDistributionCommit, "Native Cypher distribution commit");
-  root = path.resolve(root);
-  outputDir = path.resolve(outputDir);
+  const root = path.resolve(rootDir);
+  const outputDir = path.resolve(outputDirectory);
   await requireCleanHead(root, sourceCommit);
   await requireStableCommit(root, sourceCommit);
   await requireUnusedSnapshotRef(root);

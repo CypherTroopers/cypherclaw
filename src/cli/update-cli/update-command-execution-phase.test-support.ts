@@ -27,7 +27,7 @@ import type * as fixtures from "./update-command-execution.test-support.js";
 import { withUpdateCommandExecutor } from "./update-command-executor.js";
 import * as gitAdmission from "./update-command-git-admission.js";
 import type { updateGitInstall } from "./update-command-git.js";
-import type { PackageInstallUpdateParams } from "./update-command-package.js";
+import type { PackageInstallUpdateParams } from "./update-command-package.types.js";
 
 type Phase = "validating" | "activating" | "staging";
 type FixtureInputs = Pick<typeof fixtures, "executionParams" | "mocks" | "successfulUpdate"> & {

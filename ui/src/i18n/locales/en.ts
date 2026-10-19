@@ -3,7 +3,19 @@
 import type { TranslationMap } from "../lib/types.ts";
 import * as agentEn from "./en-agents.ts";
 
+// Sidebar build details use these labels before the About page loads.
+const aboutPageSharedEnglish = {
+  artifactDetails: "Control UI build details",
+  commit: "Commit",
+  built: "Built",
+  unavailable: "Unavailable",
+  copyCommit: "Copy full commit hash",
+  copiedCommit: "Commit hash copied",
+  gateway: "Gateway",
+};
+
 export const en: TranslationMap & {
+  aboutPage: typeof aboutPageSharedEnglish;
   mcpApp: TranslationMap;
   linkReader: TranslationMap;
   agentTools: TranslationMap;
@@ -30,6 +42,7 @@ export const en: TranslationMap & {
         string
       >;
     pullRequests: TranslationMap;
+    processesPanel: TranslationMap;
   };
   configForm: TranslationMap & { sections: TranslationMap };
   configPage: TranslationMap;
@@ -91,6 +104,7 @@ export const en: TranslationMap & {
   sessionsView: TranslationMap;
   skillWorkshop: TranslationMap;
   systems: TranslationMap;
+  talkPage: TranslationMap;
   cypher: TranslationMap;
   usage: TranslationMap & { overview: TranslationMap };
 } = {
@@ -144,7 +158,7 @@ export const en: TranslationMap & {
     restore: "Restore",
     unarchive: "Unarchive",
     undo: "Undo",
-    probe: "Probe",
+    probe: "Check connection",
     call: "Call",
     confirm: "Confirm",
     dontAskAgain: "Don't ask me again",
@@ -190,15 +204,15 @@ export const en: TranslationMap & {
     dark: "Dark",
     baseUrl: "Base URL",
     lastStart: "Last start",
-    lastProbe: "Last probe",
+    lastProbe: "Last connection check",
     lastConnect: "Last connect",
     lastMessage: "Last message",
     authAge: "Auth age",
     credential: "Credential",
     audience: "Audience",
     publicKey: "Public Key",
-    probeOk: "Probe ok",
-    probeFailed: "Probe failed",
+    probeOk: "Connection check passed",
+    probeFailed: "Connection check failed",
     reloadConfig: "Reload Config",
     multiSelect: {
       addCustom: "Add “{value}”",
@@ -560,16 +574,7 @@ export const en: TranslationMap & {
     retry: "Retry",
     stylesFailed: "Styles failed to load, so the page may look broken.",
   },
-  communityInvite: {
-    title: "Pull up a chair.",
-    body: "There’s a place for you in the AI future. Join the upstream OpenClaw community on Reddit, Discord, and X.",
-    join: "Join",
-    follow: "Follow",
-    joinPlatform: "Join the OpenClaw community on {platform}",
-    followPlatform: "Follow OpenClaw on {platform}",
-    dismissForever: "Dismiss and don't show again",
-    dismissFailed: "Invitation dismissed, but your preference couldn't be saved.",
-  },
+  communityInvite: {},
   updates: {
     adminRequired: "Administrator access is required to change update settings or start an update.",
     campaign: {
@@ -961,6 +966,7 @@ export const en: TranslationMap & {
     renameSession: "Rename session",
     renameSessionPrompt: "Rename session",
     renameSessionMenu: "Rename…",
+    sessionNameInUse: "A session with this name already exists.",
     setIconMenu: "Set icon",
     setColorMenu: "Color",
     setIconColorMenu: "Icon & color",
@@ -1225,6 +1231,7 @@ export const en: TranslationMap & {
       empty: "No skills found.",
       missing: "Missing: {items}",
       reason: "Reason: {items}",
+      learnedAlwaysOn: "Learned skill — archive in Workshop to hide",
       updateError: "Could not update the agent skill allowlist.",
     },
     channels: {
@@ -1396,6 +1403,8 @@ export const en: TranslationMap & {
       lobsterdexCardShinySeen: "✦ Shiny spotted {date}",
       lobsterdexCardCopyLink: "Copy link",
       lobsterdexOpen: "Open Lobsterdex",
+      lobsterdexThemeHidden:
+        "This theme hides Lobsterdex. Your collection and preferences are preserved.",
     },
     security: {
       intro: "Review gateway access, tool policy, device authentication, and approvals.",
@@ -1591,6 +1600,7 @@ export const en: TranslationMap & {
   agentTools: {},
   skillGroups: {
     workspace: "Workspace Skills",
+    learned: "Learned Skills",
     builtIn: "Built-in Skills",
     installed: "Installed Skills",
     extra: "Extra Skills",
@@ -1621,6 +1631,7 @@ export const en: TranslationMap & {
     forward: "Forward",
     settings: "Settings",
     askOpenClaw: "Ask CypherClaw",
+    askBrand: "Ask {brand}",
     settingsGroupDevice: "This Mac",
     settingsGroupThisComputer: "This computer",
     settingsGroupThisIPhone: "This iPhone",
@@ -1648,6 +1659,7 @@ export const en: TranslationMap & {
   },
   terminal: {
     title: "Terminal",
+    copiedToClipboard: "Copied to clipboard",
     toggle: "Toggle terminal",
     open: "Open terminal",
     openWindow: "Open terminal in new window",
@@ -1819,8 +1831,7 @@ export const en: TranslationMap & {
     cron: "Scheduled tasks and recurring agent runs.",
     skills: "Manage your agent skills",
     plugins: "Extend your Claw with tools",
-    skillWorkshop:
-      "The skills your agent uses now, suggestions waiting for review, and past decisions.",
+    skillWorkshop: "Skills your agent learned, recent changes, and undo.",
     devices: "Paired devices, pairing approvals, and exec bindings.",
     cloudWorkers: "Profiles and machine sizes for cloud sessions.",
     chat: "Gateway chat for quick interventions.",
@@ -1972,8 +1983,6 @@ export const en: TranslationMap & {
       prepareDialogLabel: "Local model setup",
       title: "Sign in with a provider",
       connected: "Account connected. Choose a model when you want to test a reply.",
-      failed: "Could not finish. Open Details to see what to do next.",
-      details: "Details",
       prepareTitle: "Set up a local model",
       starting: "Starting provider sign-in…",
       prepareStarting: "Starting local model setup…",
@@ -2107,47 +2116,7 @@ export const en: TranslationMap & {
   },
   mcpServers: {},
   mcpPage: {},
-  talkPage: {
-    intro: "Configure realtime voice providers, models, and speaker voices.",
-    voiceSection: {
-      title: "Realtime voice",
-      description:
-        "Continuous speech conversations with your agent. The pickers below write talk.realtime settings; the full form further down covers everything else.",
-    },
-    status: {
-      title: "Status",
-      ready: "Ready",
-      notReady: "Not configured",
-      unavailable: "Unavailable",
-      unavailableHint: "Connect to the Gateway to check realtime voice readiness.",
-      activeProvider: "Active provider: {provider}",
-      noProvider: "No realtime voice provider is configured yet.",
-    },
-    provider: {
-      title: "Provider",
-      description: "Auto picks the first provider with working credentials.",
-      auto: "Auto",
-    },
-    model: {
-      title: "Model",
-      description: "Realtime voice model for browser Talk sessions.",
-      default: "Provider default",
-      defaultNamed: "Default ({model})",
-    },
-    voice: {
-      title: "Speaker voice",
-      description: "Voice used for spoken replies. GPT-Live locks the voice once a call starts.",
-      default: "Provider default",
-      unsupported: "unsupported",
-      unsupportedDefault:
-        "This saved voice is unavailable for the selected route. Provider default will be used.",
-    },
-    gptLive: {
-      title: "GPT-Live",
-      hint: "Released browser/Gateway-owned WebRTC tries OAuth first and falls back to a Platform API key. Direct backend sockets and unlisted or private routes require Platform API-key access. Delegated work can be steered while running and requires exact spoken confirmation for high-impact actions.",
-      ready: "Ready",
-    },
-  },
+  talkPage: {},
   memoryPage: {},
   sessionsPage: {
     hubTablistLabel: "Session sections",
@@ -2188,38 +2157,7 @@ export const en: TranslationMap & {
     hostDesktop: {},
     workerDesktop: {},
   },
-  aboutPage: {
-    productName: "CypherClaw",
-    tagline: "Your personal AI assistant, running on your own devices.",
-    waveHello: "Wave hello to CypherTrooper",
-    linksLabel: "CypherClaw and upstream resources",
-    forkNotice:
-      "CypherClaw is an independent fork of OpenClaw and is not affiliated with or endorsed by the OpenClaw Foundation.",
-    linkWebsite: "OpenClaw website (upstream)",
-    linkDocs: "OpenClaw docs (upstream)",
-    linkGitHub: "CypherClaw on GitHub",
-    linkUpstreamGitHub: "OpenClaw on GitHub (upstream)",
-    linkDiscord: "OpenClaw Discord (upstream)",
-    linkX: "OpenClaw on X (upstream)",
-    linkChangelog: "OpenClaw changelog (upstream)",
-    license: "© 2026 OpenClaw Foundation — MIT License.",
-    artifactTitle: "Control UI",
-    artifactSubtitle: "Identity embedded when this browser artifact was built.",
-    artifactDetails: "Control UI build details",
-    version: "Version",
-    commit: "Commit",
-    branch: "Branch",
-    built: "Built",
-    unavailable: "Unavailable",
-    copyCommit: "Copy full commit hash",
-    copyingCommit: "Copying commit hash",
-    copiedCommit: "Commit hash copied",
-    copyCommitFailed: "Could not copy commit hash",
-    gateway: "Gateway",
-    gatewayVersion: "Connected Gateway version",
-    gatewayVersionHint:
-      "Reported by the active Gateway connection; separate from this Control UI build.",
-  },
+  aboutPage: aboutPageSharedEnglish,
   appsPage: {},
   presence: {
     sharedOwner: {
@@ -2268,7 +2206,7 @@ export const en: TranslationMap & {
       sessionUpdated: "Session updated",
       ago: "ago",
       viewActivity: "View activity",
-      web: "Web",
+      web: "Web app",
       cli: "Command line",
       terminal: "Terminal",
       app: "App",
@@ -2311,7 +2249,10 @@ export const en: TranslationMap & {
     online: "Online",
     idle: "Idle",
     offline: "Offline",
-    unknownDevice: "Unknown device",
+    unknownConnection: "Unknown client",
+    connectionDetails: "Connection details · {count}",
+    connectionOne: "1 connection",
+    connectionMany: "{count} connections",
     lastInput: "Last input {time} ago",
     viewingNow: "Viewing now",
     notViewing: "Not viewing a session right now.",
@@ -2331,6 +2272,12 @@ export const en: TranslationMap & {
     confirm: "Confirm original publication",
     check: "Check publication",
     refresh: "Refresh publication",
+    statusFailed: "Publication failed",
+    statusConfirm: "Confirmation needed",
+    statusRequested: "Publication queued",
+    statusPublishing: "Publication in progress",
+    statusUnavailable: "Publication status unavailable",
+    statusUnknown: "Outcome unknown",
     unknown:
       "The outcome is unknown. Retry keeps the original account and request; it does not switch accounts.",
     target: "Pull request: {repository} \u2192 {base}",
@@ -2901,8 +2848,12 @@ export const en: TranslationMap & {
     },
     waitingForApproval: "Waiting for approval…",
     waitingOnSubagents: "Waiting on subagents",
-    yieldWaiting: "Handed off and waiting",
-    yieldResumed: "Resumed",
+    waitingOnSubagentsCount: "Waiting on {count} subagents",
+    waitingOnSubagent: "Waiting on {name}",
+    waitingOnSession: "Waiting on 1 session",
+    waitingOnSessionsCount: "Waiting on {count} sessions",
+    subagentsRunning: "{count} subagents running",
+    subagentsRunningOne: "1 subagent running",
     startupStatus: {
       retrying: "Retrying… {attempt}/{maxAttempts}",
       preparingWorkspace: "Preparing workspace…",
@@ -2917,8 +2868,24 @@ export const en: TranslationMap & {
     },
     archivedSessionDisabled: "This session is archived. Unarchive it to continue the conversation.",
     subagentViewOnly: "View-only subagent",
-    subagentSessionDisabled:
-      "This is a subagent of {parent}. Continue the conversation in its parent session.",
+    subagentSessionDisabled: "Continue in {parent}.",
+    processesPanel: { title: "Processes", refresh: "Refresh processes" },
+    subagentsPanel: {
+      title: "Subagents",
+      back: "Back to Subagents",
+      running: "Running ({count})",
+      finished: "Finished ({count})",
+      callsOne: "{count} call",
+      callsMany: "{count} calls",
+      empty: "No subagents in this conversation.",
+      noRunning: "No running subagents",
+      refresh: "Refresh subagents",
+      loadMore: "Show more subagents",
+      stop: "Stop {name}",
+      stopping: "Stopping…",
+      elapsed: "Elapsed time",
+      duration: "Run duration",
+    },
     parentSession: "the parent session",
     openParentSession: "Open parent session",
     parentSessionUnavailable: "Parent session information is unavailable.",
@@ -3209,6 +3176,7 @@ export const en: TranslationMap & {
       cloudPublicationGuidance:
         "Start a live agent turn and ask it to publish this cloud workspace after reconciliation.",
       dismiss: "Dismiss pull request #{number}",
+      dismissBranch: "Hide {branch} for this session",
       open: "Open",
       draft: "Draft",
       merged: "Merged",
@@ -3473,8 +3441,6 @@ export const en: TranslationMap & {
       activeFilterCount: "Active filters: {count}",
       sortSessions: "Filter & sort",
       sessionSources: "Session sources",
-      showOnlyPerson: "Show only {name}",
-      showEveryone: "Show everyone",
       showAllSessions: "Show all sessions",
       noActiveSessionsForFilter: "No active sessions match this filter",
       sortUpdated: "Last updated",
@@ -3597,6 +3563,7 @@ export const en: TranslationMap & {
       disconnected: "Not connected. Try again after reconnecting.",
     },
     imageLightbox: {
+      actions: "Image actions",
       previous: "Previous image",
       next: "Next image",
       position: "{current} / {total}",
@@ -3739,6 +3706,10 @@ export const en: TranslationMap & {
       filesEmpty: "Browse files, artifacts, and changes from this session.",
       companion: "Side chat",
       companionEmpty: "Ask a focused question about this session.",
+      processes: "Processes",
+      processesEmpty: "Inspect background commands and their output for this conversation.",
+      subagents: "Subagents",
+      subagentsEmpty: "Follow delegated work from this conversation.",
       desktop: "Desktop",
       desktopEmpty: "Connect to an available remote desktop.",
       portal: "Portal",
@@ -4040,6 +4011,8 @@ export const en: TranslationMap & {
         fetchesMany: "{count} fetches",
         otherOne: "1 other operation",
         otherMany: "{count} other operations",
+        subagentsOne: "1 subagent",
+        subagentsMany: "{count} subagents",
         failed: "{count} failed",
         blocked: "{count} blocked",
         unknown: "{count} unknown",
@@ -4069,6 +4042,9 @@ export const en: TranslationMap & {
       skipped: "Skipped",
       skippedCount: "{count} skipped",
       running: "Running",
+      subagentRunning: "running",
+      subagentStopped: "stopped",
+      openSubagent: "Open subagent session",
       completed: "Completed",
       blocked: "Blocked",
       outcomeUnknown: "Outcome unknown",

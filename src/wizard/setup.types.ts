@@ -1,12 +1,14 @@
+import type { OnboardOptions } from "../commands/onboard-types.js";
 import type {
   GatewayAuthMode,
   GatewayBindMode,
   GatewayTailscaleMode,
 } from "../config/types.gateway.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { SecretInput } from "../config/types.secrets.js";
+import type { RuntimeEnv } from "../runtime.js";
+import type { WizardPrompter } from "./prompts.js";
 
-// Shared setup wizard types for quickstart/advanced gateway flows and their
-// persisted defaults.
 export type WizardFlow = "quickstart" | "advanced";
 
 export type QuickstartGatewayDefaults = {
@@ -26,4 +28,16 @@ export type GatewayWizardSettings = {
   customBindHost?: string;
   authMode: GatewayAuthMode;
   gatewayToken?: string;
+};
+
+export type FinalizeOnboardingOptions = {
+  flow: WizardFlow;
+  opts: OnboardOptions;
+  baseConfig: OpenClawConfig;
+  hadExistingConfig?: boolean;
+  nextConfig: OpenClawConfig;
+  workspaceDir: string;
+  settings: GatewayWizardSettings;
+  prompter: WizardPrompter;
+  runtime: RuntimeEnv;
 };

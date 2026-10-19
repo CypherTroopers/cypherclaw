@@ -87,7 +87,6 @@ internal data class ConversationNotificationTarget(
       gatewayStableId = gatewayStableId,
       agentId = agentId,
       sessionKey = sessionKey,
-      routingVerified = true,
     )
 
   companion object {
@@ -96,15 +95,11 @@ internal data class ConversationNotificationTarget(
       runId: String,
     ): ConversationNotificationTarget? {
       if (!owner.routingVerified) return null
-      val gatewayStableId = owner.gatewayStableId.validTargetPart() ?: return null
-      val agentId = owner.agentId.validTargetPart() ?: return null
-      val sessionKey = owner.sessionKey.validTargetPart() ?: return null
-      val normalizedRunId = runId.validTargetPart() ?: return null
       return ConversationNotificationTarget(
-        gatewayStableId = gatewayStableId,
-        agentId = agentId,
-        sessionKey = sessionKey,
-        runId = normalizedRunId,
+        gatewayStableId = owner.gatewayStableId.validTargetPart() ?: return null,
+        agentId = owner.agentId.validTargetPart() ?: return null,
+        sessionKey = owner.sessionKey.validTargetPart() ?: return null,
+        runId = runId.validTargetPart() ?: return null,
       )
     }
   }
@@ -196,15 +191,11 @@ private fun Intent.putConversationTarget(target: ConversationNotificationTarget)
     .putExtra(extraRunId, target.runId)
 
 private fun Intent.readConversationTarget(): ConversationNotificationTarget? {
-  val gatewayStableId = getStringExtra(extraGatewayStableId).validTargetPart() ?: return null
-  val agentId = getStringExtra(extraAgentId).validTargetPart() ?: return null
-  val sessionKey = getStringExtra(extraSessionKey).validTargetPart() ?: return null
-  val runId = getStringExtra(extraRunId).validTargetPart() ?: return null
   return ConversationNotificationTarget(
-    gatewayStableId = gatewayStableId,
-    agentId = agentId,
-    sessionKey = sessionKey,
-    runId = runId,
+    gatewayStableId = getStringExtra(extraGatewayStableId).validTargetPart() ?: return null,
+    agentId = getStringExtra(extraAgentId).validTargetPart() ?: return null,
+    sessionKey = getStringExtra(extraSessionKey).validTargetPart() ?: return null,
+    runId = getStringExtra(extraRunId).validTargetPart() ?: return null,
   )
 }
 
@@ -259,9 +250,7 @@ internal class ConversationNotificationLaunchStore(
       token = UUID.randomUUID().toString()
     } while (targets.containsKey(token))
     while (targets.size >= capacity) {
-      val iterator = targets.entries.iterator()
-      iterator.next()
-      iterator.remove()
+      targets.remove(targets.keys.first())
     }
     targets[token] = target
     return token
@@ -277,18 +266,14 @@ internal class ConversationNotificationLaunchStore(
 class ConversationNotificationLaunchActivity : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    if (savedInstanceState != null) {
-      finish()
-      return
+    if (savedInstanceState == null) {
+      val target = parseConversationNotificationTrampolineIntent(intent)
+      val app = application as? NodeApp
+      if (target != null && app != null) {
+        val launchToken = app.conversationNotificationLaunchStore.put(target)
+        startActivity(conversationNotificationMainIntent(this, launchToken))
+      }
     }
-    val target = parseConversationNotificationTrampolineIntent(intent)
-    val app = application as? NodeApp
-    if (target == null || app == null) {
-      finish()
-      return
-    }
-    val launchToken = app.conversationNotificationLaunchStore.put(target)
-    startActivity(conversationNotificationMainIntent(this, launchToken))
     finish()
   }
 }
@@ -379,7 +364,23 @@ internal class ConversationReplyNotifier(
       if (!canPostNotifications()) return@synchronized false
       val generation = checkNotNull(publicationGeneration(target, PendingIntent.FLAG_CANCEL_CURRENT))
       try {
-        post(target, buildAssistantReplyNotification(target, text, generation))
+        val contentIntent = contentPendingIntent(target)
+        val assistant = assistantPerson()
+        val style =
+          NotificationCompat
+            .MessagingStyle(Person.Builder().setName(nativeString("You")).build())
+            .setConversationTitle(nativeString("OpenClaw"))
+            .setGroupConversation(false)
+            .addMessage(text, System.currentTimeMillis(), assistant)
+        post(
+          target,
+          baseBuilder(target, contentIntent, generation)
+            .setStyle(style)
+            .setContentText(text)
+            .addPerson(assistant)
+            .addAction(replyAction(target, generation))
+            .build(),
+        )
         true
       } catch (err: Throwable) {
         // Cancel only this token: cancelling an obsolete token can remove its replacement's lookup key.
@@ -404,17 +405,9 @@ internal class ConversationReplyNotifier(
       val contentIntent = contentPendingIntent(target)
       val text =
         when (outcome) {
-          ConversationNotificationReplyOutcome.Admitted -> {
-            nativeString("Reply queued")
-          }
-
-          ConversationNotificationReplyOutcome.NotAdmitted -> {
-            nativeString("Chat failed")
-          }
-
-          ConversationNotificationReplyOutcome.Unknown -> {
-            nativeString("Reply status is unknown. Open the conversation before sending again.")
-          }
+          ConversationNotificationReplyOutcome.Admitted -> nativeString("Reply queued")
+          ConversationNotificationReplyOutcome.NotAdmitted -> nativeString("Chat failed")
+          ConversationNotificationReplyOutcome.Unknown -> nativeString("Reply status is unknown. Open the conversation before sending again.")
         }
       val action =
         if (outcome == ConversationNotificationReplyOutcome.NotAdmitted) {
@@ -458,27 +451,6 @@ internal class ConversationReplyNotifier(
         .setData("$notificationIntentScheme://$notificationIntentAuthority/generation/${target.conversationDigest}".toUri()),
       flags or PendingIntent.FLAG_IMMUTABLE,
     )
-
-  private fun buildAssistantReplyNotification(
-    target: ConversationNotificationTarget,
-    assistantText: String,
-    generation: PendingIntent,
-  ): Notification {
-    val contentIntent = contentPendingIntent(target)
-    val assistant = assistantPerson()
-    val style =
-      NotificationCompat
-        .MessagingStyle(userPerson())
-        .setConversationTitle(nativeString("CypherClaw"))
-        .setGroupConversation(false)
-        .addMessage(assistantText, System.currentTimeMillis(), assistant)
-    return baseBuilder(target, contentIntent, generation)
-      .setStyle(style)
-      .setContentText(assistantText)
-      .addPerson(assistant)
-      .addAction(replyAction(target, generation))
-      .build()
-  }
 
   private fun baseBuilder(
     target: ConversationNotificationTarget,
@@ -571,8 +543,6 @@ internal class ConversationReplyNotifier(
       .setName(nativeString("CypherClaw"))
       .setBot(true)
       .build()
-
-  private fun userPerson(): Person = Person.Builder().setName(nativeString("You")).build()
 
   private fun canPostNotifications(): Boolean {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true

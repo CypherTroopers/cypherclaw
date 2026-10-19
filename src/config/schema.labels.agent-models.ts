@@ -16,6 +16,13 @@ export const AGENT_MODEL_FIELD_LABELS: Record<string, string> = {
   "agents.defaults.models.*.codeMode": "Code Mode",
   "agents.defaults.model.primary": "Primary Model",
   "agents.defaults.model.fallbacks": "Model Fallbacks",
+  "agents.defaults.embeddedAgent": "Embedded CypherClaw",
+  "agents.defaults.embeddedAgent.projectSettingsPolicy":
+    "Embedded CypherClaw Project Settings Policy",
+  "agents.defaults.embeddedAgent.executionContract": "Embedded CypherClaw Execution Contract",
+  "agents.entries.*.embeddedAgent": "Agent Embedded CypherClaw",
+  "agents.entries.*.embeddedAgent.executionContract":
+    "Agent Embedded CypherClaw Execution Contract",
   "agents.defaults.embeddedAgent.cyberFailover": "Cyber Policy Failover",
   "agents.defaults.embeddedAgent.cyberFailover.mode": "Cyber Policy Failover Mode",
   "agents.defaults.embeddedAgent.cyberFailover.model": "Cyber Policy Failover Model",

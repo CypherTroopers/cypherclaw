@@ -162,6 +162,7 @@ async function importNative({ sourceDir, distributionSha, outputDir }) {
     if (error.code === "ENOENT") {
       throw new Error(
         `Official FHS-D native provenance is incomplete. Run and publish its three-OS native build first. ${error.message}`,
+        { cause: error },
       );
     }
     throw error;
@@ -193,7 +194,7 @@ async function main() {
   console.log(JSON.stringify(await importNative(options)));
 }
 
-main().catch((error) => {
+main().catch((/** @type {unknown} */ error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });

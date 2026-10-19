@@ -1,20 +1,20 @@
-/* @vitest-environment jsdom */
-
 import type { LitElement } from "lit";
+/* @vitest-environment jsdom */
 import { afterEach, expect, it, vi } from "vitest";
+import { resolveThemeBranding } from "../../../packages/gateway-protocol/src/theme.ts";
 import { setCurrentThemeBranding } from "../app/theme-branding.ts";
 import "./openclaw-mascot.ts";
 
 afterEach(() => {
   document.body.replaceChildren();
   delete document.documentElement.dataset.themeMascot;
-  setCurrentThemeBranding({ mascot: "claw", critters: [] });
+  setCurrentThemeBranding(resolveThemeBranding({ mascot: "claw", critters: [] }));
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 it("replaces the supplied mascot with a same-size neutral mark and restores it on theme changes", async () => {
-  setCurrentThemeBranding({ mascot: "claw", critters: [] });
+  setCurrentThemeBranding(resolveThemeBranding({ mascot: "claw", critters: [] }));
   const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
   const mascot = document.createElement("openclaw-mascot") as LitElement & { size: number };
   mascot.size = 48;
@@ -32,7 +32,7 @@ it("replaces the supplied mascot with a same-size neutral mark and restores it o
   document.dispatchEvent(new Event("visibilitychange"));
   expect(mascot.hasAttribute("data-playing")).toBe(true);
 
-  setCurrentThemeBranding({ mascot: "none", critters: [] });
+  setCurrentThemeBranding(resolveThemeBranding({ mascot: "none", critters: [] }));
   document.documentElement.dataset.themeMascot = "none";
   await Promise.resolve();
   await mascot.updateComplete;
@@ -41,7 +41,7 @@ it("replaces the supplied mascot with a same-size neutral mark and restores it o
   expect(mascot.style.getPropertyValue("--openclaw-mascot-size")).toBe("48px");
   expect(mascot.hasAttribute("data-playing")).toBe(false);
 
-  setCurrentThemeBranding({ mascot: "claw", critters: [] });
+  setCurrentThemeBranding(resolveThemeBranding({ mascot: "claw", critters: [] }));
   document.documentElement.dataset.themeMascot = "claw";
   await Promise.resolve();
   await mascot.updateComplete;

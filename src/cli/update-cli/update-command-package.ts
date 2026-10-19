@@ -4,12 +4,9 @@ import { resolveGatewayInstallEntrypoint } from "../../daemon/gateway-entrypoint
 import { readCypherClawDistribution } from "../../infra/cypherclaw-distribution.js";
 import { resolveInstallWorkTimeoutMs } from "../../infra/install-mode-options.js";
 import { runGlobalPackageUpdateSteps } from "../../infra/package-update-steps.js";
-import type {
-  PackageActivationOptions,
-  PackageUpdateTransaction,
-} from "../../infra/package-update-swap-contract.js";
 import { PackageUpdateActivationError } from "../../infra/package-update-swap-contract.js";
 import {
+  deferPackageStateVerification,
   failedPackageVerificationStep,
   markPackagePostInstallDoctorAdvisory,
 } from "../../infra/package-update-verification-step.js";
@@ -34,7 +31,6 @@ import {
   resolveGlobalInstallSpec,
   resolveGlobalInstallTarget,
   verifyPackageUpdateRecovery,
-  type ResolvedGlobalInstallTarget,
 } from "../../infra/update-global.js";
 import {
   normalizeFallbackFailureReason,
@@ -44,7 +40,7 @@ import {
   buildUpdateDoctorEnv,
   resolveUpdateDoctorExecutionPolicy,
 } from "../../infra/update-runner-doctor.js";
-import type { UpdateRunResult, UpdateStepProgress } from "../../infra/update-runner-types.js";
+import type { UpdateRunResult } from "../../infra/update-runner-types.js";
 import type { UpdateStepResult } from "../../infra/update-step-result.js";
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { runCommandWithTimeout } from "../../process/exec.js";
@@ -67,28 +63,20 @@ import {
 } from "./update-command-config-snapshot.js";
 import { recordUpdateDatabaseWrites } from "./update-command-database-receipts.js";
 import { withUpdateDoctorChild } from "./update-command-doctor-child.js";
-import type { PackageDoctorContext } from "./update-command-doctor-context.js";
 import { readPackageUpdateIdentity } from "./update-command-package-identity.js";
+import type {
+  PackageDoctorOptions,
+  PackageInstallUpdateParams,
+} from "./update-command-package.types.js";
 import { resolveUpdateTargetEnv } from "./update-command-service-env.js";
 
-type PackageDoctorOptions = {
-  root: string;
-  timeoutMs?: number;
-  /** Null leaves forward work unbounded; omission retains the caller's timeout. */
-  workTimeoutMs?: number | null;
-  progress: UpdateStepProgress;
-  assertCurrent?: () => void;
-  results?: UpdateStepResult[];
-  managedServiceEnv?: NodeJS.ProcessEnv;
-  invocationCwd?: string;
-  nodeRunner?: string;
-  onConfigSnapshot?: (snapshot: UpdateConfigSnapshot) => void;
-  getDoctorContext?: () => PackageDoctorContext | undefined;
-};
-
 export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
-  const assertCurrent = params.assertCurrent;
+  const assertRequesterCurrent = params.assertCurrent;
   const context = params.getDoctorContext?.();
+  const assertCurrent = () => {
+    assertRequesterCurrent?.();
+    context?.assertCurrent();
+  };
   context?.assertCurrent();
   const entryPath = await resolveGatewayInstallEntrypoint(params.root);
   if (!entryPath) {
@@ -127,26 +115,29 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
     index: 0,
     total: 0,
   };
+  let configSnapshot: UpdateConfigSnapshot | undefined;
+  try {
+    configSnapshot = params.onConfigSnapshot
+      ? await captureUpdateConfigSnapshot(resolveConfigPath(doctorEnv), doctorEnv)
+      : undefined;
+  } catch (error) {
+    assertCurrent();
+    return await deferPackageStateVerification(
+      { ...params, assertCurrent, migrationRecorded: Boolean(context?.databaseBackup?.migration) },
+      error,
+    );
+  }
   await params.progress?.onStepStart?.(doctorProgressInfo);
-  assertCurrent?.();
-  context?.assertCurrent();
-  const configSnapshot = params.onConfigSnapshot
-    ? await captureUpdateConfigSnapshot(resolveConfigPath(doctorEnv), doctorEnv)
-    : undefined;
+  assertCurrent();
   const completeDoctorStep = async (
     doctorStep: UpdateStepResult,
     doctorResult: UpdatePostInstallDoctorResult | null,
     failure?: { error: unknown },
   ) => {
     let completionFailure = failure;
-    let databaseReceipt: UpdateStepResult | undefined;
-    if (context?.databaseBackup) {
-      databaseReceipt = recordUpdateDatabaseWrites(
-        context.databaseBackup,
-        doctorResult?.databaseWrites,
-        doctorStep,
-      );
-    }
+    const databaseReceipt = context?.databaseBackup
+      ? recordUpdateDatabaseWrites(context.databaseBackup, doctorResult?.databaseWrites, doctorStep)
+      : undefined;
     try {
       const refusal = doctorResult?.configWriteRefusal;
       const configWriteRefusal = refusal
@@ -284,8 +275,7 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
         index: 0,
         total: 0,
       });
-      assertCurrent?.();
-      context?.assertCurrent();
+      assertCurrent();
     }
     await reportCompletion({
       ...doctorProgressInfo,
@@ -305,8 +295,7 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
       configChanges: doctorStep.configChanges,
       configWriteRefusal: doctorStep.configWriteRefusal,
     });
-    assertCurrent?.();
-    context?.assertCurrent();
+    assertCurrent();
     if (completionFailure) {
       throw completionFailure.error;
     }
@@ -385,8 +374,7 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
     params.results?.push(...(processSettlement ? [processSettlement] : []), ...completedSteps);
     if (processSettlement) {
       await params.progress?.onStepComplete?.({ ...processSettlement, index: 0, total: 0 });
-      assertCurrent?.();
-      context?.assertCurrent();
+      assertCurrent();
     }
   } catch (error) {
     if ("error" in outcome) {
@@ -456,27 +444,6 @@ export async function prepareGitPackageExposure(
     },
   };
 }
-
-export type PackageInstallUpdateParams = Omit<PackageDoctorOptions, "results"> & {
-  reapplyLocalOverrides?: boolean;
-  requirePackageReplacement?: boolean;
-  installKind: "git" | "package" | "unknown";
-  tag: string;
-  installSpec?: string;
-  expectedArtifact?: import("../../infra/update-package-artifact.js").PackageUpdateArtifact;
-  timeoutMs: number;
-  startedAt: number;
-  honorPackageRoot?: boolean;
-  resolveLifecycleNodeRunner?: () => string | undefined;
-  installEnv?: NodeJS.ProcessEnv;
-  installTarget?: ResolvedGlobalInstallTarget;
-  beforeVerifyCandidate?: (root: string) => Promise<void>;
-  validateCandidate: (root: string) => Promise<UpdateStepResult[]>;
-  beforeActivate: () => Promise<void>;
-  reserveInstallSlot?: (root: string) => void;
-  onTransaction: (transaction: PackageUpdateTransaction) => void | Promise<void>;
-  getActivation?: () => PackageActivationOptions | undefined;
-};
 
 /** Retain one staged target while its runtime initializes a fresh profile. */
 export async function stagePackageInstallUpdate(
@@ -600,7 +567,6 @@ export async function runPackageInstallUpdate(
   params: PackageInstallUpdateParams,
   resolveDoctorOptions: () => PackageDoctorOptions = () => params,
 ): Promise<UpdateRunResult> {
-  const installEnv = params.installEnv ?? (await createGlobalInstallEnv());
   let installTarget = params.installTarget;
   if (!installTarget) {
     const manager = await resolveGlobalManager({
@@ -616,6 +582,7 @@ export async function runPackageInstallUpdate(
       honorPackageRoot: params.honorPackageRoot === true,
     });
   }
+  const installEnv = params.installEnv ?? (await createGlobalInstallEnv(undefined, installTarget));
   const pkgRoot = installTarget.packageRoot;
   const packageName = (await readPackageName(pkgRoot || params.root)) ?? DEFAULT_PACKAGE_NAME;
   const installSpec =

@@ -58,19 +58,14 @@ function approvalNotificationCopy(params: {
 }) {
   const label = params.preferences.label ? `${params.preferences.label} · ` : "";
   const agent = params.agentLabel ? ` for ${params.agentLabel}` : "";
-  if (params.terminal) {
-    return {
-      title: `${label}CypherClaw approval updated`,
-      body:
-        params.preferences.detailLevel === "private"
-          ? "This approval is no longer pending."
-          : `Approval${agent} is no longer pending.`,
-    };
-  }
+  const privateCopy = params.preferences.detailLevel === "private";
   return {
-    title: `${label}CypherClaw approval requested`,
-    body:
-      params.preferences.detailLevel === "private"
+    title: `${label}CypherClaw approval ${params.terminal ? "updated" : "requested"}`,
+    body: params.terminal
+      ? privateCopy
+        ? "This approval is no longer pending."
+        : `Approval${agent} is no longer pending.`
+      : privateCopy
         ? "Open CypherClaw to review this request."
         : `Open CypherClaw to review an approval${agent}.`,
   };

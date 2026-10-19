@@ -41,9 +41,7 @@ import {
 } from "../infra/gateway-supervision.js";
 import { formatWindowsGatewayFirewallGuidance } from "../infra/windows-gateway-firewall-diagnostics.js";
 import { ExitError, type RuntimeEnv } from "../runtime.js";
-import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import {
-  cancelProcessExitAfterTuiReturn,
   resolveTuiShutdownHardExitMs,
   runTui,
   scheduleProcessExitAfterTuiReturn,
@@ -59,19 +57,11 @@ import {
   resolveGatewayLocalPassword,
 } from "./setup.finalize-gateway-auth.js";
 import { getLocalizedGatewayDaemonRuntimeOptions } from "./setup.service-runtime.js";
-import type { GatewayWizardSettings, WizardFlow } from "./setup.types.js";
-
-type FinalizeOnboardingOptions = {
-  flow: WizardFlow;
-  opts: OnboardOptions;
-  baseConfig: OpenClawConfig;
-  hadExistingConfig?: boolean;
-  nextConfig: OpenClawConfig;
-  workspaceDir: string;
-  settings: GatewayWizardSettings;
-  prompter: WizardPrompter;
-  runtime: RuntimeEnv;
-};
+import type {
+  FinalizeOnboardingOptions,
+  GatewayWizardSettings,
+  WizardFlow,
+} from "./setup.types.js";
 
 const HATCH_TUI_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -123,8 +113,6 @@ async function closeSessionGatewayForOnboarding(params: {
     params.runtime.error(formatErrorMessage(error));
   });
 }
-
-const loadSearchSetupModule = createLazyRuntimeModule(() => import("../flows/search-setup.js"));
 
 export type GatewayServiceSetupOutcome =
   | {
@@ -815,7 +803,8 @@ export async function finalizeSetupWizard(
     const configuredSearchProviders = listConfiguredWebSearchProviders({ config: nextConfig });
     let webSearchLines: string[];
     if (webSearchProvider) {
-      const { resolveExistingKey, hasExistingKey, hasKeyInEnv } = await loadSearchSetupModule();
+      const { resolveExistingKey, hasExistingKey, hasKeyInEnv } =
+        await import("../flows/search-setup.js");
       const entry = configuredSearchProviders.find((e) => e.id === webSearchProvider);
       const label = entry?.label ?? webSearchProvider;
       const storedKey = entry ? resolveExistingKey(nextConfig, webSearchProvider) : undefined;
@@ -894,7 +883,7 @@ export async function finalizeSetupWizard(
     } else {
       // Legacy configs may have a working key (e.g. apiKey or BRAVE_API_KEY) without
       // an explicit provider. Runtime auto-detects these, so avoid saying "skipped".
-      const { hasExistingKey, hasKeyInEnv } = await loadSearchSetupModule();
+      const { hasExistingKey, hasKeyInEnv } = await import("../flows/search-setup.js");
       const legacyDetected = configuredSearchProviders.find(
         (e) => hasExistingKey(nextConfig, e.id) || hasKeyInEnv(e),
       );
@@ -1004,7 +993,7 @@ export async function finalizeSetupWizard(
             });
             sessionGateway = undefined;
           } finally {
-            cancelProcessExitAfterTuiReturn(cleanupExitTimer);
+            clearTimeout(cleanupExitTimer);
           }
         }
       }
