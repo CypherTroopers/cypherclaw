@@ -1,0 +1,52 @@
+{
+  "id": "cypher",
+  "name": "Cypher",
+  "description": "Cypher node management with explicit verified native setup and read-only MCP diagnostics.",
+  "uiCapabilities": [
+    "page",
+    "navigation"
+  ],
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "controlUi": {
+    "entry": "dist/control-ui/f3c200d86405107cbc9f12e73efeab679ac071743ec401a3f52828cac3238e9a/index.js",
+    "styles": [
+      "dist/control-ui/f3c200d86405107cbc9f12e73efeab679ac071743ec401a3f52828cac3238e9a/index.css"
+    ]
+  },
+  "categories": [
+    "infrastructure"
+  ],
+  "mcpServers": {
+    "cypher-diagnostics": {
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "./dist/mcp.js"
+      ]
+    }
+  },
+  "backupResources": [
+    {
+      "disposition": "include",
+      "scope": "state",
+      "relativePath": "cypher"
+    },
+    {
+      "disposition": "regenerable",
+      "scope": "state",
+      "relativePath": "native/cypher-9ca4b9793d6e3527f4439ab4cc29a500a160c134"
+    },
+    {
+      "disposition": "regenerable",
+      "scope": "state",
+      "relativePath": "native/wallet-629b3122aab207a7d7149439101c571a3360eecf"
+    }
+  ]
+}

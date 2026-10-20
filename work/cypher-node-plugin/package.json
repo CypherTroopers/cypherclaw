@@ -1,0 +1,74 @@
+{
+  "name": "@cyphertroopers/openclaw-cypher",
+  "version": "0.1.0",
+  "description": "Cypher node management with verified, on-demand native installation for OpenClaw.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.16.0 <25 || >=26.1.0"
+  },
+  "packageManager": "pnpm@12.9.0+sha512.8f64efa0b792986ca98ae568791bcd7722807e274c4f0c1d9853c62116495c584119db98762a2a5343b1684d361b9ae26fdd16d551666d7635346d3fae830ddd",
+  "main": "./dist/index.js",
+  "files": [
+    "dist/",
+    "assets/",
+    "openclaw.plugin.json",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "prepack": "pnpm build",
+    "check:size": "node scripts/check-package.mjs",
+    "pack:local": "pnpm build && npm pack --ignore-scripts --pack-destination artifacts"
+  },
+  "peerDependencies": {
+    "openclaw": "2026.10.5"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "esbuild": "0.28.2",
+    "jsdom": "30.1.1",
+    "lit": "3.3.3",
+    "openclaw": "2026.10.5",
+    "playwright": "1.63.0",
+    "typescript": "7.1.0-dev.20260922.1",
+    "vitest": "5.0.1",
+    "oxfmt": "0.71.0"
+  },
+  "openclaw": {
+    "install": {
+      "minHostVersion": ">=2026.10.5"
+    },
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": "2026.10.5",
+      "minGatewayVersion": "2026.10.5"
+    },
+    "build": {
+      "openclawVersion": "2026.10.5",
+      "pluginSdkVersion": "2026.10.5"
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.0",
+    "kysely": "0.29.6"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CypherTroopers/cypherclaw.git",
+    "directory": "work/cypher-node-plugin"
+  },
+  "homepage": "https://github.com/CypherTroopers/cypherclaw"
+}

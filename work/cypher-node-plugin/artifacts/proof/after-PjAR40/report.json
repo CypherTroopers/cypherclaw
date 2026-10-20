@@ -1,0 +1,37 @@
+{
+  "phase": "after",
+  "proof": "/root/cypherclaw/work/cypher-node-plugin/artifacts/proof/after-PjAR40",
+  "bundleSha256": "95a5c8f2944a3586e150550f2e9172cb4ed9d0a8722a29bef15e99ba808004f6",
+  "jsBytes": 174749,
+  "cssBytes": 8310,
+  "checks": [
+    "Real built plugin registers all six public-host tabs, displays embedded custom artwork, and never prepares on mount.",
+    "Wallet actions retain the selected wallet without selecting a signer; independent generator masks, guards and clears its result.",
+    "Transfer review blocks sending until explicit confirmation, submits once and waits for finality before Complete.",
+    "Mining threads/signer A and reward recipient B remain separate, with immediate password clearing.",
+    "Explorer preserves network-specific links; mobile Wallets and Mining have no document horizontal overflow.",
+    "Native setup is explicit, shows progress and safe failure, retries successfully, enables Start without starting automatically.",
+    "Read-only/unsupported controls stay disabled; wallet-only platforms allow explicit preparation and independent generation without a node build."
+  ],
+  "screenshots": [
+    "desktop-overview.png",
+    "desktop-node.png",
+    "desktop-wallets.png",
+    "desktop-send.png",
+    "desktop-mining.png",
+    "desktop-explorer.png",
+    "desktop-wallet-generator.png",
+    "desktop-send-review.png",
+    "mobile-wallets.png",
+    "mobile-mining.png",
+    "setup-missing-japanese.png",
+    "setup-preparing-japanese.png",
+    "setup-error-japanese.png",
+    "setup-ready-japanese.png",
+    "state-read-only.png",
+    "state-unsupported.png",
+    "state-wallet-only.png"
+  ],
+  "pageErrors": [],
+  "success": true
+}

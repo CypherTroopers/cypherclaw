@@ -1,0 +1,159 @@
+{
+  "proof": "production NativeInstaller.prepare, immutable Linux host files; no native execution",
+  "startedAt": "2026-10-20T09:13:33.772Z",
+  "packageRoot": "/root/cypherclaw/work/cypher-node-plugin",
+  "isolatedStateDir": "/tmp/cypher-native-production-proof-jFZSPc/state",
+  "host": {
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "requests": [
+    {
+      "url": "https://raw.githubusercontent.com/CypherTroopers/cypher/9ca4b9793d6e3527f4439ab4cc29a500a160c134/build/bin/cypher-linux-amd64",
+      "status": 200,
+      "responseUrl": "https://raw.githubusercontent.com/CypherTroopers/cypher/9ca4b9793d6e3527f4439ab4cc29a500a160c134/build/bin/cypher-linux-amd64",
+      "contentLength": "52854872"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/CypherTroopers/cypher/9ca4b9793d6e3527f4439ab4cc29a500a160c134/build/provenance/linux-amd64/manifest.txt",
+      "status": 200,
+      "responseUrl": "https://raw.githubusercontent.com/CypherTroopers/cypher/9ca4b9793d6e3527f4439ab4cc29a500a160c134/build/provenance/linux-amd64/manifest.txt",
+      "contentLength": "892"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/CypherTroopers/cypher/9ca4b9793d6e3527f4439ab4cc29a500a160c134/build/provenance/linux-amd64/go-build-info.txt",
+      "status": 200,
+      "responseUrl": "https://raw.githubusercontent.com/CypherTroopers/cypher/9ca4b9793d6e3527f4439ab4cc29a500a160c134/build/provenance/linux-amd64/go-build-info.txt",
+      "contentLength": "7075"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/CypherTroopers/cypher/9ca4b9793d6e3527f4439ab4cc29a500a160c134/build/provenance/linux-amd64/SHA256SUMS",
+      "status": 200,
+      "responseUrl": "https://raw.githubusercontent.com/CypherTroopers/cypher/9ca4b9793d6e3527f4439ab4cc29a500a160c134/build/provenance/linux-amd64/SHA256SUMS",
+      "contentLength": "321"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/CypherTroopers/offlinewalletgenerator/629b3122aab207a7d7149439101c571a3360eecf/bin/linux-amd64/coldwalletgenerator",
+      "status": 200,
+      "responseUrl": "https://raw.githubusercontent.com/CypherTroopers/offlinewalletgenerator/629b3122aab207a7d7149439101c571a3360eecf/bin/linux-amd64/coldwalletgenerator",
+      "contentLength": "5375467"
+    }
+  ],
+  "before": {
+    "state": "missing",
+    "target": "linux-amd64",
+    "node": {
+      "supported": true,
+      "ready": false,
+      "pin": {
+        "repository": "CypherTroopers/cypher",
+        "distributionCommit": "9ca4b9793d6e3527f4439ab4cc29a500a160c134",
+        "sourceCommit": "546d43442e8156591786dc3c1ca1596f014509e3"
+      }
+    },
+    "wallet": {
+      "supported": true,
+      "ready": false,
+      "pin": {
+        "repository": "CypherTroopers/offlinewalletgenerator",
+        "distributionCommit": "629b3122aab207a7d7149439101c571a3360eecf",
+        "sourceCommit": "8879d9e4c0490999096bb299a0e2da31a1b20e50"
+      }
+    },
+    "progress": null,
+    "error": null
+  },
+  "prepared": {
+    "state": "ready",
+    "target": "linux-amd64",
+    "node": {
+      "supported": true,
+      "ready": true,
+      "pin": {
+        "repository": "CypherTroopers/cypher",
+        "distributionCommit": "9ca4b9793d6e3527f4439ab4cc29a500a160c134",
+        "sourceCommit": "546d43442e8156591786dc3c1ca1596f014509e3"
+      }
+    },
+    "wallet": {
+      "supported": true,
+      "ready": true,
+      "pin": {
+        "repository": "CypherTroopers/offlinewalletgenerator",
+        "distributionCommit": "629b3122aab207a7d7149439101c571a3360eecf",
+        "sourceCommit": "8879d9e4c0490999096bb299a0e2da31a1b20e50"
+      }
+    },
+    "progress": null,
+    "error": null
+  },
+  "verifiedFiles": [
+    {
+      "component": "node",
+      "path": "build/bin/cypher-linux-amd64",
+      "bytes": 52854872,
+      "sha256": "c15191998ea1149bcc8ef69aec0e48d5665c6b65320d2794b14fd40068b8abb5",
+      "executable": true
+    },
+    {
+      "component": "node",
+      "path": "build/provenance/linux-amd64/manifest.txt",
+      "bytes": 892,
+      "sha256": "3c9fec3517572227c0559063612f54bcab6a2b8612fbe4511ada080e66dcf8c7",
+      "executable": false
+    },
+    {
+      "component": "node",
+      "path": "build/provenance/linux-amd64/go-build-info.txt",
+      "bytes": 7075,
+      "sha256": "f5b4a0b1a2c372ce8f3278b558ab00710bf0a8c053bb666e905851081dbd8c61",
+      "executable": false
+    },
+    {
+      "component": "node",
+      "path": "build/provenance/linux-amd64/SHA256SUMS",
+      "bytes": 321,
+      "sha256": "f88fde0fa6cb97e1cbe377740f511bcb1ffca048e62bfd6c7c108915571190a4",
+      "executable": false
+    },
+    {
+      "component": "wallet",
+      "path": "bin/linux-amd64/coldwalletgenerator",
+      "bytes": 5375467,
+      "sha256": "a4c7183c2400f713563eea275e744fd90e840f5def3fd9f5790bea9bfbdbdd76",
+      "executable": true
+    }
+  ],
+  "requestCountAfterFirstPrepare": 5,
+  "requestCountAfterRepeatedPrepare": 5,
+  "coldReadmission": {
+    "state": "ready",
+    "target": "linux-amd64",
+    "node": {
+      "supported": true,
+      "ready": true,
+      "pin": {
+        "repository": "CypherTroopers/cypher",
+        "distributionCommit": "9ca4b9793d6e3527f4439ab4cc29a500a160c134",
+        "sourceCommit": "546d43442e8156591786dc3c1ca1596f014509e3"
+      }
+    },
+    "wallet": {
+      "supported": true,
+      "ready": true,
+      "pin": {
+        "repository": "CypherTroopers/offlinewalletgenerator",
+        "distributionCommit": "629b3122aab207a7d7149439101c571a3360eecf",
+        "sourceCommit": "8879d9e4c0490999096bb299a0e2da31a1b20e50"
+      }
+    },
+    "progress": null,
+    "error": null
+  },
+  "syntheticChainKeystoreUnchanged": true,
+  "originalWalletBuildInfoPreserved": true,
+  "originalWalletSource": "8879d9e4c0490999096bb299a0e2da31a1b20e50",
+  "success": true,
+  "largeProofFilesRemoved": true,
+  "finishedAt": "2026-10-20T09:13:39.187Z"
+}

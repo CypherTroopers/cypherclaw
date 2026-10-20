@@ -1,0 +1,234 @@
+{
+  "schema": "cypher.plugin.official-host-proof/v1",
+  "archive": {
+    "file": "cyphertroopers-openclaw-cypher-0.1.0.tgz",
+    "bytes": 524306,
+    "sha256": "fd1290b8c5e03a5971bba1aaf5e80c23308cd8f5eca06d6f3b68fdb5c1b89bd1"
+  },
+  "hostVersionExpected": "2026.10.5",
+  "versionExitCode": 0,
+  "nativeExecution": false,
+  "liveStateUsed": false,
+  "install": "passed",
+  "gateway": "passed",
+  "installExitCode": 0,
+  "installWallSeconds": 39.34,
+  "attempts": [
+    {
+      "archive": {
+        "file": "cyphertroopers-openclaw-cypher-0.1.0.tgz",
+        "bytes": 524219,
+        "sha256": "bfff0e7e22f87356d4e2ab680010a6cd2405c9d50e096562016a7bbacdd2c47e"
+      },
+      "status": "failed",
+      "exitCode": 1,
+      "wallSeconds": 34.9,
+      "reason": "invalid minHostVersion bare version rejected by official metadata gate"
+    }
+  ],
+  "inspect": {
+    "exitCode": 0,
+    "wallSeconds": 16.92
+  },
+  "health": {
+    "exitCode": 0,
+    "wallSeconds": 14.62
+  },
+  "setup-status": {
+    "exitCode": 0,
+    "wallSeconds": 2.81
+  },
+  "node-status": {
+    "exitCode": 0,
+    "wallSeconds": 2.35
+  },
+  "ownedGatewayStopped": true,
+  "healthOk": true,
+  "coldSetup": {
+    "state": "missing",
+    "target": "linux-amd64",
+    "node": {
+      "supported": true,
+      "ready": false,
+      "pin": {
+        "repository": "CypherTroopers/cypher",
+        "distributionCommit": "9ca4b9793d6e3527f4439ab4cc29a500a160c134",
+        "sourceCommit": "546d43442e8156591786dc3c1ca1596f014509e3"
+      }
+    },
+    "wallet": {
+      "supported": true,
+      "ready": false,
+      "pin": {
+        "repository": "CypherTroopers/offlinewalletgenerator",
+        "distributionCommit": "629b3122aab207a7d7149439101c571a3360eecf",
+        "sourceCommit": "8879d9e4c0490999096bb299a0e2da31a1b20e50"
+      }
+    },
+    "progress": null,
+    "error": null
+  },
+  "coldNode": {
+    "state": "stopped",
+    "owned": false,
+    "connected": false,
+    "supported": true
+  },
+  "nativeRuntimeCreated": false,
+  "nativeDownloaded": false,
+  "runtimeInspection": {
+    "loaded": true,
+    "imported": true,
+    "gatewayMethods": [
+      "cypher.status",
+      "cypher.setup.status",
+      "cypher.setup.prepare",
+      "cypher.start",
+      "cypher.stop",
+      "cypher.connect",
+      "cypher.disconnect",
+      "cypher.mining.start",
+      "cypher.mining.stop",
+      "cypher.accounts.create",
+      "cypher.accounts.select",
+      "cypher.accounts.unlock",
+      "cypher.accounts.lock",
+      "cypher.reward.get",
+      "cypher.reward.set",
+      "cypher.wallets.list",
+      "cypher.transfers.prepare",
+      "cypher.transfers.send",
+      "cypher.transfers.list",
+      "cypher.wallet.generator.status",
+      "cypher.wallet.generator.generate"
+    ],
+    "diagnostics": [],
+    "compatibility": [],
+    "dependenciesInstalled": true,
+    "controlUi": {
+      "entry": "dist/control-ui/f3c200d86405107cbc9f12e73efeab679ac071743ec401a3f52828cac3238e9a/index.js",
+      "styles": [
+        "dist/control-ui/f3c200d86405107cbc9f12e73efeab679ac071743ec401a3f52828cac3238e9a/index.css"
+      ]
+    },
+    "packagedEntries": [
+      {
+        "path": "dist/control-ui/f3c200d86405107cbc9f12e73efeab679ac071743ec401a3f52828cac3238e9a/index.js",
+        "bytes": 174749
+      },
+      {
+        "path": "dist/control-ui/f3c200d86405107cbc9f12e73efeab679ac071743ec401a3f52828cac3238e9a/index.css",
+        "bytes": 8310
+      },
+      {
+        "path": "dist/index.js",
+        "bytes": 99983
+      },
+      {
+        "path": "dist/mcp.js",
+        "bytes": 817935
+      },
+      {
+        "path": "dist/transfer-store.worker.js",
+        "bytes": 455977
+      }
+    ]
+  },
+  "fixtureCorrection": "Initial native-directory assertion also matched packaged assets/native; corrected to installer-owned state/native. First transfer call raced Gateway cleanup; retried once with exact owned port.",
+  "transfersList": {
+    "exitCode": 0,
+    "wallSeconds": 3.07,
+    "response": {
+      "transfers": []
+    }
+  },
+  "transferWorker": "passed",
+  "gatewayShutdownClean": true,
+  "ownedProcessGroupsAbsent": true,
+  "ownedPortsClosed": true,
+  "metadata": {
+    "compat": {
+      "pluginApi": "2026.10.5",
+      "minGatewayVersion": "2026.10.5"
+    },
+    "install": {
+      "minHostVersion": ">=2026.10.5"
+    }
+  },
+  "nativeStaticAssets": [
+    {
+      "path": "assets/native/README.md",
+      "bytes": 2092,
+      "sha256": "4f725105f4311b1cf576e89023215435c59c08f8174c370b87f9acca10c565e8"
+    },
+    {
+      "path": "assets/native/browser-relay.sh",
+      "bytes": 2235,
+      "sha256": "0283e07643bed3882a7e3ff655761eec335fa0350c90fe78025f7442a35bca67"
+    },
+    {
+      "path": "assets/native/wallet-build-info/darwin-amd64.json",
+      "bytes": 185,
+      "sha256": "cb511d99218c4e0d6851cc45f94edc7f08cdb35573096d4a2fc670f531763f39"
+    },
+    {
+      "path": "assets/native/wallet-build-info/darwin-arm64.json",
+      "bytes": 185,
+      "sha256": "bde2eb2db2bc3973ea25f5197d99079d9f5a8926039bdca98d872dae355221e6"
+    },
+    {
+      "path": "assets/native/wallet-build-info/linux-amd64.json",
+      "bytes": 184,
+      "sha256": "74f653f1784426f08445a2979065784f834bc85fe8b669a720bdacb695b92fb9"
+    },
+    {
+      "path": "assets/native/wallet-build-info/linux-arm64.json",
+      "bytes": 184,
+      "sha256": "ea64fca4a97b8efeebbef3f2e60730be36f36df7245f411c48aace6de675a5b0"
+    },
+    {
+      "path": "assets/native/wallet-build-info/windows-amd64.json",
+      "bytes": 186,
+      "sha256": "e522b7d97b04c608dc6c6a27da5c9286c832dd52b0c04b6a3d82a1e3e2949be2"
+    },
+    {
+      "path": "assets/native/wallet-build-info/windows-arm64.json",
+      "bytes": 186,
+      "sha256": "8cfa5983a9a04e1701b54950c4a9f78d592b5c618f5f0522bca5cea315dbf5c6"
+    }
+  ],
+  "transferWorkerArtifact": {
+    "path": "dist/transfer-store.worker.js",
+    "bytes": 455977,
+    "sha256": "de1c445d48cf8c92e55ddf1d602f06055117d7bc48e489cc06e1ee90353f9cd7",
+    "readOnlyMissingDatabaseResult": {
+      "transfers": []
+    },
+    "databaseCreated": false
+  },
+  "limits": [
+    "No native download, binary execution, mining, wallet generation, or send was requested.",
+    "Linux x64 official-host install/load proof; macOS and Windows runtime loading were not run."
+  ],
+  "gatewayControl": {
+    "parentWrapperExitCode": -15,
+    "childShutdown": "clean",
+    "ownedGroupsAbsent": true,
+    "ownedPortsClosed": true
+  },
+  "cleanup": {
+    "complete": true,
+    "removed": [
+      "isolated Gateway state and managed npm install",
+      "dedicated npm cache and npmrc",
+      "synthetic token config and environment",
+      "private archive copy",
+      "proof scripts and raw logs"
+    ],
+    "retained": [
+      "receipt.json",
+      "report.md"
+    ],
+    "sharedOrOperatorStateTouched": false
+  }
+}

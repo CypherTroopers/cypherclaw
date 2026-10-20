@@ -1,0 +1,22 @@
+{
+  "proof": "Actual bundled MCP stdio executable initialization and tools/list; no Gateway operation invoked",
+  "tools": [
+    {
+      "name": "cypher_setup_status",
+      "readOnly": true,
+      "destructive": false
+    },
+    {
+      "name": "cypher_node_status",
+      "readOnly": true,
+      "destructive": false
+    },
+    {
+      "name": "cypher_wallet_balances",
+      "readOnly": true,
+      "destructive": false
+    }
+  ],
+  "success": true,
+  "stderrEmpty": true
+}

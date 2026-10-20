@@ -1,0 +1,42 @@
+{
+  "purpose": "Inspected before/after Node screen comparison; reuse valid real-app evidence for unchanged CypherClaw screen owners.",
+  "sourceVerification": {
+    "head": "3bff10a4ca58aabdab67db93530d92cc9e22a023",
+    "baseline": "1716a4133adbacb2f70fbc1b02c8df4bf7537d4f",
+    "gitDiffExitCode": 0,
+    "pathspecs": [
+      "ui/src/pages/cypher",
+      "ui/src/components/wallet-generator",
+      "ui/src/i18n/locales/en-cypher.ts",
+      "ui/src/i18n/locales/en-wallet-generator.ts"
+    ]
+  },
+  "before": {
+    "path": "/root/.codex/visualizations/2026/10/19/01a155c4-dca9-7183-be62-3e712bf47f9d/cypherclaw-2026.10.5/after-desktop-node.png",
+    "sha256": "60478b9f28a478f7931f35a98c854b340b4cbb2930042e150ab517cb5d45e9ac",
+    "boundary": "Previously captured actual Control UI with mock Gateway during the final 2026.10.5 intake proof; reused, not recaptured."
+  },
+  "after": {
+    "path": "/root/cypherclaw/work/cypher-node-plugin/artifacts/proof/after-PjAR40/desktop-node.png",
+    "sha256": "c43860535eab49bc5afe6297c4ed026107986b4c84f2145f5a121d8e4d132010",
+    "boundary": "Final built standalone plugin through synthetic public ControlUiHost; no live Gateway or native process."
+  },
+  "preserved": [
+    "Six tabs and their order",
+    "Node process and IPC controls",
+    "Platform, chain, block, peers, hashrate and paths",
+    "Expandable node logs",
+    "Supplied logo bytes; embedded PNG matches ui/public/cypherclaw-mark.png"
+  ],
+  "added": [
+    "Explicit preparation/verification section with state, progress, retry and in-use guidance",
+    "Plugin-local custom logo in the header"
+  ],
+  "limits": [
+    "Shell and font context differ; pixel identity is not claimed.",
+    "Reused real-app before evidence covers Node; current isolated after proof covers all six tabs.",
+    "UI mock proof does not prove live IPC, mining, transaction finality or native download execution."
+  ],
+  "afterReport": "/root/cypherclaw/work/cypher-node-plugin/artifacts/proof/after-PjAR40/report.json",
+  "oldStandaloneBaseline": "/root/cypherclaw/work/cypher-node-plugin/artifacts/proof/before-yhG8n2/report.json"
+}
