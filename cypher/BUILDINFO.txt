@@ -3,15 +3,28 @@ CypherClaw bundled node provenance
 
 This directory owns the CypherClaw body distribution's native node assets and
 their retained source, licenses, and build provenance.
-The Unix relay helper, genesis, relay configuration, three executables, and
+The Unix relay helper, relay configuration, three executables, and
 five Windows DLLs were copied without content changes from the CypherClaw
 runtime distribution at commit
 bdd9f88d28f21fa74bcaee7e4cceab251cfb135f.
 The three launchers have subsequent CypherClaw changes: automatic browser
 relay startup was removed, and CYPHER_DATADIR/CYPHER_IPC_PATH overrides are
 honored so managed launches use the data and IPC paths selected by the Gateway.
-SHA256SUMS identifies the exact files. No node executable was run or rebuilt
-while preparing this asset bundle.
+SHA256SUMS identifies the exact files. The retained asset import did not
+rebuild these executables; runtime validation is recorded separately.
+
+Genesis configuration
+---------------------
+CypherClaw commit 049d17e6382d42b29af5bce7ea2b9cd01e20abd2 updated genesis.json
+to the unchanged genesis from the official FHS-D build source
+546d43442e8156591786dc3c1ca1596f014509e3 in CypherTroopers/cypher.
+Git blob: 037c22719191282e51df141ec7c31f9cf7b94fcc
+SHA256: 9d521f550214f377d61beedb74481512908602b48fcab555974165ddf5e25b0b
+It selects the 250 ms Fair HotStuff clock and its matching EVM resource
+limits, config commitment, and genesis slot envelope. It changes the genesis
+block hash. Existing chain databases are preserved by package updates and
+must not be reused for the new network. See the migration procedure in
+CYPHERCLAW_DISTRIBUTION.md before changing an installed node's data directory.
 
 Node executable source and distribution
 --------------------------------------

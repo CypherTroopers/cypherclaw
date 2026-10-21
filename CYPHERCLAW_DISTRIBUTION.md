@@ -46,9 +46,60 @@ cypherclaw update
 
 The CLI and Control UI use the same existing package updater. Fork metadata directs resolution to this repository's stable GitHub Releases. The selected manifest supplies package SHA-256, byte length, Node engines, and database schema requirements before the updater stages the package. Existing admission, backups, Doctor, activation, service recovery, and rollback remain with that updater. Official npm update notifications and automatic npm updates are disabled for this marked distribution.
 
-The first UI send creates its feature table in the profile's existing `state/openclaw.sqlite`. Minimal transfer metadata and the original hash survive reloads and restarts without automatic expiration; passwords, private keys, and signed raw transactions are never retained. Recovery only queries the original hash. This additive table uses the existing worker, first-use schema, and backup owners; older software ignores it. Keep chain data and keystore paths unchanged during upgrade or rollback. An older native node lacking `eth_getTransactionFinality` remains usable but shows confirmation as unavailable rather than reporting receipt-only completion.
+The first UI send creates its feature table in the profile's existing `state/openclaw.sqlite`. Minimal transfer metadata and the original hash survive reloads and restarts without automatic expiration; passwords, private keys, and signed raw transactions are never retained. Recovery only queries the original hash. This additive table uses the existing worker, first-use schema, and backup owners; older software ignores it. Ordinary package upgrades and rollbacks preserve chain data and keystore paths. Changing networks requires the explicit genesis migration below. An older native node lacking `eth_getTransactionFinality` remains usable but shows confirmation as unavailable rather than reporting receipt-only completion.
 
 An immutable release can be selected with `cypherclaw update --tag cypherclaw-v<version>-<commit-prefix>`. Re-running the installer also delegates an existing installation to the package updater. Other upstream release channels are unavailable for this distribution. Source checkouts retain their separate [stable intake and update procedure](CYPHERCLAW_UPSTREAM.md).
+
+### Migrate to the new genesis
+
+The updated genesis has hash `0xbef1d519ceeba0d303fe63d13bb5fb70cda8947f9ee5c60436135cdb77e4db52`; its chain ID remains `10101919` (`0x9a249f`). An existing initialized directory stays on its original genesis after a package update. Joining the new network requires a fresh directory and synchronization; old balances and pending transactions do not move to it.
+
+The network operator must bring up the validator committee with the same genesis before users join. A Common node alone cannot produce finalized transactions.
+
+1. Record the current **Data directory** and **IPC** paths in **ColossusX → Node**. Stop the old node through its actual owner: **Stop node** for a UI-managed node, or the terminal/service that started an external node. Confirm it has exited before proceeding.
+2. Stop the Gateway with `cypherclaw gateway stop` (or stop its foreground process/external supervisor). Back up the complete old node directory, including its encrypted keystore, WAL, ingress, and outbox, and the Gateway profile, including `state/openclaw.sqlite` and its associated SQLite files. Keep these backups and the original directories. Then run `cypherclaw update`.
+3. Start the updated Gateway with a new, unused absolute data path and a distinct bare IPC name in its **process environment**. The examples below use the default `cypherclaw` profile; adjust paths to the recorded Node page and your custom profile/state directory. Each example refuses an existing destination. The updater may have restarted the service, so stop it again before starting this foreground Gateway.
+
+Linux/macOS/WSL2, in Bash:
+
+```bash
+(
+  set -eu
+  cypherclaw gateway stop
+  export CYPHER_DATADIR="$HOME/.openclaw-cypherclaw/cypher/chaindb-fhs-250ms"
+  export CYPHER_IPC_PATH="cypher-fhs-250ms.ipc"
+  if [ -e "$CYPHER_DATADIR" ] || [ -L "$CYPHER_DATADIR" ]; then
+    echo "Choose a new, unused CYPHER_DATADIR." >&2
+    exit 1
+  fi
+  umask 077
+  mkdir -m 700 "$CYPHER_DATADIR"
+  cypherclaw gateway run
+)
+```
+
+Native Windows, in PowerShell:
+
+```powershell
+$ErrorActionPreference = "Stop"
+cypherclaw gateway stop
+if ($LASTEXITCODE -ne 0) { throw "Gateway stop failed; check its owner before continuing." }
+$env:CYPHER_DATADIR = Join-Path $HOME ".openclaw-cypherclaw\cypher\chaindb-fhs-250ms"
+$env:CYPHER_IPC_PATH = "cypher-fhs-250ms.ipc"
+if (Test-Path -LiteralPath $env:CYPHER_DATADIR) {
+  throw "Choose a new, unused CYPHER_DATADIR."
+}
+New-Item -ItemType Directory -Path $env:CYPHER_DATADIR | Out-Null
+cypherclaw gateway run
+```
+
+Keep the new directory private to the operator. If you want the same wallet addresses, copy only the backed-up **encrypted keystore** into the new directory's `keystore` folder before starting the node. Do not copy old chain, ingress, outbox, or reward state. Retaining keys does not retain the old network's balances. Leave the Gateway SQLite database intact; its transfer history remains bound to each record's original network and IPC endpoint. Old-network pending records are not confirmed or rebroadcast on the new network.
+
+For background operation, persist both variables in the existing service manager's Gateway environment, then restart through that manager. Shell exports do not change an already running Gateway or an installed service's environment. Set these variables before launching the Gateway; do not rely on `.env` or `env.vars` for these overrides. A separate IPC name is especially important on Windows, where the named pipe is independent of the data directory.
+
+4. Open the dashboard from another terminal with `cypherclaw dashboard`. Check the selected paths under **ColossusX → Node**, then select **Start node**. To inspect the connected genesis and wallet addresses, run `cypherclaw gateway call cypher.wallets.list --params '{}'` in that terminal. Its `network.genesisHash` and `network.chainId` must match the values above; verify the expected wallet addresses before sending. Allow the node to synchronize, then configure the signing account and register the reward address again for this network using the [Common RPC setup](cypher/README.md#beginner-setup-common-rpc-node-and-rewards).
+
+If you set `CYPHER_ROOT`, the Gateway uses that external node directory. A package update replaces only the bundled assets; update the selected external binary and genesis from their owner before following this procedure. Explorer links remain guarded by both chain ID and the explorer's verified genesis; matching the new local genesis alone does not establish that the public explorer has switched networks.
 
 ## Build a reviewed stable commit
 

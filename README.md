@@ -73,6 +73,8 @@ UI-managed and manual launches use the same OS-specific launch scripts. The Gate
 
 Set launcher overrides in the Gateway environment when using the UI, or in the shell environment for manual launches. `CYPHER_DATADIR` selects another data directory; relative paths are resolved beside the launch script. `CYPHER_IPC_PATH` selects the IPC endpoint, defaulting to `cypher.ipc`. On Unix, a bare IPC filename is resolved inside the selected data directory; an IPC path containing a directory is resolved beside the launch script unless absolute. On Windows, it names a pipe. `CYPHER_RPC_BIND` and `CYPHER_WS_BIND` select the HTTP and WebSocket bind addresses; the launchers enable both listeners and the console by default. Genesis initialization runs only when the selected chain-data directory does not exist; existing chain data and peer files are preserved. Changing the selected directory does not move existing data.
 
+Existing nodes need an explicit [migration to the new genesis](CYPHERCLAW_DISTRIBUTION.md#migrate-to-the-new-genesis). Preserve the old node data and Gateway history, then select a fresh data directory and distinct IPC endpoint in the Gateway's startup environment. Updating the package alone leaves an initialized node on its original network.
+
 For a local source-package tarball, use the repository's supported packaging command, which prepares the bundled workspace runtime before packing:
 
 ```sh
