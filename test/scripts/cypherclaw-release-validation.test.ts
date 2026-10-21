@@ -8,7 +8,10 @@ import {
   assertExpectedIdentities,
   verifyReleaseDirectory,
 } from "../../scripts/cypherclaw-release-validation.mjs";
-import { projectUpdateCommand } from "../../scripts/lib/cypherclaw-update-diagnostics.mts";
+import {
+  projectGatewayServiceStatus,
+  projectUpdateCommand,
+} from "../../scripts/lib/cypherclaw-update-diagnostics.mts";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -64,6 +67,39 @@ function receipts() {
 }
 
 describe("CypherClaw publication acceptance", () => {
+  it.each(["running", "stopped", "unknown"])(
+    "retains the %s cleanup observation without publishing service details",
+    (runtimeStatus) => {
+      const privateText = "synthetic-private-token /private/operator/home";
+      const projected = projectGatewayServiceStatus({
+        service: {
+          loaded: false,
+          command: privateText,
+          runtime: {
+            status: runtimeStatus,
+            pid: 12345,
+            detail: privateText,
+            inspectionFailure: { detail: privateText },
+          },
+        },
+        config: privateText,
+      });
+      expect(projected).toEqual({ loaded: false, runtimeStatus });
+      expect(JSON.stringify(projected)).not.toContain(privateText);
+    },
+  );
+
+  it("redacts unexpected cleanup status values and omits malformed service fields", () => {
+    const privateText = "synthetic-private-token /private/operator/home";
+    expect(
+      projectGatewayServiceStatus({
+        service: { loaded: privateText, runtime: { status: privateText } },
+      }),
+    ).toEqual({ loaded: undefined, runtimeStatus: "redacted" });
+    expect(JSON.stringify(projectGatewayServiceStatus(null))).toBe("{}");
+    expect(JSON.stringify(projectGatewayServiceStatus({ service: [] }))).toBe("{}");
+  });
+
   it("retains updater failure facts without publishing private command or ledger text", () => {
     const privateText = "synthetic-private-token /private/operator/home";
     const failedStep = {

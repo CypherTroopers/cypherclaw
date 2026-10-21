@@ -10,7 +10,10 @@ import {
   assertExpectedIdentities,
 } from "./cypherclaw-release-validation.mjs";
 import type { LaneState } from "./lib/cross-os-release-checks/config.ts";
-import { waitForInstalledGateway } from "./lib/cross-os-release-checks/installed.ts";
+import {
+  waitForInstalledGateway,
+  waitForInstalledGatewayToStop,
+} from "./lib/cross-os-release-checks/installed.ts";
 import {
   resolveDashboardAssetUrls,
   verifyDashboardAssetUrls,
@@ -20,7 +23,10 @@ import {
   reserveGatewayPortForLane,
   runCommand,
 } from "./lib/cross-os-release-checks/process.ts";
-import { projectUpdateCommand } from "./lib/cypherclaw-update-diagnostics.mts";
+import {
+  projectGatewayServiceStatus,
+  projectUpdateCommand,
+} from "./lib/cypherclaw-update-diagnostics.mts";
 
 type Release = Awaited<ReturnType<typeof verifyReleaseDirectory>>;
 type BuildInfo = { commit: string; version: string; buildId: string };
@@ -40,6 +46,13 @@ type UpdateResult = {
   after: { version: string };
 };
 type ServiceStatus = { service: { loaded: boolean; runtime?: { status?: string; pid?: number } } };
+type CleanupDiagnostic = {
+  cell: "fresh" | "upgrade";
+  stopped?: ReturnType<typeof projectGatewayServiceStatus>;
+  listenerOpen?: boolean;
+  uninstalled?: ReturnType<typeof projectGatewayServiceStatus>;
+  stateRemoved?: boolean;
+};
 const timeoutMs = 60 * 60 * 1000;
 const argv = new Map<string, string>();
 for (let index = 2; index < process.argv.length; index += 2) {
@@ -72,6 +85,7 @@ let candidate: Release;
 let baseline: Release;
 let phase = "runner-admission";
 const updateDiagnostics: ReturnType<typeof projectUpdateCommand>[] = [];
+const cleanupDiagnostics: CleanupDiagnostic[] = [];
 const env: NodeJS.ProcessEnv = {};
 const inherited = new Set([
   "PATH",
@@ -318,17 +332,31 @@ async function configure(prefix: string, token: string, port: number) {
   await command(prefix, ["gateway", "install", "--runtime", "node", "--json"]);
   await command(prefix, ["gateway", "start", "--json"]);
 }
-async function cleanup(prefix: string, port: number) {
+async function cleanup(prefix: string, port: number, cellName: "fresh" | "upgrade") {
+  const diagnostic: CleanupDiagnostic = { cell: cellName };
+  cleanupDiagnostics.push(diagnostic);
   assertOwnership();
   await command(prefix, ["gateway", "stop", "--force", "--json"], true, 10 * 60 * 1000);
+  // Native status can be unknown after bounded inspection; the installed-lane
+  // owner waits for physical listener shutdown before cleanup continues.
+  await waitForInstalledGatewayToStop({
+    lane,
+    cliPath: launcher(prefix),
+    env,
+    logPath: path.join(outputDir, `${++sequence}-stop-status.log`),
+  });
   const stopped = await status(prefix);
-  assert.equal(stopped.service.runtime?.status, "stopped", "Managed Gateway stop is unverified");
-  assert.equal(await canConnectToLoopbackPort(port), false, "Gateway listener survived stop");
+  diagnostic.stopped = projectGatewayServiceStatus(stopped);
+  diagnostic.listenerOpen = await canConnectToLoopbackPort(port);
+  assert.equal(diagnostic.listenerOpen, false, "Gateway listener survived stop");
   await command(prefix, ["gateway", "uninstall", "--json"]);
-  assert.equal((await status(prefix)).service.loaded, false, "Managed service survived uninstall");
+  const uninstalled = await status(prefix);
+  diagnostic.uninstalled = projectGatewayServiceStatus(uninstalled);
+  assert.equal(uninstalled.service.loaded, false, "Managed service survived uninstall");
   assertOwnership();
   fs.rmSync(state, { recursive: true });
-  assert(!fs.existsSync(state));
+  diagnostic.stateRemoved = !fs.existsSync(state);
+  assert(diagnostic.stateRemoved);
 }
 function configPreserved(token: string, port: number) {
   const config = readRecord(path.join(state, "openclaw.json"));
@@ -513,7 +541,7 @@ async function cell(prefix: string, directory: string, release: Release, upgrade
     assert(JSON.stringify(usable.messages).includes(appended.messageId));
     await databaseIntegrity(prefix, upgrade ? candidate : release, created.sessionId);
     phase = `${cellName}.cleanup`;
-    await cleanup(prefix, lane.gatewayPort);
+    await cleanup(prefix, lane.gatewayPort, cellName);
     return updateRunId;
   } finally {
     await reservation.release();
@@ -565,6 +593,7 @@ try {
         baseline: identity(baseline),
         candidate: identity(candidate),
         updateRunId,
+        cleanupDiagnostics,
         checks: {
           freshInstall: true,
           managedGateway: true,
@@ -608,7 +637,7 @@ try {
       : [];
   fs.writeFileSync(
     path.join(outputDir, "receipt.json"),
-    `${JSON.stringify({ schemaVersion: 1, target, status: "failed", phase, errorCategory: error instanceof assert.AssertionError ? "contract-check" : "execution", errorLocations, updateDiagnostics }, null, 2)}\n`,
+    `${JSON.stringify({ schemaVersion: 1, target, status: "failed", phase, errorCategory: error instanceof assert.AssertionError ? "contract-check" : "execution", errorLocations, updateDiagnostics, cleanupDiagnostics }, null, 2)}\n`,
     { mode: 0o600, flag: "wx" },
   );
   console.error(

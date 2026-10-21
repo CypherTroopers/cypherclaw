@@ -7,7 +7,7 @@ import {
 import { isRecord } from "../../packages/normalization-core/src/record-coerce.ts";
 import { UPDATE_PREFLIGHT_DETAILS } from "../../src/infra/update-preflight-details.ts";
 
-// This receipt permits only fixed vocabulary; updater prose and command output stay private.
+// This receipt permits only fixed vocabulary; command prose and output stay private.
 const codes = [
   ...Object.keys(UPDATE_PREFLIGHT_DETAILS),
   ...UPDATE_NPM_ERROR_CODES,
@@ -102,6 +102,18 @@ const failureSignals = {
 function fixed(value: unknown, allowed: readonly string[]) {
   return typeof value === "string" && allowed.includes(value) ? value : undefined;
 }
+
+export function projectGatewayServiceStatus(value: unknown) {
+  const service = isRecord(value) && isRecord(value.service) ? value.service : undefined;
+  const runtime = isRecord(service?.runtime) ? service.runtime : undefined;
+  return {
+    loaded: typeof service?.loaded === "boolean" ? service.loaded : undefined,
+    runtimeStatus:
+      fixed(runtime?.status, ["running", "stopped", "unknown"]) ??
+      (typeof runtime?.status === "string" ? "redacted" : undefined),
+  };
+}
+
 function integer(value: unknown) {
   return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
 }
