@@ -22,5 +22,10 @@
     "commit": "60b8164405a4d5531c65f778e5661b9272cedbc2",
     "sha256": "884ba41ad79bc7264ca2fffe6e5c0a40ca00e138b8f21550b464da7bb9374291",
     "relationship": "Native Go and build source is unchanged between the archive commit and baseCommit; differences are built artifact trees, .gitignore, and browser-llm-lab/searxng/config/settings.example.yml."
+  },
+  "releaseInputs": {
+    "reviewedSourceCommit": "4739c45aeaea625d8344a46762f4552086352765",
+    "nativeSourceCommit": "546d43442e8156591786dc3c1ca1596f014509e3",
+    "nativeDistributionCommit": "9ca4b9793d6e3527f4439ab4cc29a500a160c134"
   }
 }
