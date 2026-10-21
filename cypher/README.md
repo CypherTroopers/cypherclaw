@@ -6,7 +6,6 @@
 
 New to operating a Common RPC node? Start with the [beginner setup walkthrough](#beginner-setup-common-rpc-node-and-rewards) after building the executable.
 
-
 ## Preparations
 
 ### Requirements
@@ -34,7 +33,7 @@ The build downloads and verifies Go modules, builds the pinned BLS/MCL native li
 
 The same binary includes the Common browser mesh and the bounded LevelDB reads used by its optional public-header exporter. The build applies [the additive bounded-read patch](build/goleveldb-bounded.patch) to the checksum-pinned upstream module in its temporary directory and enables `cypher_bounded_storage`. Ordinary LevelDB source files and the repository's `go.mod`/`go.sum` remain unchanged; the stage's `manifest.txt` records the module version, module checksum, patch checksum and build tag. No separate fork checkout is needed.
 
-Building this support does not start a relay. The binary defaults to OFF without `--browser.public-relay` and its owner configuration; the four Common launchers below enable it by default. The [Common browser mesh](docs/common-relay/browser-public-header-relay-spec.md) provides a private HTTP/WebSocket endpoint over a Unix socket on Linux/macOS or an owner-only local named pipe on Windows. The shipped Common launcher configuration enables an outbound authenticated WSS uplink to the public browser gateway, which discovers new native identities automatically; node owners do not need a separate public inbound gateway or a manual entry in the browser server's node list. Custom configurations may omit `mesh.gatewayUplink` to retain owner-local IPC operation. Browser participation uses the Web application's real WebRTC forwarding and explicit ON/OFF controls. Native node support and node-side WS tests do not establish browser WebRTC interoperability. The Windows gateway still needs the platform changes listed in the specification; Windows native build, runtime tests and browser end-to-end operation have not been run in the current Linux environment.
+Building this support does not start a relay. The binary defaults to OFF without `--browser.public-relay` and its owner configuration; the three launchers bundled with CypherClaw leave it disabled. Browser relay is a retired CypherClaw feature. The following details describe capabilities retained in the native binary and its original source documentation. The [Common browser mesh](docs/common-relay/browser-public-header-relay-spec.md) provides a private HTTP/WebSocket endpoint over a Unix socket on Linux/macOS or an owner-only local named pipe on Windows. The shipped Common launcher configuration enables an outbound authenticated WSS uplink to the public browser gateway, which discovers new native identities automatically; node owners do not need a separate public inbound gateway or a manual entry in the browser server's node list. Custom configurations may omit `mesh.gatewayUplink` to retain owner-local IPC operation. Browser participation uses the Web application's real WebRTC forwarding and explicit ON/OFF controls. Native node support and node-side WS tests do not establish browser WebRTC interoperability. The Windows gateway still needs the platform changes listed in the specification; Windows native build, runtime tests and browser end-to-end operation have not been run in the current Linux environment.
 
 ### Browser application in this workspace
 
@@ -141,17 +140,13 @@ From PowerShell, `./build_windows.ps1` is a compatibility wrapper around the sam
 
 ### OS-specific node launchers
 
-`start-cyphermine.sh`, `colossusX_linux.sh`, `colossusX_mac.sh` and `colossusX_windows.ps1` enable the Common browser mesh by default using the shipped [common-mine.json](config/browser-relay/common-mine.json). They initialize their configured data directory if necessary, preserve existing peer files, and pass additional node startup arguments immediately before `console`. Additional arguments are not passed to `init`. Initialization failure stops startup, and the final node exit code is returned to the caller. Keep the data directory, genesis and network settings consistent with the node you intend to run; do not enable this endpoint on a committee node.
-
-Each Common accepts up to 80 browser sessions and up to 40 native peers through the browser mesh. A browser session may carry up to 40 Common-to-Common circuits, sharing a node-wide limit of 40 circuits including pending opens. The ordinary native peer limits still apply; bandwidth and queue budgets remain bounded independently of these counts. The Web gateway and browser enforce their own limits, which are not increased by rebuilding the Common binary. See the [relay specification](docs/common-relay/browser-public-header-relay-spec.md) for the complete limits.
+CypherClaw bundles `colossusX_linux.sh`, `colossusX_mac.sh`, and `colossusX_windows.ps1`. They initialize their selected data directory if necessary, preserve existing peer files, and pass additional node startup arguments immediately before `console`. Additional arguments are not passed to `init`. Initialization failure stops startup, and the final node exit code is returned to the caller. Browser relay is retired in CypherClaw and is not enabled by these launchers.
 
 On Linux amd64:
 
 ```bash
 ./colossusX_linux.sh
 ```
-
-The existing local `./start-cyphermine.sh` is an alternative; use only one launcher for a given data directory.
 
 On macOS Apple Silicon arm64:
 
@@ -165,29 +160,20 @@ On Windows amd64:
 .\colossusX_windows.ps1
 ```
 
-The shipped configuration uses `"socketPath": "auto"`. On Linux/macOS this resolves to `common-mine.sock` beside the configuration; the launcher makes the shipped configuration directory owner-only (`0700`). On Windows it resolves to a deterministic local named pipe derived from the current user SID and absolute configuration path. Pass `--verbosity 3` to see the resolved endpoint in the `Browser relay listening` log; the macOS/Windows launchers otherwise default to a quieter level. Its protected DACL permits only that owner, and remote pipe clients are rejected. The gateway must run on the same host under the same owner and pin that endpoint; enabling the node does not register it with the public gateway.
+The default data directory is `chaindbname` beside the launcher. `CYPHER_DATADIR` selects another directory; relative paths are resolved beside the launcher. `CYPHER_IPC_PATH` selects the local IPC endpoint and defaults to `cypher.ipc`. On Unix, a bare IPC filename is resolved inside the selected data directory; a path containing a directory is resolved beside the launcher unless absolute. On Windows, the IPC value names a local pipe. Changing the selected directory does not move existing chain data or wallets.
 
-Set `CYPHER_BROWSER_RELAY=0` to launch without either relay flag:
+HTTP JSON-RPC and WebSocket JSON-RPC are enabled on ports 8000 and 9251, respectively. `CYPHER_RPC_BIND` selects the HTTP bind address, defaulting to `0.0.0.0`; `CYPHER_WS_BIND` selects the WebSocket bind address and otherwise follows `CYPHER_RPC_BIND`. The launchers always start the interactive console.
 
-```bash
-CYPHER_BROWSER_RELAY=0 ./colossusX_linux.sh
-```
-
-```powershell
-$env:CYPHER_BROWSER_RELAY = "0"
-.\colossusX_windows.ps1
-```
-
-Use `CYPHER_BROWSER_RELAY_CONFIG` or `--browser.public-relay.config /absolute/path/common.json` to select another existing configuration. A command-line relay option overrides the environment setting; an explicit configuration cannot be combined with relay OFF. Custom configurations and their local endpoint permissions remain operator-managed. See the [mesh connection specification](docs/common-relay/browser-public-header-relay-spec.md#2-buildと起動) for platform paths, Windows gateway limitations and the optional separate P-256 header-export key. Direct binary invocation without relay flags remains OFF.
+The CypherClaw Gateway uses these same scripts for UI-managed launches. Set overrides in the Gateway environment before starting it. Open **ColossusX → Node** and select **Start node** to launch and connect, or **Connect IPC** for an existing node using the same data directory and IPC settings. The page shows the selected paths and connection; **Overview** shows the network, block height, peers, and mining state. Use only one launcher for a given data directory.
 
 ### GitHub Actions native builds
 
 The [`Build Binaries`](.github/workflows/build-binaries.yml) workflow uses one native matrix:
 
-| Target | GitHub-hosted runner | Build command |
-| --- | --- | --- |
-| Linux amd64 | `ubuntu-24.04` | `make cypher TARGET_OS=linux TARGET_ARCH=amd64` |
-| macOS arm64 | `macos-15` | `make cypher TARGET_OS=darwin TARGET_ARCH=arm64` |
+| Target        | GitHub-hosted runner              | Build command                                     |
+| ------------- | --------------------------------- | ------------------------------------------------- |
+| Linux amd64   | `ubuntu-24.04`                    | `make cypher TARGET_OS=linux TARGET_ARCH=amd64`   |
+| macOS arm64   | `macos-15`                        | `make cypher TARGET_OS=darwin TARGET_ARCH=arm64`  |
 | Windows amd64 | `windows-2022` with MSYS2 MINGW64 | `make cypher TARGET_OS=windows TARGET_ARCH=amd64` |
 
 Each matrix job uploads only freshly staged and checksummed artifacts. After all three native builds succeed, the default-branch publish job validates their source commit, architecture, toolchain version, BLS revision, and checksums before automatically committing and pushing the files under `build/bin`.
@@ -220,11 +206,11 @@ This walkthrough sets up a **Common RPC node** that accepts users' signed transa
 
 ### 1. Understand the three accounts
 
-| Name used below | Purpose | Where its private key belongs |
-|---|---|---|
-| **A: signing account** | Your Common node signs admission proofs and delivery packets with A | In this node's encrypted keystore; unlock only A |
-| **B: reward address** | Receives this node's Common RPC transaction rewards directly | In a separate wallet/environment; never import B's key into the Common node |
-| **U: user account** | Signs and pays for the transactions submitted to public RPC | In the user's own wallet |
+| Name used below        | Purpose                                                             | Where its private key belongs                                               |
+| ---------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **A: signing account** | Your Common node signs admission proofs and delivery packets with A | In this node's encrypted keystore; unlock only A                            |
+| **B: reward address**  | Receives this node's Common RPC transaction rewards directly        | In a separate wallet/environment; never import B's key into the Common node |
+| **U: user account**    | Signs and pays for the transactions submitted to public RPC         | In the user's own wallet                                                    |
 
 Prepare B first. Copy its complete address: `0x` followed by 40 hexadecimal characters. B must be nonzero and different from A. B does not need an existing balance or a key on this server. An ordinary address or a contract address can receive rewards.
 
@@ -274,15 +260,15 @@ CYPHER_RPC_BIND="127.0.0.1"
 
 Leave this terminal running. It displays node logs; it is not the JavaScript console. Do not start a second node against the same datadir.
 
-| Setting | Meaning in this example |
-|---|---|
-| `10101919` | Network ID used by the supplied network; its wallet chain ID is also 10101919 |
+| Setting           | Meaning in this example                                                                               |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `10101919`        | Network ID used by the supplied network; its wallet chain ID is also 10101919                         |
 | `--rnetport 7200` | Selects the Common bridge role with the supplied genesis, whose committee ports are 7102 through 7114 |
-| `6000` | P2P port for peer connectivity |
-| `8000` | HTTP JSON-RPC port |
-| `9251` | WebSocket JSON-RPC port |
-| `cypher.ipc` | Local administrative socket inside the datadir on Linux/macOS |
-| `127.0.0.1` | Allows the initial HTTP/WS checks from this computer only |
+| `6000`            | P2P port for peer connectivity                                                                        |
+| `8000`            | HTTP JSON-RPC port                                                                                    |
+| `9251`            | WebSocket JSON-RPC port                                                                               |
+| `cypher.ipc`      | Local administrative socket inside the datadir on Linux/macOS                                         |
+| `127.0.0.1`       | Allows the initial HTTP/WS checks from this computer only                                             |
 
 For a customized genesis, obtain the matching network ID and a Common rnet port that is **not one of its committee ports**. With the supplied configuration, look for `TxQUIC auto role: common RPC FHS bridge` in the startup log. TxQUIC forwarding is selected automatically; public HTTP/3 is a separate optional service and is not needed for this walkthrough. A firewall must allow the required peer traffic and outbound UDP to the network's validator TxQUIC endpoints.
 
@@ -438,12 +424,12 @@ These flags do not grant administrative access. HTTP, WS, and HTTP/3 reject node
 
 In U's own wallet, add the network using:
 
-| Wallet setting | Value for the supplied network |
-|---|---|
-| Network name | A descriptive name, such as `Cypher FHS-D` |
-| RPC URL | Your reachable HTTP/HTTPS RPC URL; `http://127.0.0.1:8000` only when the wallet runs on the node computer |
-| Chain ID | `10101919` |
-| Currency symbol | `CPH` |
+| Wallet setting  | Value for the supplied network                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------------- |
+| Network name    | A descriptive name, such as `Cypher FHS-D`                                                                |
+| RPC URL         | Your reachable HTTP/HTTPS RPC URL; `http://127.0.0.1:8000` only when the wallet runs on the node computer |
+| Chain ID        | `10101919`                                                                                                |
+| Currency symbol | `CPH`                                                                                                     |
 
 U needs funds on **this new chain** to pay transaction fees. Obtain test funds through the network's normal funding process. Do not import U's or B's private key into the Common node. Send a small test transaction from U's wallet; the wallet signs it locally and submits the signed transaction to RPC. Transfers, contract calls, and deployments use this same path.
 
@@ -515,17 +501,17 @@ Enter A's password again. Already accepted transactions and retries retain their
 
 ### Common problems
 
-| Symptom | What to check |
-|---|---|
-| `method not found` for reward registration | Use actual IPC attach and the newly built executable. HTTP/WS/HTTP/3 and the embedded in-process console cannot register B |
-| `Common RPC reward recipient is not configured` | Register B for the same A shown by `eth.coinbase`, on this chain and datadir |
-| `authentication needed`, locked account, or signing error | Select the intended A and unlock it through IPC; check whether the one-hour deadline expired |
-| Incorrect password or invalid recipient error | Enter A's password and a complete nonzero B address different from A; the old preference remains unchanged |
-| Cannot open IPC | Keep Terminal 1 running; use its actual socket/pipe path and operator account; check private-directory/pipe permissions |
-| Zero peers, delivery retries, or receipt stays `null` | Check the agreed genesis, bootnode URLs, synchronization, validator availability, and required TCP/UDP connectivity. An admission response alone is not finality |
-| Genesis mismatch on startup | Use the agreed updated genesis with a fresh datadir for the new network; preserve old data instead of deleting it |
-| Registry cannot be read or saved | Check datadir permissions and storage; repair the cause. Do not replace it with an empty file or expect fallback payment to A |
-| Node is running but no rewards appear | Rewards require submitted TXs that finalize with your selected admission; uptime alone does not earn this fee reward |
+| Symptom                                                   | What to check                                                                                                                                                    |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `method not found` for reward registration                | Use actual IPC attach and the newly built executable. HTTP/WS/HTTP/3 and the embedded in-process console cannot register B                                       |
+| `Common RPC reward recipient is not configured`           | Register B for the same A shown by `eth.coinbase`, on this chain and datadir                                                                                     |
+| `authentication needed`, locked account, or signing error | Select the intended A and unlock it through IPC; check whether the one-hour deadline expired                                                                     |
+| Incorrect password or invalid recipient error             | Enter A's password and a complete nonzero B address different from A; the old preference remains unchanged                                                       |
+| Cannot open IPC                                           | Keep Terminal 1 running; use its actual socket/pipe path and operator account; check private-directory/pipe permissions                                          |
+| Zero peers, delivery retries, or receipt stays `null`     | Check the agreed genesis, bootnode URLs, synchronization, validator availability, and required TCP/UDP connectivity. An admission response alone is not finality |
+| Genesis mismatch on startup                               | Use the agreed updated genesis with a fresh datadir for the new network; preserve old data instead of deleting it                                                |
+| Registry cannot be read or saved                          | Check datadir permissions and storage; repair the cause. Do not replace it with an empty file or expect fallback payment to A                                    |
+| Node is running but no rewards appear                     | Rewards require submitted TXs that finalize with your selected admission; uptime alone does not earn this fee reward                                             |
 
 The unlocked A key still exists inside the node process. Protect the OS account, keystore backups, and IPC access. These RPC restrictions do not protect against an attacker who controls that process or the operator account.
 
@@ -533,7 +519,7 @@ For the exact API inventory, storage guarantees, and remaining platform limitati
 
 ### Using the existing launcher scripts
 
-The scripts below are alternatives to the manual startup command. Review their datadir, binary, genesis, peer, and bind settings before running one; do not run it alongside the manual node against the same datadir. The Unix scripts set `DATADIR`, while the Windows script sets `DATADIR_NAME`. Their embedded console is not IPC, so use a separate IPC attach session for B registration as shown above.
+The scripts below are alternatives to the manual startup command. Review their datadir, binary, genesis, peer, and bind settings before running one; do not run it alongside the manual node against the same datadir. Set `CYPHER_DATADIR` to select the same data directory and `CYPHER_IPC_PATH` to select the same IPC endpoint used by your manual node. Their embedded console is not IPC, so use a separate IPC attach session for B registration as shown above.
 
 ```bash
 # Linux
@@ -551,6 +537,7 @@ The scripts below are alternatives to the manual startup command. Review their d
 ```
 
 ## setting http/3 QUIC RPC port(example)
+
 Low-latency, high-speed communication example: [nginx HTTP/3 configuration](https://github.com/CypherTroopers/cypher/blob/ColossusX_CommonRPC_TXrewards/nginx%20example).
 <img width="1448" height="1086" alt="image" src="https://github.com/user-attachments/assets/dbb7c1bd-f031-41a0-933b-2eeadbeac9ba" />
 
@@ -602,18 +589,18 @@ For a transaction using 21,000 gas at an effective gas price of 1 gwei, B receiv
 
 Use `eth_getTransactionReceipt` and `eth_getTransactionByHash`, or the console equivalents `eth.getTransactionReceipt(txHash)` and `eth.getTransaction(txHash)`.
 
-| Field | Meaning |
-|---|---|
-| `commonTxApprover` | Admission signer A |
-| `commonTxRewardRecipient` | Actual reward recipient B |
-| `commonTxApproverReward` | Common RPC fee reward credited to B; existing field name retained |
-| `commonTxBurn` | Burned remainder of the actual fee |
-| `commonTxAdmissionRoot` | Block commitment to the signed admissions and references |
-| `commonTxRewardRoot` | Block commitment to reward records |
-| `commonTxAdmissionChainId` | Chain ID bound to the proof |
-| `commonTxAdmissionKeyBlockNumber` | Admission's key-block boundary |
-| `commonTxAdmissionTimestamp` | Signed admission timestamp |
-| `commonTxAdmissionSignature` | A's signature over the admission payload |
+| Field                             | Meaning                                                           |
+| --------------------------------- | ----------------------------------------------------------------- |
+| `commonTxApprover`                | Admission signer A                                                |
+| `commonTxRewardRecipient`         | Actual reward recipient B                                         |
+| `commonTxApproverReward`          | Common RPC fee reward credited to B; existing field name retained |
+| `commonTxBurn`                    | Burned remainder of the actual fee                                |
+| `commonTxAdmissionRoot`           | Block commitment to the signed admissions and references          |
+| `commonTxRewardRoot`              | Block commitment to reward records                                |
+| `commonTxAdmissionChainId`        | Chain ID bound to the proof                                       |
+| `commonTxAdmissionKeyBlockNumber` | Admission's key-block boundary                                    |
+| `commonTxAdmissionTimestamp`      | Signed admission timestamp                                        |
+| `commonTxAdmissionSignature`      | A's signature over the admission payload                          |
 
 For a client connected to public RPC:
 

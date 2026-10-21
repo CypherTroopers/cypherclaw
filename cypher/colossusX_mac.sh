@@ -4,7 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$SCRIPT_DIR"
 
-DATADIR="chaindbname"
+DATADIR="${CYPHER_DATADIR:-chaindbname}"
+CYPHER_IPC_ARGS=()
+if [[ -n "${CYPHER_IPC_PATH:-}" ]]; then
+  CYPHER_IPC_ARGS=(--ipcpath "$CYPHER_IPC_PATH")
+fi
 
 CYPHER_BIN="./build/bin/cypher-darwin-arm64"
 
@@ -32,7 +36,7 @@ BOOTNODES="$(IFS=,; echo "${BOOTNODES_ARRAY[*]}")"
 RPC_BIND="${CYPHER_RPC_BIND:-0.0.0.0}"
 WS_BIND="${CYPHER_WS_BIND:-${RPC_BIND}}"
 
-PEER_DIR="./${DATADIR}/cypher"
+PEER_DIR="${DATADIR%/}/cypher"
 CHAINDATA_DIR="${PEER_DIR}/chaindata"
 STATIC_NODES_FILE="${PEER_DIR}/static-nodes.json"
 TRUSTED_NODES_FILE="${PEER_DIR}/trusted-nodes.json"
@@ -114,6 +118,7 @@ exec "${CYPHER_BIN}" \
   --http.corsdomain "*" \
   --port 6000 \
   --datadir "${DATADIR}" \
+  ${CYPHER_IPC_ARGS[@]+"${CYPHER_IPC_ARGS[@]}"} \
   --networkid 10101919 \
   --gcmode archive \
   --bootnodes "${BOOTNODES}" \

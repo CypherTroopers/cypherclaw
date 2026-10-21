@@ -3,10 +3,13 @@ CypherClaw bundled node provenance
 
 This directory owns the CypherClaw body distribution's native node assets and
 their retained source, licenses, and build provenance.
-The three launchers, Unix relay helper, genesis, relay configuration, three
-executables, and five Windows DLLs were copied without content changes from
-the CypherClaw runtime distribution at commit
+The Unix relay helper, genesis, relay configuration, three executables, and
+five Windows DLLs were copied without content changes from the CypherClaw
+runtime distribution at commit
 bdd9f88d28f21fa74bcaee7e4cceab251cfb135f.
+The three launchers have subsequent CypherClaw changes: automatic browser
+relay startup was removed, and CYPHER_DATADIR/CYPHER_IPC_PATH overrides are
+honored so managed launches use the data and IPC paths selected by the Gateway.
 SHA256SUMS identifies the exact files. No node executable was run or rebuilt
 while preparing this asset bundle.
 
@@ -126,6 +129,7 @@ Windows x86-64: preserve all five supplied DLLs beside cypher.exe.
 There are no Linux ARM64, macOS x86-64, or Windows ARM64 node binaries here.
 Wallet generation has its own independent six-target asset set.
 
-The native relay config is intentionally retained unchanged (414 bytes) for
-the existing launchers' default behavior. No browser-llm-lab files, live node
-data directories, user settings, private keys, or IPC sockets are packaged.
+The native relay config is retained unchanged (414 bytes) as source material.
+CypherClaw retired browser relay and its launchers no longer enable it. No
+browser-llm-lab files, live node data directories, user settings, private keys,
+or IPC sockets are packaged.

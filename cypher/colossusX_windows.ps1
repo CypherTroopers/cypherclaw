@@ -16,8 +16,17 @@ if ([string]::IsNullOrWhiteSpace($SCRIPT_DIR)) {
   $SCRIPT_DIR = (Get-Location).Path
 }
 
-$DATADIR_NAME = "chaindbname"
-$DATADIR = Join-Path $SCRIPT_DIR $DATADIR_NAME
+if ([string]::IsNullOrWhiteSpace($env:CYPHER_DATADIR)) {
+  $DATADIR = Join-Path $SCRIPT_DIR "chaindbname"
+} elseif ([System.IO.Path]::IsPathRooted($env:CYPHER_DATADIR)) {
+  $DATADIR = $env:CYPHER_DATADIR
+} else {
+  $DATADIR = Join-Path $SCRIPT_DIR $env:CYPHER_DATADIR
+}
+$CypherIpcArgs = @()
+if (![string]::IsNullOrWhiteSpace($env:CYPHER_IPC_PATH)) {
+  $CypherIpcArgs = @("--ipcpath", $env:CYPHER_IPC_PATH)
+}
 $CYPHER_BIN = Join-Path $SCRIPT_DIR "build\bin\cypher.exe"
 $GENESIS_FILE = Join-Path $SCRIPT_DIR "genesis.json"
 
@@ -178,7 +187,7 @@ $CypherNodeArgs = @(
   "--networkid", "10101919",
   "--gcmode", "archive",
   "--bootnodes", $BOOTNODES
-) + $CypherExtraArgs + @("console")
+) + $CypherIpcArgs + $CypherExtraArgs + @("console")
 
 & $CYPHER_BIN @CypherNodeArgs
 exit $LASTEXITCODE
