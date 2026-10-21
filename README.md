@@ -63,6 +63,8 @@ The ColossusX page has six tabs, each with a short explanation of its purpose:
 | **Mining**   | Select the node signer, start or stop mining, and configure Common RPC rewards.                                            |
 | **Explorer** | Open an address, transaction, or block in the ColossusX explorer when both the chain ID and genesis hash match.            |
 
+In **Wallets**, choose the local account in the **Wallet** selector before selecting **Unlock account** or **Lock account**. This selector includes all local accounts, independently of the balance list page, and remains usable if balance details cannot be loaded.
+
 Wallet and transfer selection is separate from mining configuration. The **signing account (A)** identifies the local node; the **reward address (B)** receives the configured Common RPC rewards. Start and stop mining explicitly, and use **Stop node** to end the node process managed by this Gateway. Account creation, unlocking, sending, reward changes, mining changes, and node lifecycle operations require a Gateway operator with admin permission. Reading balances and transfer history requires read permission.
 
 Sending uses the node's local keystore and IPC. Review the exact amount, recipient, and maximum fee before entering the wallet password. **Accepted** means the node accepted submission; **Included** means a receipt is available; **Complete** requires successful execution and the canonical FHS finalized-transaction index. A timeout keeps the original hash under confirmation and never triggers an automatic replacement or rebroadcast. An FHS transfer needs an admission-enabled Common node with a configured signing account; the submission response confirms whether admission is available.

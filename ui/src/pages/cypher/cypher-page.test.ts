@@ -54,7 +54,7 @@ const status: CypherStatus = {
     peerCount: "0x0",
     mining: false,
     hashrate: "0x0",
-    accounts: [signer],
+    accounts: [signer, secondWallet],
     signer,
   },
 };
@@ -125,11 +125,13 @@ async function settle(page: TestPage): Promise<void> {
 async function mount(
   response: (method: string, params: unknown) => Promise<unknown>,
   scopes = ["operator.admin"],
-  readResponses: { wallets?: CypherWallets; transfers?: CypherTransferRecord[] } = {},
+  readResponses: { wallets?: CypherWallets | Error; transfers?: CypherTransferRecord[] } = {},
 ) {
   const request = vi.fn((method: string, params: unknown) => {
     if (method === "cypher.wallets.list") {
-      return Promise.resolve(readResponses.wallets ?? wallets);
+      return readResponses.wallets instanceof Error
+        ? Promise.reject(readResponses.wallets)
+        : Promise.resolve(readResponses.wallets ?? wallets);
     }
     if (method === "cypher.transfers.list") {
       return Promise.resolve({ transfers: readResponses.transfers ?? [] });
@@ -356,21 +358,91 @@ describe("Cypher page", () => {
     }
   });
 
-  it("uses the selected wallet for locking without changing the mining signer", async () => {
-    const { page, request } = await mount(async (method) =>
-      method === "cypher.accounts.lock" ? { locked: true } : status,
+  it("unlocks the selected node account when wallet details are unavailable", async () => {
+    const { page, request } = await mount(
+      async (method) => (method === "cypher.accounts.unlock" ? { unlocked: true } : status),
+      ["operator.admin"],
+      { wallets: new Error("Synthetic wallet balance failure") },
     );
     await selectTab(page, "wallets");
     const wallet = page.querySelector<HTMLSelectElement>("#cypher-wallet")!;
+    expect([...wallet.options].map((option) => option.value)).toEqual([signer, secondWallet]);
+    expect(wallet.value).toBe(signer);
+    expect(button(page, "unlock").disabled).toBe(false);
+    expect(page.querySelector('[role="alert"]')?.textContent).toContain(
+      "Synthetic wallet balance failure",
+    );
     wallet.value = secondWallet;
     wallet.dispatchEvent(new Event("change", { bubbles: true }));
     await settle(page);
+    input(page, "cypher-account-password").value = "fixture-only-password";
+    input(page, "cypher-mining-password").value = "another-fixture-password";
+    button(page, "unlock").click();
+    expect(request).toHaveBeenCalledWith("cypher.accounts.unlock", {
+      address: secondWallet,
+      password: "fixture-only-password",
+      duration: 300,
+    });
+    expect(input(page, "cypher-account-password").value).toBe("");
+    expect(input(page, "cypher-mining-password").value).toBe("");
+    await settle(page);
+    expect(wallet.value).toBe(secondWallet);
+    expect(request.mock.calls.some(([method]) => method === "cypher.accounts.select")).toBe(false);
+    expect(page.querySelector<HTMLSelectElement>("#cypher-account")?.value).toBe(signer);
+  });
+
+  it("keeps a later-page wallet selected for locking across balance pages and refreshes", async () => {
+    const accounts = [
+      signer,
+      ...Array.from(
+        { length: 24 },
+        (_, index) => `0x${(index + 3).toString(16).padStart(40, "0")}`,
+      ),
+      secondWallet,
+    ];
+    const firstPage: CypherWallets = {
+      ...wallets,
+      total: accounts.length,
+      wallets: accounts.slice(0, 25).map((address) => ({
+        address,
+        balance: "12.5",
+        balanceWei: "0xad78ebc5ac620000",
+        locked: true,
+      })),
+    };
+    const reads = { wallets: firstPage };
+    const { page, request } = await mount(
+      async (method) =>
+        method === "cypher.accounts.lock"
+          ? { locked: true }
+          : { ...status, node: { ...status.node!, accounts } },
+      ["operator.admin"],
+      reads,
+    );
+    await selectTab(page, "wallets");
+    const wallet = page.querySelector<HTMLSelectElement>("#cypher-wallet")!;
+    expect([...wallet.options].map((option) => option.value)).toEqual(accounts);
+    wallet.value = secondWallet;
+    wallet.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle(page);
+    reads.wallets = { ...firstPage, offset: 25, wallets: [wallets.wallets[1]!] };
+    button(page, "wallet-next").click();
+    await settle(page);
+    expect(request).toHaveBeenCalledWith("cypher.wallets.list", { offset: 25, limit: 25 });
+    expect(wallet.value).toBe(secondWallet);
+    expect(page.textContent).toContain("0.000000000000000001");
+    reads.wallets = firstPage;
+    button(page, "wallet-previous").click();
+    await settle(page);
+    expect(wallet.value).toBe(secondWallet);
+    await selectTab(page, "send");
+    expect(page.querySelector<HTMLSelectElement>("#cypher-send-wallet")?.value).toBe(secondWallet);
+    await selectTab(page, "wallets");
     button(page, "lock").click();
     await settle(page);
     expect(request).toHaveBeenCalledWith("cypher.accounts.lock", { address: secondWallet });
     expect(request.mock.calls.some(([method]) => method === "cypher.accounts.select")).toBe(false);
     expect(page.querySelector<HTMLSelectElement>("#cypher-account")?.value).toBe(signer);
-    expect(page.textContent).toContain("0.000000000000000001");
   });
 
   it("requires fee review and confirmation, clears the password, and reports completion only from the tracked result", async () => {

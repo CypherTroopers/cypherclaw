@@ -149,6 +149,9 @@ class CypherPage extends OpenClawLightDomElement {
       this.confirmed = false;
     }
     const accounts = status.node?.accounts ?? [];
+    if (!this.walletAddress) {
+      this.walletAddress = accounts[0] ?? "";
+    }
     if (!accounts.includes(this.selectedAccount)) {
       this.selectedAccount =
         status.node?.signer && accounts.includes(status.node.signer)
@@ -260,9 +263,6 @@ class CypherPage extends OpenClawLightDomElement {
         return;
       }
       this.wallets = wallets;
-      if (!this.walletAddress) {
-        this.walletAddress = wallets.wallets[0]?.address ?? "";
-      }
     }
     if (
       this.status?.connected &&

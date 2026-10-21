@@ -242,9 +242,9 @@ export function renderCypher(props: CypherProps): TemplateResult {
       ?disabled=${!status?.connected || Boolean(props.busy)}
       @change=${(event: Event) => props.onWallet((event.target as HTMLSelectElement).value)}
     >
-      ${!props.walletAddress ? html`<option value="">${t("cypher.noAccounts")}</option>` : nothing}
-      ${props.walletAddress && !props.wallets?.wallets.some((wallet) => wallet.address === props.walletAddress) ? html`<option value=${props.walletAddress}>${props.walletAddress}</option>` : nothing}
-      ${(props.wallets?.wallets ?? []).map((wallet) => html`<option value=${wallet.address}>${wallet.address}</option>`)}
+      ${!props.walletAddress ? html`<option value="" selected>${t("cypher.noAccounts")}</option>` : nothing}
+      ${props.walletAddress && !node?.accounts.includes(props.walletAddress) ? html`<option value=${props.walletAddress} selected>${props.walletAddress}</option>` : nothing}
+      ${(node?.accounts ?? []).map((address) => html`<option value=${address} ?selected=${address === props.walletAddress}>${address}</option>`)}
     </select></label
   >`;
   const accounts = renderSettingsSection(
