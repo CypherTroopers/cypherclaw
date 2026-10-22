@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 
 export const CYPHERCLAW_REPOSITORY = "CypherTroopers/cypherclaw";
 export const CYPHERCLAW_SOURCE_BRANCH = "cypherclaw-stable";
-export const CYPHERCLAW_NODE_VERSION = "24.21.0";
+export const CYPHERCLAW_NODE_VERSION = "24.22.1";
 export const CYPHERCLAW_INSTALL_ASSETS = [
   "install.sh",
   "install.ps1",
@@ -88,7 +88,11 @@ function artifact(value) {
 /** The installer, packer, and updater share one immutable release contract. */
 export function validateCypherClawReleaseManifest(value) {
   const manifest = record(value, "release manifest");
-  if (manifest.schemaVersion !== 1 || manifest.nodeVersion !== CYPHERCLAW_NODE_VERSION) {
+  // Baseline verification still reads published releases with the previous private runtime.
+  if (
+    manifest.schemaVersion !== 1 ||
+    (manifest.nodeVersion !== CYPHERCLAW_NODE_VERSION && manifest.nodeVersion !== "24.21.0")
+  ) {
     throw new Error("Unsupported CypherClaw release manifest or Node runtime.");
   }
   const identity = sourceIdentity(manifest);
@@ -136,7 +140,7 @@ export function validateCypherClawReleaseManifest(value) {
     schemaVersion: 1,
     ...identity,
     version,
-    nodeVersion: CYPHERCLAW_NODE_VERSION,
+    nodeVersion: manifest.nodeVersion,
     package: {
       ...packageArtifact,
       name: "openclaw",

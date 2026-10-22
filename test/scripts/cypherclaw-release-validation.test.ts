@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { satisfies } from "semver";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import {
@@ -8,6 +9,7 @@ import {
   assertExpectedIdentities,
   verifyReleaseDirectory,
 } from "../../scripts/cypherclaw-release-validation.mjs";
+import { CYPHERCLAW_NODE_VERSION } from "../../scripts/lib/cypherclaw-contract.mjs";
 import {
   projectGatewayServiceStatus,
   projectUpdateCommand,
@@ -295,64 +297,73 @@ describe("CypherClaw publication acceptance", () => {
     ).toThrow("publication blockers");
   });
 
-  it("refuses altered payloads even when the release manifest itself is intact", async () => {
-    const directory = tempDirs.make("cypherclaw-acceptance-seal-");
-    const entries = [
-      "cypherclaw.tgz",
-      "install.sh",
-      "install.ps1",
-      "install-node.sh",
-      "install-node.ps1",
-      "install-runtime.mjs",
-      "cypherclaw-contract.mjs",
-    ].map((file) => {
-      const bytes = Buffer.from(`Synthetic sealed fixture: ${file}\n`);
-      writeFileSync(path.join(directory, file), bytes);
-      return {
-        file,
-        bytes: bytes.length,
-        sha256: createHash("sha256").update(bytes).digest("hex"),
-      };
-    });
-    const manifest = {
-      schemaVersion: 1,
-      repository: "CypherTroopers/cypherclaw",
-      sourceBranch: "cypherclaw-stable",
-      channel: "stable",
-      version: "2026.10.2",
-      releaseTag: candidate.releaseTag,
-      sourceCommit: candidate.sourceCommit,
-      nodeVersion: "24.21.0",
-      supportedTargets: ["linux-x64", "darwin-arm64", "win32-x64"],
-      publication: { ready: true, limitations: [] },
-      package: {
-        ...entries[0],
-        name: "openclaw",
-        nodeEngine: ">=24.16.0 <25 || >=26.1.0",
-        schemaVersions: { state: 20, agent: 24 },
-      },
-      assets: entries.slice(1),
-    };
-    const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
-    writeFileSync(path.join(directory, "cypherclaw-release.json"), manifestBytes);
-    writeFileSync(
-      path.join(directory, "SHA256SUMS"),
-      [
-        ...entries,
-        {
-          file: "cypherclaw-release.json",
-          sha256: createHash("sha256").update(manifestBytes).digest("hex"),
-        },
-      ]
-        .map((entry) => `${entry.sha256}  ${entry.file}\n`)
-        .join(""),
-    );
-    await expect(verifyReleaseDirectory(directory)).resolves.toMatchObject({
-      sourceCommit: candidate.sourceCommit,
-    });
-    writeFileSync(path.join(directory, "cypherclaw.tgz"), "Altered candidate payload");
-    await expect(verifyReleaseDirectory(directory)).rejects.toThrow("checksum or size mismatch");
+  it("pins the installer runtime to a Node version supported by the package", () => {
+    const packageJson = JSON.parse(readFileSync(path.resolve("package.json"), "utf8"));
+    expect(satisfies(CYPHERCLAW_NODE_VERSION, packageJson.engines.node)).toBe(true);
   });
+
+  it.each(["24.21.0", "24.22.1"])(
+    "verifies a sealed Node %s release without accepting altered payloads",
+    async (nodeVersion) => {
+      const directory = tempDirs.make("cypherclaw-acceptance-seal-");
+      const entries = [
+        "cypherclaw.tgz",
+        "install.sh",
+        "install.ps1",
+        "install-node.sh",
+        "install-node.ps1",
+        "install-runtime.mjs",
+        "cypherclaw-contract.mjs",
+      ].map((file) => {
+        const bytes = Buffer.from(`Synthetic sealed fixture: ${file}\n`);
+        writeFileSync(path.join(directory, file), bytes);
+        return {
+          file,
+          bytes: bytes.length,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+        };
+      });
+      const manifest = {
+        schemaVersion: 1,
+        repository: "CypherTroopers/cypherclaw",
+        sourceBranch: "cypherclaw-stable",
+        channel: "stable",
+        version: "2026.10.2",
+        releaseTag: candidate.releaseTag,
+        sourceCommit: candidate.sourceCommit,
+        nodeVersion,
+        supportedTargets: ["linux-x64", "darwin-arm64", "win32-x64"],
+        publication: { ready: true, limitations: [] },
+        package: {
+          ...entries[0],
+          name: "openclaw",
+          nodeEngine: ">=24.16.0 <25 || >=26.1.0",
+          schemaVersions: { state: 20, agent: 24 },
+        },
+        assets: entries.slice(1),
+      };
+      const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
+      writeFileSync(path.join(directory, "cypherclaw-release.json"), manifestBytes);
+      writeFileSync(
+        path.join(directory, "SHA256SUMS"),
+        [
+          ...entries,
+          {
+            file: "cypherclaw-release.json",
+            sha256: createHash("sha256").update(manifestBytes).digest("hex"),
+          },
+        ]
+          .map((entry) => `${entry.sha256}  ${entry.file}\n`)
+          .join(""),
+      );
+      await expect(verifyReleaseDirectory(directory)).resolves.toMatchObject({
+        sourceCommit: candidate.sourceCommit,
+        nodeVersion,
+      });
+      writeFileSync(path.join(directory, "cypherclaw.tgz"), "Altered candidate payload");
+      await expect(verifyReleaseDirectory(directory)).rejects.toThrow("checksum or size mismatch");
+    },
+  );
 
   it("makes OS acceptance a required publication dependency without platform failure exceptions", () => {
     const workflow = parse(

@@ -9,8 +9,8 @@ This file owns the fork's source provenance and intake procedure. Update the ups
 | Source                  | Pin                                                                          |
 | ----------------------- | ---------------------------------------------------------------------------- |
 | Official repository     | `https://github.com/openclaw/openclaw.git`                                   |
-| Official stable release | [`v2026.10.5`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.5) |
-| Official peeled commit  | `1b58cb9a1b4f4353e1add63c8506db4d890962e8`                                   |
+| Official stable release | [`v2026.10.6`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.6) |
+| Official peeled commit  | `fe06181dc5ecc01cf8904abbfc26925925efefbc`                                   |
 | Fork repository         | `https://github.com/CypherTroopers/cypherclaw.git`                           |
 
 ### Initial stable migration
@@ -39,7 +39,7 @@ Shared state schema **20** and agent schema **24** remain unchanged. The intake 
 
 ### October 2026.10.5 intake
 
-The `v2026.10.5` intake reapplies the reviewed fork delta through `1716a4133adbacb2f70fbc1b02c8df4bf7537d4f`, relative to official `v2026.10.2` commit `b8952d477f0c932d8ddc6da5c89cab5a169b6ff1`, onto the official commit above. The official release lines diverge, so older upstream changes are not merged wholesale into this candidate. The integration commit retains the prior fork and new official histories as its two parents.
+The `v2026.10.5` intake reapplies the reviewed fork delta through `1716a4133adbacb2f70fbc1b02c8df4bf7537d4f`, relative to official `v2026.10.2` commit `b8952d477f0c932d8ddc6da5c89cab5a169b6ff1`, onto official `1b58cb9a1b4f4353e1add63c8506db4d890962e8`. The official release lines diverge, so older upstream changes are not merged wholesale into this candidate. The integration commit retains the prior fork and new official histories as its two parents.
 
 The ColossusX Overview, Node, Wallets, Send, Mining, and Explorer tabs retain their layout and operations, along with the independent wallet generator and custom logo assets. The intake preserves the packaged fork's GitHub Releases identity and the published CypherClaw 10.1 and 10.2 updaters' compatibility modules, while retaining upstream update recovery and worker admission changes.
 
@@ -53,6 +53,24 @@ The published CypherClaw `2026.10.2` artifact at `ec944b6de83cb69969388c4b0d19ce
 
 Inherited static-check findings remain explicit: `check:max-lines-ratchet --staged --base 1b58cb9a1b4f4353e1add63c8506db4d890962e8` rejects the upstream `src/commands/doctor-memory-search.test.ts` suppression (1045 counted lines against its 1000-line cap); that file is byte-identical to the official tag. A full `git diff --cached --check` against the tag also reports whitespace in 28 retained vendor, license, and provenance files, all byte-identical to the previous fork head. No baseline, threshold, or ignore exceptions were added. Native app builds/device behavior, OS-specific installation acceptance, and a live Gateway upgrade were not exercised.
 
+### October 2026.10.6 intake
+
+The `v2026.10.6` intake merges official `fe06181dc5ecc01cf8904abbfc26925925efefbc` into fork head `647c893f98200d638971d38003052361a053c5f3`. Official `v2026.10.5` is its ancestor, so this regular merge retains both histories and all nine intervening fork commits. The official delta contains 294 commits across 1,669 files.
+
+The four content conflicts combine the fork's About, Cypher, and wallet catalogs with upstream lazy catalog declarations and Secrets composition; use the upstream shared approval terminal-message owner with CypherClaw copy; and keep both install/restart failure coverage and the fork's failed-Gateway TUI launch guard. The Cypher English catalog is also included in its owner's source-hash dependencies. Node data and IPC paths, the updated genesis, unlocking any local account, physical Gateway shutdown verification, custom branding, wallet generation, and the six ColossusX tabs remain part of the fork.
+
+Shared state schema **20**, agent schema **25**, and update admission protocol **1** are unchanged. Existing migration, backup, admission, and rollback owners continue to control deployment. Upstream raises the source runtime floor to Node **24.22.1** or **26.12.1** and pins pnpm **12.15.0**. Fork installers and release jobs use private Node **24.22.1**. Historical manifests declaring **24.21.0** remain readable for baseline verification; new releases advertise their actual **24.22.1** runtime.
+
+**Packaged upgrade limitation:** published fork updaters that require manifest Node **24.21.0** reject a new **24.22.1** manifest before downloading the candidate. Candidate compatibility modules cannot repair that earlier gate. Those installations need a verified installer migration, or a separately prepared and authorized bridge release, before accepting this runtime transition. Do not rewrite the new manifest to advertise an unsupported runtime. Full installation migration and a published-driver × candidate upgrade have not been proven by this source intake. Preparing this source does not publish a release or activate a live Gateway.
+
+Validation used an independent physical dependency installation with the frozen lockfile. The complete build passed in **10m 56.7s**, and the supported CLI entry point reported **2026.10.6** with isolated state. The UI startup payload measured **371704 B gzip**, within the unchanged **373454 B** hard limit. All 268 custom branding assets retain their previous bytes, and the native icon generator verified 152 resources. Synthetic browser checks captured 32 desktop/mobile before-and-after screenshots: all 14 Cypher-tab and wallet-generator pairs were byte-identical; the About page changed only its release version. These checks cover real components and controllers with an isolated Gateway fixture, not a live chain or a complete application handshake.
+
+The latest complete attempt for each selected test file passed **319 tests across 17 files**. The first completed run exposed one stale `OpenClaw apps` expectation after the shared approval message retained fork branding. Correcting that expectation to `CypherClaw apps` preserved the expiry, no-change, fresh-request, and explicit-approval assertions; all 27 approval tests then passed. The affected approval and wizard groups took **124.39s** and **37.23s** respectively with one worker. Release validation passed 21 tests in **210ms** of test time within its **29.13s** tooling group, including the current runtime floor and both historical/current sealed manifests. CI duration was not measured. The original run took **404.98s**; the corrected suite and four previously unrun files took **296.41s**. Passing unaffected groups were reused.
+
+Core, UI, scripts, and extensions type checks and scoped type-aware lint passed. The lint prerequisite initially exceeded its five-minute SDK declaration budget. Using the existing supported ten-minute compiler-preparation budget completed declaration generation and the same lint commands; source thresholds and test timeouts were unchanged. Workflow static checks, keyless i18n validation, native state-schema verification, formatting, and whitespace checks passed. Independent scoped integration review and review of the final assertion correction found no actionable P0/P1 findings.
+
+The first sandbox build stopped in postbuild without child diagnostics. The official postbuild entry point and then the complete build passed on the supported host with the same production tree; the sandbox failure remains unclassified. An earlier test preparation attempt overlapped build output mutation and rejected its package topology before discovering tests; serializing artifact preparation and tests removed that fixture conflict. Native application builds, real-device behavior, OS-specific installer migration, and a live Gateway upgrade were not exercised.
+
 ## Prepare the next stable intake
 
 Start with a clean checkout of the reviewed fork branch and verify `origin` is the CypherTroopers repository. Confirm the selected official release is published, is not a draft or prerelease, and belongs to the regular stable channel. Record its full peeled commit from the official tag. Moving official `main` and `release/*` branch tips are not intake targets.
@@ -60,7 +78,7 @@ Start with a clean checkout of the reviewed fork branch and verify `origin` is t
 Fetch only the selected tag into a private reference. Replace the example tag with the release selected for this intake:
 
 ```sh
-cypherclaw_tag=v2026.10.5
+cypherclaw_tag=v2026.10.6
 git fetch --no-tags --no-write-fetch-head https://github.com/openclaw/openclaw.git \
   "refs/tags/${cypherclaw_tag}:refs/cypherclaw/upstream/${cypherclaw_tag}"
 git rev-parse "refs/cypherclaw/upstream/${cypherclaw_tag}^{commit}"

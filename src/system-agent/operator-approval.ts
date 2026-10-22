@@ -6,6 +6,18 @@ import { isPersistentSystemAgentOperation } from "./operations-parse.js";
 
 export type SystemAgentProposalRef = { current?: string; operation?: SystemAgentOperation };
 
+const APPROVAL_RETRY_GUIDANCE =
+  "If the change is still needed, submit a fresh request and approve it in the Control UI or CypherClaw apps, or through the approval prompt in the requesting chat. Retrying alone does not approve the change.";
+
+export const SYSTEM_AGENT_APPROVAL_APPLICATION_UNCONFIRMED_TEXT =
+  "The approved change's application status is unconfirmed. Check the current settings and CypherClaw status before retrying.";
+
+export const SYSTEM_AGENT_APPROVAL_TERMINAL_MESSAGES = {
+  expired: `CypherClaw approval request expired without a decision. No change was made. The expired request can no longer be approved. ${APPROVAL_RETRY_GUIDANCE}`,
+  cancelled: `CypherClaw change cancelled before application. No change was made. The approval request is no longer active. ${APPROVAL_RETRY_GUIDANCE}`,
+  failed: `CypherClaw change failed to complete. ${SYSTEM_AGENT_APPROVAL_APPLICATION_UNCONFIRMED_TEXT}`,
+};
+
 /** Canonical operation fingerprint used to bind approval to one exact mutation. */
 export function hashSystemAgentOperation(operation: SystemAgentOperation): string {
   return createHash("sha256").update(stableStringify(operation)).digest("hex");

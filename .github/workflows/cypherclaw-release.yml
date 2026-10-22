@@ -44,7 +44,7 @@ jobs:
       - name: Setup pinned validation runtime
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24.21.0"
+          node-version: "24.22.1"
 
       - name: Resolve and verify one immutable published baseline
         id: baseline
@@ -205,7 +205,7 @@ jobs:
       - name: Setup pinned package toolchain
         uses: ./.github/actions/setup-node-env
         with:
-          node-version: "24.21.0"
+          node-version: "24.22.1"
           install-bun: "true"
           frozen-lockfile: "true"
 
@@ -298,7 +298,7 @@ jobs:
       - name: Setup pinned validation runtime
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24.21.0"
+          node-version: "24.22.1"
 
       - name: Download exact prepared candidate assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -356,7 +356,7 @@ jobs:
       - name: Setup pinned validation runtime
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24.21.0"
+          node-version: "24.22.1"
 
       - name: Download exact prepared candidate assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

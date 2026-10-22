@@ -1019,31 +1019,46 @@ describe("finalizeSetupWizard", () => {
     },
   );
 
-  it("reports gateway installation failure without waiting for impossible health", async () => {
-    gatewayServiceInstall.mockRejectedValueOnce(new Error("service install exploded"));
-    const prompter = createLaterPrompter();
-    const runtime = createRuntime();
-    const result = await finalize("advanced", {
-      opts: { installDaemon: true, skipHealth: false, skipUi: false },
-      prompter,
-      runtime,
-    });
+  it.each(["install", "restart"] as const)(
+    "reports gateway %s failure with recovery guidance instead of success",
+    async (action) => {
+      gatewayServiceIsLoaded.mockResolvedValue(action === "restart");
+      const error = `service ${action} exploded`;
+      (action === "restart" ? gatewayServiceRestart : gatewayServiceInstall).mockRejectedValueOnce(
+        new Error(error),
+      );
+      const progressStop = vi.fn();
+      const prompter = buildWizardPrompter(
+        {
+          progress: () => ({ update: vi.fn(), stop: progressStop }),
+        },
+        { defaultSelect: "restart" },
+      );
+      const runtime = createRuntime();
+      const result = await finalize("advanced", {
+        opts: { installDaemon: true, skipHealth: false, skipUi: false },
+        prompter,
+        runtime,
+      });
 
-    expect(result).toEqual({ launchedTui: false });
-    expect(runTui).not.toHaveBeenCalled();
-    expect(waitForGatewayReachable).not.toHaveBeenCalled();
-    expect(probeGatewayReachable).toHaveBeenCalledOnce();
-    expect(runtime.error).toHaveBeenCalledWith("health failed");
-    expectNoteContains(prompter, "service install exploded", "Gateway");
-    expectNoteContains(prompter, "Gateway: not detected (offline)", "Control UI");
-    expect(prompter.outro).toHaveBeenCalledWith(
-      expect.stringContaining("managed Mock Platform Service setup failed"),
-    );
-    expectNoteContains(prompter, "openclaw gateway status --deep", "Gateway");
-    expectNoteContains(prompter, "openclaw gateway install --force", "Gateway");
-    expectNoteNotContains(prompter, "openclaw gateway run");
-    expectNoteNotContains(prompter, "openclaw gateway restart");
-  });
+      expect(result).toEqual({ launchedTui: false });
+      expect(runTui).not.toHaveBeenCalled();
+      expect(progressStop).not.toHaveBeenCalledWith("Gateway service restarted.");
+      expect(progressStop).not.toHaveBeenCalledWith("Gateway service installed.");
+      expect(waitForGatewayReachable).not.toHaveBeenCalled();
+      expect(probeGatewayReachable).toHaveBeenCalledOnce();
+      expect(runtime.error).toHaveBeenCalledWith("health failed");
+      expectNoteContains(prompter, error, "Gateway");
+      expectNoteContains(prompter, "Gateway: not detected (offline)", "Control UI");
+      expect(prompter.outro).toHaveBeenCalledWith(
+        expect.stringContaining("managed Mock Platform Service setup failed"),
+      );
+      expectNoteContains(prompter, "openclaw gateway status --deep", "Gateway");
+      expectNoteContains(prompter, "openclaw gateway install --force", "Gateway");
+      expectNoteNotContains(prompter, "openclaw gateway run");
+      expectNoteNotContains(prompter, "openclaw gateway restart");
+    },
+  );
 
   it("keeps managed readiness timeout recovery on the canonical service path", async () => {
     const detail = "gateway readiness timed out";

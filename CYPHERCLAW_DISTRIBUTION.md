@@ -6,7 +6,7 @@ CypherClaw uses GitHub Releases for a prebuilt package containing the CLI, Gatew
 
 ## Install a published release
 
-Supported node targets are Linux x64, Apple Silicon macOS, and native Windows x64. WSL2 uses the Linux package. Linux runtime requirements are recorded in the selected native manifest; the retained original node requires glibc 2.38+ and GLIBCXX 3.4.32. The macOS node requires macOS 15+. Intel Macs and Linux/Windows ARM64 have no bundled node binary. Node.js 24.21.0 is installed privately; a system Node.js or pnpm installation is unnecessary.
+Supported node targets are Linux x64, Apple Silicon macOS, and native Windows x64. WSL2 uses the Linux package. Linux runtime requirements are recorded in the selected native manifest; the retained original node requires glibc 2.38+ and GLIBCXX 3.4.32. The macOS node requires macOS 15+. Intel Macs and Linux/Windows ARM64 have no bundled node binary. Node.js 24.22.1 is installed privately; a system Node.js or pnpm installation is unnecessary.
 
 After a release is published, run one command from your user account:
 
@@ -49,6 +49,10 @@ The CLI and Control UI use the same existing package updater. Fork metadata dire
 The first UI send creates its feature table in the profile's existing `state/openclaw.sqlite`. Minimal transfer metadata and the original hash survive reloads and restarts without automatic expiration; passwords, private keys, and signed raw transactions are never retained. Recovery only queries the original hash. This additive table uses the existing worker, first-use schema, and backup owners; older software ignores it. Ordinary package upgrades and rollbacks preserve chain data and keystore paths. Changing networks requires the explicit genesis migration below. An older native node lacking `eth_getTransactionFinality` remains usable but shows confirmation as unavailable rather than reporting receipt-only completion.
 
 An immutable release can be selected with `cypherclaw update --tag cypherclaw-v<version>-<commit-prefix>`. Re-running the installer also delegates an existing installation to the package updater. Other upstream release channels are unavailable for this distribution. Source checkouts retain their separate [stable intake and update procedure](CYPHERCLAW_UPSTREAM.md).
+
+The 2026.10.6 source requires Node.js 24.22.1+ or 26.12.1+. Previously published CypherClaw packages pin their release-manifest reader to Node.js 24.21.0, so their ordinary `cypherclaw update` cannot resolve a new manifest declaring 24.22.1. The existing installer route provisions the new private runtime, verifies the release assets, and passes the local tarball to the installed updater. That transition still needs published-driver acceptance on every supported OS before a 2026.10.6 package can be published. Source intake does not prove that migration or change an installed Gateway.
+
+Current release verification accepts both the historical 24.21.0 manifest pin and the current 24.22.1 pin, preserving the recorded value. Remove historical acceptance only when those published packages no longer serve as supported upgrade baselines; installers and newly prepared manifests use 24.22.1.
 
 ### Migrate to the new genesis
 

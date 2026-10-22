@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repository = "CypherTroopers/cypherclaw"
-$nodeVersion = "24.21.0"
+$nodeVersion = "24.22.1"
 $stagingDirectory = $null
 
 if ($Help) {
