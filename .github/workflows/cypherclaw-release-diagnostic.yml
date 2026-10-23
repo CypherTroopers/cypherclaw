@@ -130,11 +130,62 @@ jobs:
           --output-dir "$RUNNER_TEMP/cypherclaw-upgrade-proof"
           --target "${{ matrix.target }}"
 
-      - name: Upload sanitized diagnostic receipt
+      - name: Encrypt failed fixture command details for the task operator
+        if: failure()
+        env:
+          DIAGNOSTIC_PUBLIC_KEY: |
+            -----BEGIN PUBLIC KEY-----
+            MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEApj5d3jaQX4j/rlocqUUQ
+            MtR3U1j/8Lb0VCRz5uLzp9ACF9GKCums/txeyIhx6vm5p36NV39uwuaIAcIK4hr+
+            +MrfnK0dQ4l5yNymk/OtrMeiW1q5t8K3YiixVrnILR1KyO6knIdin3Tnu88vgmHe
+            BBbtB0MUtq1mnkjf6mykqDdfzaX98B0EIfECoZ8wZXBqyXJqOx3LoojTUWhgkn1h
+            KjiUKFR5lKqkPFkN7K/Nmir8ZChLG/AvCS+1jr9KoXk7I6cSCgjZJQFThY5/EfTv
+            44xEVYKVUgPyCkQDLf7Lg8kx619EHKAvt5WQdYQGlbUeRgb/iQIccQV74PrwaDcA
+            PCeRTZYrglB6g7ek93hPaHBhLdW5OBRWyshBUuDM0/ZUhfmA72iErHlt1iaBwnZb
+            feK8BZzGyjrCA3vWqY2oF2edNGB39Kpu3Ijsmz7B850kbNVldcsHAaQsBoPIaeL+
+            UhHl0iJDqGx0PIH5Q/kp6CNgLQKm/vgYsJwNIlLTzB4vAgMBAAE=
+            -----END PUBLIC KEY-----
+        run: |
+          node --input-type=module - <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { constants, createCipheriv, publicEncrypt, randomBytes } from 'node:crypto';
+          const root = path.join(process.env.RUNNER_TEMP, 'cypherclaw-upgrade-proof');
+          const receipt = JSON.parse(fs.readFileSync(path.join(root, 'receipt.json'), 'utf8'));
+          assert.equal(receipt.status, 'failed');
+          const names = fs.readdirSync(root);
+          const files = {};
+          for (const kind of ['installer', 'command']) {
+            const selected = names.filter(name => new RegExp(`^[1-9][0-9]*-${kind}\\.log$`).test(name))
+              .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10)).at(-1);
+            if (!selected) continue;
+            const file = path.join(root, selected);
+            const stat = fs.lstatSync(file);
+            assert(stat.isFile() && !stat.isSymbolicLink() && stat.size <= 8 * 1024 * 1024);
+            files[kind] = fs.readFileSync(file, 'utf8');
+          }
+          assert(Object.keys(files).length > 0);
+          const key = randomBytes(32);
+          const iv = randomBytes(12);
+          const cipher = createCipheriv('aes-256-gcm', key, iv);
+          const ciphertext = Buffer.concat([cipher.update(JSON.stringify({ target: receipt.target, phase: receipt.phase, files })), cipher.final()]);
+          const wrappedKey = publicEncrypt({ key: process.env.DIAGNOSTIC_PUBLIC_KEY, oaepHash: 'sha256', padding: constants.RSA_PKCS1_OAEP_PADDING }, key);
+          fs.writeFileSync(path.join(root, 'encrypted-diagnostic.json'), JSON.stringify({
+            schemaVersion: 1, algorithm: 'RSA-OAEP-SHA256/AES-256-GCM',
+            key: wrappedKey.toString('base64'), iv: iv.toString('base64'),
+            tag: cipher.getAuthTag().toString('base64'), ciphertext: ciphertext.toString('base64'),
+          }), { mode: 0o600, flag: 'wx' });
+          console.log('Encrypted only the final installer and status logs; plaintext remains on the disposable runner.');
+          NODE
+
+      - name: Upload sanitized receipt and encrypted task details
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: cypherclaw-release-diagnostic-${{ matrix.target }}-39915228885-${{ github.run_id }}
-          path: ${{ runner.temp }}/cypherclaw-upgrade-proof/receipt.json
+          path: |
+            ${{ runner.temp }}/cypherclaw-upgrade-proof/receipt.json
+            ${{ runner.temp }}/cypherclaw-upgrade-proof/encrypted-diagnostic.json
           if-no-files-found: error
           retention-days: 7
