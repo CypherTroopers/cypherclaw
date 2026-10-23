@@ -473,10 +473,30 @@ jobs:
           release_state="$(gh release list --repo CypherTroopers/cypherclaw --limit 1000 --json tagName,isDraft \
             | jq -r --arg tag "$RELEASE_TAG" '.[] | select(.tagName == $tag) | if .isDraft then "draft" else "published" end')"
           if [[ -z "$release_state" ]]; then
+            node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { CYPHERCLAW_NODE_VERSION } from './source/scripts/lib/cypherclaw-contract.mjs';
+          const version = JSON.parse(fs.readFileSync('source/package.json', 'utf8')).version;
+          const notes = [
+            `CypherClaw incorporates OpenClaw ${version}.`,
+            '',
+            `This package uses private Node.js ${CYPHERCLAW_NODE_VERSION}. Existing installations on an earlier private Node runtime must re-run the one-line installer; the old update command cannot perform this runtime transition. The installer retains the existing package updater and Gateway recovery lifecycle.`,
+            '',
+            `[Installation and upgrade instructions](https://github.com/CypherTroopers/cypherclaw/blob/${process.env.REVIEWED_SHA}/CYPHERCLAW_DISTRIBUTION.md)`,
+            '',
+            `Reviewed cypherclaw-stable commit: ${process.env.REVIEWED_SHA}`,
+            `FHS-D build source: ${process.env.NATIVE_SHA}`,
+            `FHS-D distribution: ${process.env.NATIVE_DISTRIBUTION_SHA}`,
+            `Immutable release snapshot: ${process.env.SOURCE_SHA}`,
+            '',
+            'SHA256SUMS binds the installer, runtime, manifest, and package assets.',
+          ].join('\n');
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/cypherclaw-release-notes.md`, `${notes}\n`);
+          NODE
             gh release create "$RELEASE_TAG" release/* \
               --repo CypherTroopers/cypherclaw --verify-tag --draft \
               --title "CypherClaw $RELEASE_TAG" \
-              --notes "Reviewed cypherclaw-stable commit $REVIEWED_SHA; FHS-D build source $NATIVE_SHA; FHS-D distribution $NATIVE_DISTRIBUTION_SHA; immutable release snapshot $SOURCE_SHA. SHA256SUMS binds the installer, runtime, manifest, and package assets."
+              --notes-file "$RUNNER_TEMP/cypherclaw-release-notes.md"
             release_state=draft
           fi
           verification_dir="$(mktemp -d "$RUNNER_TEMP/cypherclaw-release-verify.XXXXXXXX")"

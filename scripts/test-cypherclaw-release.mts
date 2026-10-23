@@ -173,10 +173,9 @@ function assertOwnership() {
   );
   assert.equal(fs.readFileSync(marker, "utf8"), ownership, "Test state ownership changed");
 }
-async function install(directory: string, prefix: string) {
-  assert(!fs.existsSync(prefix), "Fresh installation prefix already exists");
+async function install(directory: string, prefix: string, check = true) {
   const win = process.platform === "win32";
-  await runCommand(
+  return runCommand(
     win ? "powershell.exe" : "/bin/bash",
     win
       ? [
@@ -201,8 +200,23 @@ async function install(directory: string, prefix: string) {
           prefix,
           "--no-onboard",
         ],
-    { env, cwd: home, logPath: path.join(outputDir, `${++sequence}-installer.log`), timeoutMs },
+    {
+      env,
+      cwd: home,
+      logPath: path.join(outputDir, `${++sequence}-installer.log`),
+      timeoutMs,
+      check,
+    },
   );
+}
+async function verifyPrivateRuntime(prefix: string, release: Release) {
+  const result = await runCommand(privateNode(prefix), ["--version"], {
+    env,
+    cwd: home,
+    logPath: path.join(outputDir, `${++sequence}-private-node.log`),
+    timeoutMs,
+  });
+  assert.equal(result.stdout.trim(), `v${release.nodeVersion}`, "Private Node version differs");
 }
 function installedIdentity(prefix: string, release: Release): BuildInfo {
   const root = packageRoot(prefix);
@@ -427,7 +441,9 @@ const lane: LaneState = {
 async function cell(prefix: string, directory: string, release: Release, upgrade: boolean) {
   const cellName = upgrade ? "upgrade" : "fresh";
   phase = `${cellName}.install`;
+  assert(!fs.existsSync(prefix), "Fresh installation prefix already exists");
   await install(directory, prefix);
+  await verifyPrivateRuntime(prefix, release);
   installedIdentity(prefix, release);
   const reservation = await reserveGatewayPortForLane(lane);
   const token = `cypherclaw-release-fixture-${randomUUID()}`;
@@ -465,12 +481,15 @@ async function cell(prefix: string, directory: string, release: Release, upgrade
     const transcriptBefore = await databaseIntegrity(prefix, release, created.sessionId);
     let updateRunId: string | undefined;
     if (upgrade) {
-      phase = "upgrade.installed-updater";
-      const result = await command(
-        prefix,
-        ["update", "--tag", path.join(candidateDir, "cypherclaw.tgz"), "--yes", "--json"],
-        false,
-      );
+      const runtimeMigration = release.nodeVersion !== candidate.nodeVersion;
+      phase = runtimeMigration ? "upgrade.installer-runtime" : "upgrade.installed-updater";
+      const result = runtimeMigration
+        ? await install(candidateDir, prefix, false)
+        : await command(
+            prefix,
+            ["update", "--tag", path.join(candidateDir, "cypherclaw.tgz"), "--yes", "--json"],
+            false,
+          );
       updateDiagnostics.push(projectUpdateCommand("installed-update", result));
       if (result.exitCode !== 0) {
         // Preserve the failed command while reading the public ledger best effort.
@@ -487,17 +506,22 @@ async function cell(prefix: string, directory: string, release: Release, upgrade
         }
       }
       assert.equal(result.exitCode, 0, "Installed updater command failed");
-      const updated = JSON.parse(result.stdout) as UpdateResult;
-      assert.equal(
-        updated.status,
-        "ok",
-        "Installed updater did not complete the selected transition",
-      );
-      assert.equal(updated.after.version, candidate.version);
-      assert(typeof updated.runId === "string" && updated.runId.length > 0);
-      if (updated.run) {
-        assert.equal(updated.runId, updated.run.runId);
+      let commandRunId: string | undefined;
+      if (!runtimeMigration) {
+        const updated = JSON.parse(result.stdout) as UpdateResult;
+        assert.equal(
+          updated.status,
+          "ok",
+          "Installed updater did not complete the selected transition",
+        );
+        assert.equal(updated.after.version, candidate.version);
+        assert(typeof updated.runId === "string" && updated.runId.length > 0);
+        if (updated.run) {
+          assert.equal(updated.runId, updated.run.runId);
+        }
+        commandRunId = updated.runId;
       }
+      await verifyPrivateRuntime(prefix, candidate);
       phase = "upgrade.update-status";
       const statusResult = await command(prefix, ["update", "status", "--json"], false);
       updateDiagnostics.push(projectUpdateCommand("update-status", statusResult));
@@ -505,10 +529,13 @@ async function cell(prefix: string, directory: string, release: Release, upgrade
       const recorded = JSON.parse(statusResult.stdout) as {
         lastRun: { runId: string; status: string; phase: string; reason?: string };
       };
-      assert.equal(recorded.lastRun.runId, updated.runId);
+      assert(typeof recorded.lastRun.runId === "string" && recorded.lastRun.runId.length > 0);
+      if (commandRunId) {
+        assert.equal(recorded.lastRun.runId, commandRunId);
+      }
       assert.equal(recorded.lastRun.status, "succeeded");
       assert.equal(recorded.lastRun.phase, "finished");
-      updateRunId = updated.runId;
+      updateRunId = recorded.lastRun.runId;
       phase = "upgrade.serving-candidate";
       await serving(prefix, candidate, token, lane.gatewayPort);
     }
