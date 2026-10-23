@@ -662,13 +662,30 @@ try {
           )
           .slice(0, 5)
       : [];
+  const errorCategory = error instanceof assert.AssertionError ? "contract-check" : "execution";
+  const updateDiagnosticCodes = [
+    ...new Set(
+      updateDiagnostics.flatMap((entry) => [
+        ...Object.entries(entry.failureSignals)
+          .filter(([, present]) => present)
+          .map(([name]) => name),
+        ...entry.runtimeErrorCodes,
+        ...[entry.result, entry.run, entry.lastRun, entry.activeRun].flatMap((record) =>
+          record?.reason ? [record.reason] : [],
+        ),
+      ]),
+    ),
+  ];
   fs.writeFileSync(
     path.join(outputDir, "receipt.json"),
-    `${JSON.stringify({ schemaVersion: 1, target, status: "failed", phase, errorCategory: error instanceof assert.AssertionError ? "contract-check" : "execution", errorLocations, updateDiagnostics, cleanupDiagnostics }, null, 2)}\n`,
+    `${JSON.stringify({ schemaVersion: 1, target, status: "failed", phase, errorCategory, errorLocations, updateDiagnostics, cleanupDiagnostics }, null, 2)}\n`,
     { mode: 0o600, flag: "wx" },
   );
   console.error(
     `CypherClaw application acceptance failed during ${phase}; private state and logs remain on the disposable runner.`,
+  );
+  console.error(
+    JSON.stringify({ errorCategory, errorLocations, updateDiagnostics: updateDiagnosticCodes }),
   );
   process.exitCode = 1;
 }

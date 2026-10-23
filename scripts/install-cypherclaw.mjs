@@ -196,7 +196,6 @@ async function inspectMigrationService(node, cli, env, root, original, port) {
     status,
     node: await fs.realpath(executable),
     port: gateway.port,
-    expectedPin: { revision: intent.revision, definition: intent.definition },
   };
 }
 
@@ -253,23 +252,15 @@ function isOriginalGatewayHealthy(status, original) {
 
 async function installMigrationRuntime(node, cli, env, service) {
   await assertMigrationAutoStart(service.status.service, env);
-  // This shipped marker selects the install owner's full audit, backups and
-  // compensation. Native custody still comes from that owner's operation lock.
+  // The published owner routes OPENCLAW_UPDATE_IN_PROGRESS through definition
+  // reconciliation and treats --expected-runtime-pin as a running-state fence.
+  // That combination exited before the updater recorded a run. The same
+  // unpinned --runtime node install that created the service does not store a pin.
   const result = await runJson(
     node,
     cli,
-    [
-      "gateway",
-      "install",
-      "--runtime",
-      "node",
-      "--force",
-      "--port",
-      String(service.port),
-      "--expected-runtime-pin",
-      JSON.stringify(service.expectedPin),
-    ],
-    { ...env, OPENCLAW_UPDATE_IN_PROGRESS: "1" },
+    ["gateway", "install", "--runtime", "node", "--force", "--port", String(service.port)],
+    env,
   );
   if (result.ok !== true) {
     throw new Error("The installed service owner did not confirm runtime installation.");
@@ -290,22 +281,30 @@ async function waitForMigrationService(
   // the same five-minute scale as managed lifecycle admission before recovery.
   const deadline = Date.now() + 5 * 60 * 1000;
   while (true) {
-    const observed = await inspectMigrationService(node, cli, env, root, original, port);
-    if (observed.node !== expectedNode) {
-      throw new Error("The managed Gateway runtime changed during recovery.");
-    }
-    if (isOriginalGatewayHealthy(observed.status, original)) {
-      const health = await runJson(
-        node,
-        cli,
-        ["gateway", "call", "health", "--timeout", "30000"],
-        env,
-      );
-      if (health.ok !== true) {
-        throw new Error("The original Gateway health check failed after runtime selection.");
+    try {
+      const observed = await inspectMigrationService(node, cli, env, root, original, port);
+      if (observed.node !== expectedNode) {
+        throw new Error("The managed Gateway runtime changed during recovery.");
       }
-      await assertInstalledIdentity(root, manifest, original);
-      return observed;
+      if (isOriginalGatewayHealthy(observed.status, original)) {
+        const health = await runJson(
+          node,
+          cli,
+          ["gateway", "call", "health", "--timeout", "30000"],
+          env,
+        );
+        if (health.ok !== true) {
+          throw new Error("The original Gateway health check failed after runtime selection.");
+        }
+        await assertInstalledIdentity(root, manifest, original);
+        return observed;
+      }
+    } catch (error) {
+      // A wrong published executable is not a restart race. Status and health
+      // can fail while systemd or launchd is still activating the new command.
+      if (error?.message === "The managed Gateway runtime changed during recovery.") {
+        throw error;
+      }
     }
     if (Date.now() >= deadline) {
       throw new Error("The original Gateway did not become healthy after runtime selection.");
