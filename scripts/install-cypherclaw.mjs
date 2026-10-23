@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 // The release asset sits beside its contract; the source entry uses scripts/lib.
@@ -67,7 +68,11 @@ async function run(command, args, env, capture = false) {
       if (code === 0) {
         resolve(output.trim());
       } else {
-        reject(new Error(`${path.basename(command)} failed (${code ?? signal}).`));
+        reject(
+          Object.assign(new Error(`${path.basename(command)} failed (${code ?? signal}).`), {
+            stdout: output,
+          }),
+        );
       }
     });
   });
@@ -87,6 +92,346 @@ async function exists(file) {
 
 async function readPackage(root) {
   return JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
+}
+
+async function runJson(node, cli, args, env) {
+  const reportWarnings = (result) => {
+    for (const warning of result.warnings ?? []) {
+      console.warn(warning);
+    }
+  };
+  let output;
+  try {
+    output = await run(node, [cli, ...args, "--json"], env, true);
+  } catch (error) {
+    try {
+      const result = JSON.parse(error.stdout);
+      reportWarnings(result);
+      if (result.error) {
+        console.warn(result.error);
+      }
+    } catch {
+      // The child already reported non-JSON diagnostics on stderr.
+    }
+    throw error;
+  }
+  const result = JSON.parse(output);
+  reportWarnings(result);
+  return result;
+}
+
+async function readInstalledIdentity(root, manifest) {
+  const [packageBytes, buildBytes] = await Promise.all([
+    fs.readFile(path.join(root, "package.json")),
+    fs.readFile(path.join(root, "dist", "build-info.json")),
+  ]);
+  const pkg = JSON.parse(packageBytes);
+  const build = JSON.parse(buildBytes);
+  requireDistribution(pkg, manifest, false);
+  if (
+    build.version !== pkg.version ||
+    build.commit !== pkg.openclaw.distribution.sourceCommit ||
+    typeof build.buildId !== "string" ||
+    !build.buildId
+  ) {
+    throw new Error("Installed CypherClaw build identity could not be verified.");
+  }
+  return { pkg, build, packageBytes, buildBytes };
+}
+
+async function assertInstalledIdentity(root, manifest, original) {
+  const current = await readInstalledIdentity(root, manifest);
+  if (
+    !current.packageBytes.equals(original.packageBytes) ||
+    !current.buildBytes.equals(original.buildBytes)
+  ) {
+    throw new Error("The installed package changed; runtime recovery was not attempted.");
+  }
+}
+
+async function inspectMigrationService(node, cli, env, root, original, port) {
+  const status = await runJson(
+    node,
+    cli,
+    ["gateway", "status", "--deep", "--timeout", "30000"],
+    env,
+  );
+  const { service, config, gateway } = status;
+  const intent = service?.runtimeIntent;
+  if (
+    service?.targetRole !== "target" ||
+    service.loaded !== true ||
+    service.loadState?.status !== "loaded" ||
+    service.inspectionReason ||
+    service.launcherOverridden !== false ||
+    (process.platform === "linux" && service.definitionMutation !== "writable") ||
+    intent?.status !== "known" ||
+    intent.stored !== false ||
+    intent.pin !== undefined ||
+    typeof intent.revision !== "string" ||
+    typeof intent.definition !== "string" ||
+    service.layout?.entrypointSourceCheckout !== false ||
+    service.layout.packageVersion !== original.pkg.version ||
+    !service.layout.packageRootReal ||
+    config?.cli?.valid !== true ||
+    config?.daemon?.valid !== true ||
+    config.mismatch === true ||
+    config.cli.path !== config.daemon.path ||
+    !Number.isInteger(gateway?.port) ||
+    gateway.port < 1 ||
+    gateway.port > 65535 ||
+    (port !== undefined && gateway.port !== port) ||
+    (await fs.realpath(service.layout.packageRootReal)) !== (await fs.realpath(root))
+  ) {
+    throw new Error(
+      "The original managed Gateway, context, or unpinned runtime could not be verified. Inspect cypherclaw gateway status --deep before selecting its runtime manually.",
+    );
+  }
+  const executable = service.command?.programArguments?.[0];
+  if (!executable || !path.isAbsolute(executable) || path.basename(executable) !== "node") {
+    throw new Error("The selected Gateway does not expose a direct Node executable.");
+  }
+  return {
+    status,
+    node: await fs.realpath(executable),
+    port: gateway.port,
+    expectedPin: { revision: intent.revision, definition: intent.definition },
+  };
+}
+
+async function assertMigrationAutoStart(service, env) {
+  if (process.platform !== "darwin") {
+    return;
+  }
+  // Published status exposes launchd registration, but omits its enabled override.
+  // Project the selected owner's read-only fact using launchd-runtime.ts semantics.
+  const source = service.command?.sourcePath;
+  if (
+    !source ||
+    !path.isAbsolute(source) ||
+    !source.endsWith(".plist") ||
+    (await fs.realpath(source)) !== service.layout?.sourcePathReal
+  ) {
+    throw new Error("The selected LaunchAgent definition could not be verified.");
+  }
+  const label = path.basename(source, ".plist");
+  const output = await run(
+    "/bin/launchctl",
+    ["print-disabled", `gui/${os.userInfo().uid}`],
+    env,
+    true,
+  );
+  for (const line of output.split("\n")) {
+    const entry = line.trim();
+    const prefix = `"${label}"`;
+    if (!entry.startsWith(prefix)) {
+      continue;
+    }
+    const state = entry.slice(prefix.length).trim();
+    if (state === "=> enabled" || state === "=> false") {
+      return;
+    }
+    if (state === "=> disabled" || state === "=> true") {
+      throw new Error(
+        "The LaunchAgent is disabled for automatic startup. Its selection was preserved; enable it intentionally before retrying the runtime migration.",
+      );
+    }
+    throw new Error("The LaunchAgent enabled state could not be verified.");
+  }
+  // No persisted override leaves the plist's normal startup policy in effect.
+}
+
+function isOriginalGatewayHealthy(status, original) {
+  return (
+    status.service.runtime?.status === "running" &&
+    status.rpc?.ok === true &&
+    status.rpc.server?.version === original.pkg.version &&
+    status.rpc.server?.buildId === original.build.buildId
+  );
+}
+
+async function installMigrationRuntime(node, cli, env, service) {
+  await assertMigrationAutoStart(service.status.service, env);
+  // This shipped marker selects the install owner's full audit, backups and
+  // compensation. Native custody still comes from that owner's operation lock.
+  const result = await runJson(
+    node,
+    cli,
+    [
+      "gateway",
+      "install",
+      "--runtime",
+      "node",
+      "--force",
+      "--port",
+      String(service.port),
+      "--expected-runtime-pin",
+      JSON.stringify(service.expectedPin),
+    ],
+    { ...env, OPENCLAW_UPDATE_IN_PROGRESS: "1" },
+  );
+  if (result.ok !== true) {
+    throw new Error("The installed service owner did not confirm runtime installation.");
+  }
+}
+
+async function waitForMigrationService(
+  node,
+  cli,
+  env,
+  root,
+  manifest,
+  original,
+  expectedNode,
+  port,
+) {
+  // Service installation confirms publication before startup; allow slow hosts
+  // the same five-minute scale as managed lifecycle admission before recovery.
+  const deadline = Date.now() + 5 * 60 * 1000;
+  while (true) {
+    const observed = await inspectMigrationService(node, cli, env, root, original, port);
+    if (observed.node !== expectedNode) {
+      throw new Error("The managed Gateway runtime changed during recovery.");
+    }
+    if (isOriginalGatewayHealthy(observed.status, original)) {
+      const health = await runJson(
+        node,
+        cli,
+        ["gateway", "call", "health", "--timeout", "30000"],
+        env,
+      );
+      if (health.ok !== true) {
+        throw new Error("The original Gateway health check failed after runtime selection.");
+      }
+      await assertInstalledIdentity(root, manifest, original);
+      return observed;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error("The original Gateway did not become healthy after runtime selection.");
+    }
+    await setTimeout(1000);
+  }
+}
+
+async function updateExistingInstallation(node, root, tarball, manifest, env) {
+  const cli = path.join(root, "openclaw.mjs");
+  // Missing old metadata must not prevent the installed updater's first attempt.
+  const original = await readInstalledIdentity(root, manifest).catch(() => null);
+  const startedAt = Date.now();
+  try {
+    await run(node, [cli, "update", "--tag", tarball, "--yes"], env);
+  } catch (updateError) {
+    if (!original || !["linux", "darwin"].includes(process.platform)) {
+      throw updateError;
+    }
+    const recorded = await runJson(node, cli, ["update", "status", "--timeout", "10"], env);
+    const runRecord = recorded.lastRun;
+    const verified = runRecord?.verification;
+    const admission = runRecord?.origin?.candidateAdmission;
+    const facts = admission?.facts;
+    if (
+      recorded.activeRun ||
+      recorded.runStatusError ||
+      recorded.runReconciliationError ||
+      runRecord?.reason !== "target-native-unsupported" ||
+      runRecord.status !== "failed" ||
+      runRecord.phase !== "finished" ||
+      !(runRecord.createdAtMs >= startedAt) ||
+      !(runRecord.finishedAtMs >= runRecord.createdAtMs) ||
+      runRecord.target?.tag !== tarball ||
+      runRecord.target.kind !== "package" ||
+      runRecord.target.version !== manifest.version ||
+      runRecord.before?.version !== original.pkg.version ||
+      runRecord.before.buildId !== original.build.buildId ||
+      verified?.recovery?.serviceRestartSafe !== true ||
+      verified.recovery.service !== "healthy" ||
+      verified.recovery.version !== original.pkg.version ||
+      verified.recovery.buildId !== original.build.buildId ||
+      verified.runningVersion !== original.pkg.version ||
+      verified.runningBuildId !== original.build.buildId ||
+      !["serviceRunning", "versionMatch", "channelsReady", "readyz", "settled"].every(
+        (key) => verified[key] === true,
+      ) ||
+      admission?.verdict !== "admit" ||
+      facts?.candidateVersion !== manifest.version ||
+      facts.installedVersion !== original.pkg.version ||
+      typeof facts.nodeEngines !== "string"
+    ) {
+      throw updateError;
+    }
+    await assertInstalledIdentity(root, manifest, original);
+    const service = await inspectMigrationService(node, cli, env, root, original, verified.port);
+    if (!isOriginalGatewayHealthy(service.status, original)) {
+      throw new Error("The failed updater's original Gateway is no longer healthy.", {
+        cause: updateError,
+      });
+    }
+    const oldVersion = await run(service.node, ["--version"], env, true);
+    const runtimeCheck = facts.checks?.find((check) => check.name === "node-runtime");
+    const currentNode = await fs.realpath(node);
+    if (
+      service.node === currentNode ||
+      !/^v\d+\.\d+\.\d+$/.test(oldVersion) ||
+      runtimeCheck?.status !== "warn" ||
+      runtimeCheck.detail !==
+        `Candidate requires Node ${facts.nodeEngines}; selected runtime is Node ${oldVersion.slice(1)}. The installed updater selects or provisions a compatible runtime.`
+    ) {
+      throw updateError;
+    }
+    console.warn(
+      `The installed updater preserved the original Gateway because its Node ${oldVersion.slice(1)} cannot run this candidate. Refreshing its unpinned service through the installed owner with private Node ${manifest.nodeVersion}.`,
+    );
+    try {
+      await installMigrationRuntime(node, cli, env, service);
+      await waitForMigrationService(
+        node,
+        cli,
+        env,
+        root,
+        manifest,
+        original,
+        currentNode,
+        service.port,
+      );
+    } catch (refreshError) {
+      try {
+        await assertInstalledIdentity(root, manifest, original);
+        const current = await inspectMigrationService(node, cli, env, root, original, service.port);
+        if (current.node !== service.node) {
+          if (current.node !== currentNode) {
+            throw new Error("Another runtime selection was observed; it was preserved.", {
+              cause: refreshError,
+            });
+          }
+          await installMigrationRuntime(service.node, cli, env, current);
+        }
+        await waitForMigrationService(
+          service.node,
+          cli,
+          env,
+          root,
+          manifest,
+          original,
+          service.node,
+          service.port,
+        );
+        console.warn(
+          "Runtime refresh failed; the original Gateway and unpinned runtime were restored.",
+        );
+      } catch (recoveryError) {
+        throw new AggregateError(
+          [refreshError, recoveryError],
+          "Runtime refresh recovery could not be verified. Service-owner backups were retained; inspect cypherclaw gateway status --deep and the preceding owner diagnostics before retrying.",
+          { cause: recoveryError },
+        );
+      }
+      throw refreshError;
+    }
+    console.warn(
+      "The original Gateway is healthy on the new private Node. Retrying the installed updater once.",
+    );
+    await run(node, [cli, "update", "--tag", tarball, "--yes"], env);
+  }
 }
 
 function requireDistribution(pkg, manifest, requireSelected = true) {
@@ -333,11 +678,7 @@ async function main() {
       requireDistribution(await readPackage(packageRoot), manifest, false);
       // Updates retain the existing owner's staging, admission, backups,
       // service recovery, and rollback rather than creating a second updater.
-      await run(
-        node,
-        [path.join(packageRoot, "openclaw.mjs"), "update", "--tag", tarball, "--yes"],
-        env,
-      );
+      await updateExistingInstallation(node, packageRoot, tarball, manifest, env);
     } else {
       await preflightFreshNpmLaunchers(prefix);
       const npmVersion = await run(node, [npm, "--version"], env, true);

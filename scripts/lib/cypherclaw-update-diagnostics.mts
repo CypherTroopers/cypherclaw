@@ -41,6 +41,7 @@ const codes = [
   "candidate-checks-timeout",
   "candidate-config-failed",
   "candidate-plugins-failed",
+  "target-native-unsupported",
   "update-executor-settlement-failed",
   "package-backup-retention-failed",
   "update-activation-timeout",
@@ -87,6 +88,7 @@ const stepNames = [
   "global install stage",
   "global install swap",
   "package update",
+  "package-update",
 ];
 const failureSignals = {
   finalizerTerminalUnconfirmed:

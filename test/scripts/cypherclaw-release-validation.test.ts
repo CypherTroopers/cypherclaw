@@ -128,6 +128,8 @@ describe("CypherClaw publication acceptance", () => {
       run: {
         status: "failed",
         phase: "finished",
+        reason: "target-native-unsupported",
+        steps: [{ step: "package-update", status: "failed", detail: privateText }],
         verification: { booted: false, serviceRunning: true, doctorHint: privateText },
       },
       lastRun: {
@@ -156,6 +158,8 @@ describe("CypherClaw publication acceptance", () => {
       run: {
         status: "failed",
         phase: "finished",
+        reason: "target-native-unsupported",
+        steps: [{ name: "package-update", status: "failed" }],
         verification: { booted: false, serviceRunning: true },
       },
       result: {

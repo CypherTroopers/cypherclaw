@@ -705,8 +705,13 @@ function Install-PrivateNode {
             throw
         }
         if ($backup) {
-            Remove-Item -LiteralPath $backup -Recurse -Force
-            $backup = $null
+            try {
+                Remove-Item -LiteralPath $backup -Recurse -Force
+                $backup = $null
+            } catch {
+                # A running Gateway can still hold the previous node.exe after publication.
+                Write-Host "[!] Private Node.js was updated, but old runtime cleanup failed: $backup. After processes using it stop, remove that directory. $($_.Exception.Message)" -ForegroundColor Yellow
+            }
         }
         Write-Host "[OK] Private Node.js ready: $(Join-Path $Prefix 'node.exe')" -ForegroundColor Green
     } finally {
