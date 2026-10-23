@@ -42,6 +42,28 @@ describe("resolveStableNodePath", () => {
       await expect(resolveStableNodePath(defaultNode)).resolves.toBe(defaultNode);
     });
   });
+
+  it("prefers the private Node alias when it is the same executable", async () => {
+    await withTestDir({ prefix: "openclaw-private-node-" }, async (prefix) => {
+      const current = path.join(prefix, "tools", "node-v24.22.1", "bin", "node");
+      const next = path.join(prefix, "tools", "node-v24.23.0", "bin", "node");
+      const alias = path.join(prefix, "tools", "node", "bin", "node");
+      await fs.mkdir(path.dirname(current), { recursive: true });
+      await fs.mkdir(path.dirname(next), { recursive: true });
+      await fs.writeFile(current, "current");
+      await fs.writeFile(next, "next");
+      await fs.symlink(
+        path.join(prefix, "tools", "node-v24.23.0"),
+        path.join(prefix, "tools", "node"),
+        "dir",
+      );
+
+      await expect(resolveStableNodePath(next)).resolves.toBe(alias);
+      await expect(resolveStableNodePath(current)).resolves.toBe(current);
+      await fs.rm(path.join(prefix, "tools", "node"));
+      await expect(resolveStableNodePath(next)).resolves.toBe(next);
+    });
+  });
 });
 
 describe("resolveLaunchableNodePath", () => {
@@ -59,6 +81,24 @@ describe("resolveLaunchableNodePath", () => {
       expect(resolveLaunchableNodePath(cellarNode)).toBe(optNode);
       await fs.rm(optNode);
       expect(resolveLaunchableNodePath(cellarNode)).toBe(cellarNode);
+    });
+  });
+
+  it("uses the private Node alias after the versioned executable is removed", async () => {
+    await withTestDir({ prefix: "openclaw-private-node-launch-" }, async (prefix) => {
+      const removed = path.join(prefix, "tools", "node-v24.21.0", "bin", "node");
+      const current = path.join(prefix, "tools", "node-v24.22.1", "bin", "node");
+      const alias = path.join(prefix, "tools", "node", "bin", "node");
+      await fs.mkdir(path.dirname(current), { recursive: true });
+      await fs.writeFile(current, "current");
+      await fs.symlink(
+        path.join(prefix, "tools", "node-v24.22.1"),
+        path.join(prefix, "tools", "node"),
+        "dir",
+      );
+
+      expect(resolveLaunchableNodePath(removed)).toBe(alias);
+      expect(resolveLaunchableNodePath(current)).toBe(current);
     });
   });
 });

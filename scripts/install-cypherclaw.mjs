@@ -13,7 +13,8 @@ const contractPath =
     ? "./cypherclaw-contract.mjs"
     : "./lib/cypherclaw-contract.mjs";
 const {
-  CYPHERCLAW_NODE_VERSION,
+  CYPHERCLAW_SUPPORTED_NODE_RANGE,
+  isSupportedCypherClawNodeVersion,
   parseCypherClawDistribution,
   parseChecksumFile,
   validateCypherClawReleaseManifest,
@@ -313,125 +314,162 @@ async function waitForMigrationService(
   }
 }
 
-async function updateExistingInstallation(node, root, tarball, manifest, env) {
-  const cli = path.join(root, "openclaw.mjs");
-  // Missing old metadata must not prevent the installed updater's first attempt.
-  const original = await readInstalledIdentity(root, manifest).catch(() => null);
-  const startedAt = Date.now();
+function isVersionedPrivateNodeExecutable(executable) {
+  return /[/\\]tools[/\\]node-v\d+\.\d+\.\d+[/\\]bin[/\\]node$/.test(executable);
+}
+
+async function refreshManagedRuntime(node, cli, env, root, manifest, original, service) {
+  const currentNode = await fs.realpath(node);
   try {
-    await run(node, [cli, "update", "--tag", tarball, "--yes"], env);
-  } catch (updateError) {
-    if (!original || !["linux", "darwin"].includes(process.platform)) {
-      throw updateError;
-    }
-    const recorded = await runJson(node, cli, ["update", "status", "--timeout", "10"], env);
-    const runRecord = recorded.lastRun;
-    const verified = runRecord?.verification;
-    const admission = runRecord?.origin?.candidateAdmission;
-    const facts = admission?.facts;
-    if (
-      recorded.activeRun ||
-      recorded.runStatusError ||
-      recorded.runReconciliationError ||
-      runRecord?.reason !== "target-native-unsupported" ||
-      runRecord.status !== "failed" ||
-      runRecord.phase !== "finished" ||
-      !(runRecord.createdAtMs >= startedAt) ||
-      !(runRecord.finishedAtMs >= runRecord.createdAtMs) ||
-      runRecord.target?.tag !== tarball ||
-      runRecord.target.kind !== "package" ||
-      runRecord.target.version !== manifest.version ||
-      runRecord.before?.version !== original.pkg.version ||
-      runRecord.before.buildId !== original.build.buildId ||
-      verified?.recovery?.serviceRestartSafe !== true ||
-      verified.recovery.service !== "healthy" ||
-      verified.recovery.version !== original.pkg.version ||
-      verified.recovery.buildId !== original.build.buildId ||
-      verified.runningVersion !== original.pkg.version ||
-      verified.runningBuildId !== original.build.buildId ||
-      !["serviceRunning", "versionMatch", "channelsReady", "readyz", "settled"].every(
-        (key) => verified[key] === true,
-      ) ||
-      admission?.verdict !== "admit" ||
-      facts?.candidateVersion !== manifest.version ||
-      facts.installedVersion !== original.pkg.version ||
-      typeof facts.nodeEngines !== "string"
-    ) {
-      throw updateError;
-    }
-    await assertInstalledIdentity(root, manifest, original);
-    const service = await inspectMigrationService(node, cli, env, root, original, verified.port);
-    if (!isOriginalGatewayHealthy(service.status, original)) {
-      throw new Error("The failed updater's original Gateway is no longer healthy.", {
-        cause: updateError,
-      });
-    }
-    const oldVersion = await run(service.node, ["--version"], env, true);
-    const runtimeCheck = facts.checks?.find((check) => check.name === "node-runtime");
-    const currentNode = await fs.realpath(node);
-    if (
-      service.node === currentNode ||
-      !/^v\d+\.\d+\.\d+$/.test(oldVersion) ||
-      runtimeCheck?.status !== "warn" ||
-      runtimeCheck.detail !==
-        `Candidate requires Node ${facts.nodeEngines}; selected runtime is Node ${oldVersion.slice(1)}. The installed updater selects or provisions a compatible runtime.`
-    ) {
-      throw updateError;
-    }
-    console.warn(
-      `The installed updater preserved the original Gateway because its Node ${oldVersion.slice(1)} cannot run this candidate. Refreshing its unpinned service through the installed owner with private Node ${manifest.nodeVersion}.`,
+    await installMigrationRuntime(node, cli, env, service);
+    await waitForMigrationService(
+      node,
+      cli,
+      env,
+      root,
+      manifest,
+      original,
+      currentNode,
+      service.port,
     );
+  } catch (refreshError) {
     try {
-      await installMigrationRuntime(node, cli, env, service);
+      await assertInstalledIdentity(root, manifest, original);
+      const current = await inspectMigrationService(node, cli, env, root, original, service.port);
+      if (current.node !== service.node) {
+        if (current.node !== currentNode) {
+          throw new Error("Another runtime selection was observed; it was preserved.", {
+            cause: refreshError,
+          });
+        }
+        await installMigrationRuntime(service.node, cli, env, current);
+      }
       await waitForMigrationService(
-        node,
+        service.node,
         cli,
         env,
         root,
         manifest,
         original,
-        currentNode,
+        service.node,
         service.port,
       );
-    } catch (refreshError) {
-      try {
-        await assertInstalledIdentity(root, manifest, original);
-        const current = await inspectMigrationService(node, cli, env, root, original, service.port);
-        if (current.node !== service.node) {
-          if (current.node !== currentNode) {
-            throw new Error("Another runtime selection was observed; it was preserved.", {
-              cause: refreshError,
-            });
-          }
-          await installMigrationRuntime(service.node, cli, env, current);
-        }
-        await waitForMigrationService(
-          service.node,
-          cli,
-          env,
-          root,
-          manifest,
-          original,
-          service.node,
-          service.port,
-        );
-        console.warn(
-          "Runtime refresh failed; the original Gateway and unpinned runtime were restored.",
-        );
-      } catch (recoveryError) {
-        throw new AggregateError(
-          [refreshError, recoveryError],
-          "Runtime refresh recovery could not be verified. Service-owner backups were retained; inspect cypherclaw gateway status --deep and the preceding owner diagnostics before retrying.",
-          { cause: recoveryError },
-        );
-      }
-      throw refreshError;
+      console.warn(
+        "Runtime refresh failed; the original Gateway and unpinned runtime were restored.",
+      );
+    } catch (recoveryError) {
+      throw new AggregateError(
+        [refreshError, recoveryError],
+        "Runtime refresh recovery could not be verified. Service-owner backups were retained; inspect cypherclaw gateway status --deep and the preceding owner diagnostics before retrying.",
+        { cause: recoveryError },
+      );
     }
-    console.warn(
-      "The original Gateway is healthy on the new private Node. Retrying the installed updater once.",
-    );
-    await run(node, [cli, "update", "--tag", tarball, "--yes"], env);
+    throw refreshError;
   }
+}
+
+async function alignManagedRuntimeBeforeUpdate(node, cli, env, root, manifest, original) {
+  if (!original || !["linux", "darwin"].includes(process.platform)) {
+    return;
+  }
+  let service;
+  try {
+    service = await inspectMigrationService(node, cli, env, root, original);
+  } catch (error) {
+    console.warn(`The installed updater will run without a runtime switch: ${error.message}`);
+    return;
+  }
+  if (!isOriginalGatewayHealthy(service.status, original)) {
+    console.warn(
+      "The managed Gateway is not the healthy original install. Its runtime was left unchanged.",
+    );
+    return;
+  }
+  const currentNode = await fs.realpath(node);
+  if (service.node === currentNode) {
+    return;
+  }
+  const oldVersion = await run(service.node, ["--version"], env, true);
+  if (!/^v\d+\.\d+\.\d+$/.test(oldVersion)) {
+    throw new Error(
+      "The managed Gateway Node version could not be read. Inspect cypherclaw gateway status --deep before retrying.",
+    );
+  }
+  // The published updater selects the service executable. A local tarball has
+  // no candidate engine and records no target version, so a retry after
+  // target-native-unsupported never starts. Point the service at this Node first.
+  console.warn(
+    `The managed Gateway is still using Node ${oldVersion.slice(1)}. Selecting private Node ${manifest.nodeVersion} before the installed updater runs.`,
+  );
+  await refreshManagedRuntime(node, cli, env, root, manifest, original, service);
+}
+
+async function publishStableServiceNode(node, cli, env) {
+  if (!["linux", "darwin"].includes(process.platform)) {
+    return;
+  }
+  let status;
+  try {
+    status = await runJson(node, cli, ["gateway", "status", "--deep", "--timeout", "30000"], env);
+  } catch (error) {
+    console.warn(`The managed service was left unchanged after the update: ${error.message}`);
+    return;
+  }
+  const executable = status.service?.command?.programArguments?.[0];
+  const intent = status.service?.runtimeIntent;
+  const port = status.gateway?.port;
+  if (
+    !executable ||
+    !isVersionedPrivateNodeExecutable(executable) ||
+    intent?.stored !== false ||
+    intent?.pin !== undefined ||
+    !Number.isInteger(port)
+  ) {
+    return;
+  }
+  const currentNode = await fs.realpath(node);
+  if ((await fs.realpath(executable)) !== currentNode) {
+    return;
+  }
+  // The previous service owner stored process.execPath, which is the versioned
+  // directory. The updated owner maps that same file to the tools/node alias.
+  console.warn(
+    "Publishing the managed Gateway command on the version-independent private Node path.",
+  );
+  const result = await runJson(
+    node,
+    cli,
+    ["gateway", "install", "--runtime", "node", "--force", "--port", String(port)],
+    env,
+  );
+  if (result.ok !== true) {
+    throw new Error("The installed service owner did not confirm runtime installation.");
+  }
+  const published = await runJson(
+    node,
+    cli,
+    ["gateway", "status", "--deep", "--timeout", "30000"],
+    env,
+  );
+  const publishedExecutable = published.service?.command?.programArguments?.[0];
+  if (
+    !publishedExecutable ||
+    isVersionedPrivateNodeExecutable(publishedExecutable) ||
+    (await fs.realpath(publishedExecutable)) !== currentNode
+  ) {
+    throw new Error(
+      "The managed Gateway is still bound to a versioned private Node path. Inspect cypherclaw gateway status --deep before retrying.",
+    );
+  }
+}
+
+async function updateExistingInstallation(node, root, tarball, manifest, env) {
+  const cli = path.join(root, "openclaw.mjs");
+  // Missing old metadata must not prevent the installed updater's first attempt.
+  const original = await readInstalledIdentity(root, manifest).catch(() => null);
+  await alignManagedRuntimeBeforeUpdate(node, cli, env, root, manifest, original);
+  await run(node, [cli, "update", "--tag", tarball, "--yes"], env);
+  await publishStableServiceNode(node, cli, env);
 }
 
 function requireDistribution(pkg, manifest, requireSelected = true) {
@@ -610,9 +648,9 @@ async function main() {
     console.log(`Verified ${manifest.releaseTag}; install prebuilt package into ${prefix}.`);
     return;
   }
-  if (process.version !== `v${CYPHERCLAW_NODE_VERSION}`) {
+  if (!isSupportedCypherClawNodeVersion(process.version)) {
     throw new Error(
-      `Use the private Node ${CYPHERCLAW_NODE_VERSION} installed by install.sh or install.ps1.`,
+      `Use a private Node that satisfies ${CYPHERCLAW_SUPPORTED_NODE_RANGE}, installed by install.sh or install.ps1.`,
     );
   }
   const nodeRoot = path.join(prefix, "tools", "node");

@@ -150,8 +150,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Private Node provisioning failed with exit code $LASTEXITCODE." }
     $node = Join-Path $nodeDirectory "node.exe"
     if (-not (Test-Path -LiteralPath $node -PathType Leaf)) { throw "Private Node is unavailable at $node." }
-    $privateNodeVersion = & $node --version
-    if ($LASTEXITCODE -ne 0 -or $privateNodeVersion -ne "v$nodeVersion") { throw "Private Node must be exactly $nodeVersion for this release." }
+    $contract = Join-Path $stagingDirectory "cypherclaw-contract.mjs"
+    & $node --input-type=module -e "import { pathToFileURL } from 'node:url'; const { isSupportedCypherClawNodeVersion } = await import(pathToFileURL(process.argv[1]).href); process.exit(isSupportedCypherClawNodeVersion(process.versions.node) ? 0 : 1);" $contract
+    if ($LASTEXITCODE -ne 0) { throw "Private Node must satisfy the supported release range (>=24.22.1 <25 or >=26.12.1)." }
     $runtimeArguments = @((Join-Path $stagingDirectory "install-runtime.mjs"), "--release-dir", $stagingDirectory, "--prefix", $Prefix)
     if ($Version -ne "latest") { $runtimeArguments += @("--release-tag", $Version) }
     if ($NoOnboard) { $runtimeArguments += "--no-onboard" }

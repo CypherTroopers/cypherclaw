@@ -5,11 +5,20 @@ import { satisfies } from "semver";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import {
+  SUPPORTED_NODE_VERSION_RANGE,
+  isSupportedOpenClawNodeVersion,
+} from "../../node-version.mjs";
+import {
   assertAcceptance,
   assertExpectedIdentities,
   verifyReleaseDirectory,
 } from "../../scripts/cypherclaw-release-validation.mjs";
-import { CYPHERCLAW_NODE_VERSION } from "../../scripts/lib/cypherclaw-contract.mjs";
+import {
+  CYPHERCLAW_NODE_VERSION,
+  CYPHERCLAW_SUPPORTED_NODE_RANGE,
+  isAcceptedCypherClawManifestNodeVersion,
+  isSupportedCypherClawNodeVersion,
+} from "../../scripts/lib/cypherclaw-contract.mjs";
 import {
   projectGatewayServiceStatus,
   projectUpdateCommand,
@@ -340,9 +349,31 @@ describe("CypherClaw publication acceptance", () => {
   it("pins the installer runtime to a Node version supported by the package", () => {
     const packageJson = JSON.parse(readFileSync(path.resolve("package.json"), "utf8"));
     expect(satisfies(CYPHERCLAW_NODE_VERSION, packageJson.engines.node)).toBe(true);
+    expect(CYPHERCLAW_SUPPORTED_NODE_RANGE).toBe(SUPPORTED_NODE_VERSION_RANGE);
+    for (const version of [
+      "24.21.0",
+      "24.22.0",
+      "24.22.1",
+      "24.23.2",
+      "25.0.0",
+      "26.12.0",
+      "26.12.1",
+      "27.0.1",
+      "v24.22.1",
+      "24.22.1+local.1",
+      "not-a-version",
+    ]) {
+      expect(isSupportedCypherClawNodeVersion(version)).toBe(
+        isSupportedOpenClawNodeVersion(version),
+      );
+    }
+    expect(isSupportedCypherClawNodeVersion("24.21.0")).toBe(false);
+    expect(isAcceptedCypherClawManifestNodeVersion("24.21.0")).toBe(true);
+    expect(isAcceptedCypherClawManifestNodeVersion("24.23.0")).toBe(true);
+    expect(isAcceptedCypherClawManifestNodeVersion("25.0.0")).toBe(false);
   });
 
-  it.each(["24.21.0", "24.22.1"])(
+  it.each(["24.21.0", "24.22.1", "24.23.0", "26.12.1"])(
     "verifies a sealed Node %s release without accepting altered payloads",
     async (nodeVersion) => {
       const directory = tempDirs.make("cypherclaw-acceptance-seal-");
