@@ -105,14 +105,19 @@ describe("CypherClaw publication acceptance", () => {
   it("retains updater failure facts without publishing private command or ledger text", () => {
     const privateText = "synthetic-private-token /private/operator/home";
     const failedStep = {
-      name: "package-stage",
+      name: "global install verify",
       exitCode: 1,
       termination: "exit",
       command: privateText,
       cwd: privateText,
       stderrTail: privateText,
       failureFacts: [
-        { code: "global-install-failed", npmErrorCode: "ENOSPC", message: privateText },
+        {
+          check: "package-verify",
+          code: "global-install-failed",
+          npmErrorCode: "ENOSPC",
+          message: privateText,
+        },
       ],
     };
     const payload = {
@@ -136,12 +141,18 @@ describe("CypherClaw publication acceptance", () => {
     const projected = projectUpdateCommand("installed-update", {
       exitCode: 1,
       stdout: JSON.stringify(payload),
-      stderr: privateText,
+      stderr: [
+        privateText,
+        `At ${privateText}/install-node.ps1:708 char:13`,
+        `At ${privateText}/unrelated.ps1:4`,
+        `At ${privateText}/install-node.ps1:708 char:13`,
+      ].join("\n"),
     });
     expect(projected).toMatchObject({
       operation: "installed-update",
       exitCode: 1,
       jsonObject: true,
+      installerErrorLocations: ["install-node.ps1:708"],
       run: {
         status: "failed",
         phase: "finished",
@@ -151,9 +162,11 @@ describe("CypherClaw publication acceptance", () => {
         status: "error",
         reason: "global-install-failed",
         failedStep: {
-          name: "package-stage",
+          name: "global install verify",
           exitCode: 1,
-          failureFacts: [{ code: "global-install-failed", npmErrorCode: "ENOSPC" }],
+          failureFacts: [
+            { check: "package-verify", code: "global-install-failed", npmErrorCode: "ENOSPC" },
+          ],
         },
       },
       lastRun: {
@@ -187,7 +200,9 @@ describe("CypherClaw publication acceptance", () => {
       failedStep: {
         name: "private",
         exitCode: "private",
-        failureFacts: [{ code: "private", npmErrorCode: "private", errorName: "private" }],
+        failureFacts: [
+          { check: "private", code: "private", npmErrorCode: "private", errorName: "private" },
+        ],
       },
     }),
   ])("keeps malformed or unknown updater diagnostics private: %s", (stdout) => {
@@ -211,6 +226,27 @@ describe("CypherClaw publication acceptance", () => {
     ["terminalPublicationFailed", "Update result publication failed"],
     ["packageBackupCleanupFailed", "Update backup cleanup failed:"],
     ["retainedWorkerSettlementFailed", "Retained updater workers did not settle"],
+    ["nodeProvisioningFailed", "Private Node provisioning failed with exit code"],
+    ["missingPackagedDistFile", "missing packaged dist file "],
+    ["unexpectedPackagedDistFile", "unexpected packaged dist file "],
+    ["invalidDistInventory", "invalid package dist inventory "],
+    ["missingDistInventory", "missing package dist inventory "],
+    ["missingRuntimeSidecar", "missing bundled runtime sidecar "],
+    [
+      "invalidDistContentInventory",
+      "Invalid package dist content inventory at dist/postinstall-content-inventory.json:",
+    ],
+    ["unsafeDistPath", "Unsafe package dist path: "],
+    ["installedVersionMismatch", "expected installed version "],
+    ["nodeRuntimeTooOld", "[openclaw] error: this OpenClaw release requires Node "],
+    ["packageLifecycleUncertain", "OpenClaw package lifecycle ownership is uncertain ("],
+    [
+      "packageLifecycleIncomplete",
+      "OpenClaw package postinstall did not complete its lifecycle marker",
+    ],
+    ["launcherIdentityChanged", "Selected package launcher identity changed."],
+    ["launcherFingerprintChanged", "Selected package launcher fingerprint changed."],
+    ["publicationJournalMismatch", "Package publication journal does not match its installation"],
   ])("identifies %s in non-JSON output without exposing the error body", (name, phrase) => {
     const privateText = "synthetic-private-token /private/operator/home";
     const projected = projectUpdateCommand("installed-update", {

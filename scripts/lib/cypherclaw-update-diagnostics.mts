@@ -81,6 +81,12 @@ const stepNames = [
   "package-backup-retention",
   "openclaw doctor",
   "updater-runtime-retention",
+  "global update",
+  "global update (omit optional)",
+  "global install verify",
+  "global install stage",
+  "global install swap",
+  "package update",
 ];
 const failureSignals = {
   finalizerTerminalUnconfirmed:
@@ -98,6 +104,22 @@ const failureSignals = {
   sqliteContention: "database is locked",
   circularJson: "Converting circular structure to JSON",
   bigintJson: "Do not know how to serialize a BigInt",
+  nodeProvisioningFailed: "Private Node provisioning failed with exit code",
+  missingPackagedDistFile: "missing packaged dist file ",
+  unexpectedPackagedDistFile: "unexpected packaged dist file ",
+  invalidDistInventory: "invalid package dist inventory ",
+  missingDistInventory: "missing package dist inventory ",
+  missingRuntimeSidecar: "missing bundled runtime sidecar ",
+  invalidDistContentInventory:
+    "Invalid package dist content inventory at dist/postinstall-content-inventory.json:",
+  unsafeDistPath: "Unsafe package dist path: ",
+  installedVersionMismatch: "expected installed version ",
+  nodeRuntimeTooOld: "[openclaw] error: this OpenClaw release requires Node ",
+  packageLifecycleUncertain: "OpenClaw package lifecycle ownership is uncertain (",
+  packageLifecycleIncomplete: "OpenClaw package postinstall did not complete its lifecycle marker",
+  launcherIdentityChanged: "Selected package launcher identity changed.",
+  launcherFingerprintChanged: "Selected package launcher fingerprint changed.",
+  publicationJournalMismatch: "Package publication journal does not match its installation",
 };
 function fixed(value: unknown, allowed: readonly string[]) {
   return typeof value === "string" && allowed.includes(value) ? value : undefined;
@@ -123,6 +145,14 @@ function facts(value: unknown) {
         .slice(0, 5)
         .filter(isRecord)
         .map((fact) => ({
+          check: fixed(fact.check, [
+            "package-verify",
+            "package-update",
+            "package-runtime",
+            "node-runtime",
+            "npm-package-lifecycle",
+            "npm-package-postinstall",
+          ]),
           code: fixed(fact.code, codes),
           npmErrorCode: fixed(fact.npmErrorCode, UPDATE_NPM_ERROR_CODES),
           errorName: fixed(fact.errorName, codes),
@@ -186,6 +216,11 @@ export function projectUpdateCommand(
     failureSignals: Object.fromEntries(
       Object.entries(failureSignals).map(([name, phrase]) => [name, output.includes(phrase)]),
     ),
+    installerErrorLocations: [
+      ...new Set(
+        output.match(/\b(?:install(?:-node)?\.ps1|install-runtime\.mjs):[1-9]\d{0,4}\b/gu) ?? [],
+      ),
+    ].slice(0, 5),
     result: record(payload),
     run: isRecord(payload) ? record(payload.run) : undefined,
     lastRun: isRecord(payload) ? record(payload.lastRun) : undefined,
