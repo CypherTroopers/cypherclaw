@@ -4,6 +4,73 @@ import { createReadStream } from "node:fs";
 export const CYPHERCLAW_REPOSITORY = "CypherTroopers/cypherclaw";
 export const CYPHERCLAW_SOURCE_BRANCH = "cypherclaw-stable";
 export const CYPHERCLAW_NODE_VERSION = "24.22.1";
+
+// The release asset is this file copied on its own, so it cannot import
+// node-version.mjs. These floors match NODE_RELEASE_FLOORS there; the release
+// validation test fails if the two predicates drift.
+const CYPHERCLAW_NODE_RELEASE_RE =
+  /^v?((?:0|[1-9]\d*))\.((?:0|[1-9]\d*))\.((?:0|[1-9]\d*))(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+const CYPHERCLAW_NODE_RELEASE_FLOORS = [
+  { major: 24, minor: 22, patch: 1 },
+  { major: 26, minor: 12, patch: 1 },
+];
+const CYPHERCLAW_HIGHEST_NODE_FLOOR =
+  CYPHERCLAW_NODE_RELEASE_FLOORS[CYPHERCLAW_NODE_RELEASE_FLOORS.length - 1];
+// Published 2026.10.5 manifests record this runtime. It is below the current
+// floor and is accepted only so those upgrade baselines still verify.
+const HISTORICAL_CYPHERCLAW_MANIFEST_NODE_VERSIONS = ["24.21.0"];
+
+export const CYPHERCLAW_SUPPORTED_NODE_RANGE = CYPHERCLAW_NODE_RELEASE_FLOORS.map(
+  ({ major, minor, patch }, index) =>
+    `>=${major}.${minor}.${patch}${index < CYPHERCLAW_NODE_RELEASE_FLOORS.length - 1 ? ` <${major + 1}` : ""}`,
+).join(" || ");
+
+function parseCypherClawNodeVersion(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = CYPHERCLAW_NODE_RELEASE_RE.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+  const version = {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+  return Object.values(version).every(Number.isSafeInteger) ? version : null;
+}
+
+function isCypherClawNodeAtLeast(version, minimum) {
+  if (version.major !== minimum.major) {
+    return version.major > minimum.major;
+  }
+  if (version.minor !== minimum.minor) {
+    return version.minor > minimum.minor;
+  }
+  return version.patch >= minimum.patch;
+}
+
+/** Private installers accept any runtime on the shared OpenClaw release floor. */
+export function isSupportedCypherClawNodeVersion(value) {
+  const version = parseCypherClawNodeVersion(value);
+  if (!version) {
+    return false;
+  }
+  const minimum = CYPHERCLAW_NODE_RELEASE_FLOORS.find((floor) => floor.major === version.major);
+  return minimum
+    ? isCypherClawNodeAtLeast(version, minimum)
+    : version.major > CYPHERCLAW_HIGHEST_NODE_FLOOR.major;
+}
+
+/** Manifests may also name the last published runtime below the current floor. */
+export function isAcceptedCypherClawManifestNodeVersion(value) {
+  const normalized = typeof value === "string" ? value.trim().replace(/^v/, "") : "";
+  return (
+    HISTORICAL_CYPHERCLAW_MANIFEST_NODE_VERSIONS.includes(normalized) ||
+    isSupportedCypherClawNodeVersion(normalized)
+  );
+}
 export const CYPHERCLAW_INSTALL_ASSETS = [
   "install.sh",
   "install.ps1",
@@ -88,10 +155,9 @@ function artifact(value) {
 /** The installer, packer, and updater share one immutable release contract. */
 export function validateCypherClawReleaseManifest(value) {
   const manifest = record(value, "release manifest");
-  // Baseline verification still reads published releases with the previous private runtime.
   if (
     manifest.schemaVersion !== 1 ||
-    (manifest.nodeVersion !== CYPHERCLAW_NODE_VERSION && manifest.nodeVersion !== "24.21.0")
+    !isAcceptedCypherClawManifestNodeVersion(manifest.nodeVersion)
   ) {
     throw new Error("Unsupported CypherClaw release manifest or Node runtime.");
   }

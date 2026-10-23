@@ -156,7 +156,9 @@ printf 'Installing CypherClaw from %s\n' "${RELEASE_DIR:-$RELEASE_TAG}"
 bash "$STAGING_DIR/install-node.sh" --node-only --prefix "$PREFIX" --node-version "$NODE_VERSION"
 NODE="$PREFIX/tools/node/bin/node"
 [[ -x "$NODE" ]] || fail "Private Node is unavailable at $NODE"
-[[ "$("$NODE" --version)" == "v$NODE_VERSION" ]] || fail "Private Node must be exactly $NODE_VERSION for this release."
+if ! "$NODE" --input-type=module -e 'import { pathToFileURL } from "node:url"; const { isSupportedCypherClawNodeVersion } = await import(pathToFileURL(process.argv[1]).href); if (!isSupportedCypherClawNodeVersion(process.versions.node)) process.exit(1);' "$STAGING_DIR/cypherclaw-contract.mjs"; then
+  fail "Private Node must satisfy the supported release range (>=24.22.1 <25 or >=26.12.1)."
+fi
 runtime_args=(--release-dir "$STAGING_DIR" --prefix "$PREFIX")
 if [[ "$RELEASE_TAG" != latest ]]; then
   runtime_args+=(--release-tag "$RELEASE_TAG")
