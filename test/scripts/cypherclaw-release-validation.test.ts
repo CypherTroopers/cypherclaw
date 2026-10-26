@@ -16,8 +16,8 @@ import {
 import {
   CYPHERCLAW_NODE_VERSION,
   CYPHERCLAW_SUPPORTED_NODE_RANGE,
-  isAcceptedCypherClawManifestNodeVersion,
   isSupportedCypherClawNodeVersion,
+  validateCypherClawReleaseManifest,
 } from "../../scripts/lib/cypherclaw-contract.mjs";
 import {
   projectGatewayServiceStatus,
@@ -376,12 +376,14 @@ describe("CypherClaw publication acceptance", () => {
       );
     }
     expect(isSupportedCypherClawNodeVersion("24.21.0")).toBe(false);
-    expect(isAcceptedCypherClawManifestNodeVersion("24.21.0")).toBe(true);
-    expect(isAcceptedCypherClawManifestNodeVersion("24.23.0")).toBe(true);
-    expect(isAcceptedCypherClawManifestNodeVersion("25.0.0")).toBe(false);
+    expect(isSupportedCypherClawNodeVersion("24.23.0")).toBe(true);
+    expect(isSupportedCypherClawNodeVersion("25.0.0")).toBe(false);
+    expect(() =>
+      validateCypherClawReleaseManifest({ schemaVersion: 1, nodeVersion: "24.21.0" }),
+    ).toThrow("Unsupported CypherClaw release manifest or Node runtime.");
   });
 
-  it.each(["24.21.0", "24.22.1", "24.23.0", "26.12.1"])(
+  it.each(["24.22.1", "24.23.0", "26.12.1"])(
     "verifies a sealed Node %s release without accepting altered payloads",
     async (nodeVersion) => {
       const directory = tempDirs.make("cypherclaw-acceptance-seal-");

@@ -25,7 +25,6 @@ export const CYPHERCLAW_SOURCE_BRANCH: "cypherclaw-stable";
 export const CYPHERCLAW_NODE_VERSION: "24.22.1";
 export const CYPHERCLAW_SUPPORTED_NODE_RANGE: string;
 export function isSupportedCypherClawNodeVersion(value: unknown): boolean;
-export function isAcceptedCypherClawManifestNodeVersion(value: unknown): boolean;
 export const CYPHERCLAW_INSTALL_ASSETS: readonly string[];
 export const CYPHERCLAW_TARGETS: readonly string[];
 export function parseCypherClawDistribution(value: unknown): CypherClawDistribution | null;

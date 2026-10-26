@@ -27,7 +27,7 @@ const release = {
   ...distribution,
   schemaVersion: 1,
   version: "2026.9.4",
-  nodeVersion: "24.21.0",
+  nodeVersion: "24.22.1",
   package: {
     file: "cypherclaw.tgz",
     name: "openclaw",
