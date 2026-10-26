@@ -16,9 +16,6 @@ const CYPHERCLAW_NODE_RELEASE_FLOORS = [
 ];
 const CYPHERCLAW_HIGHEST_NODE_FLOOR =
   CYPHERCLAW_NODE_RELEASE_FLOORS[CYPHERCLAW_NODE_RELEASE_FLOORS.length - 1];
-// Published 2026.10.5 manifests record this runtime. It is below the current
-// floor and is accepted only so those upgrade baselines still verify.
-const HISTORICAL_CYPHERCLAW_MANIFEST_NODE_VERSIONS = ["24.21.0"];
 
 export const CYPHERCLAW_SUPPORTED_NODE_RANGE = CYPHERCLAW_NODE_RELEASE_FLOORS.map(
   ({ major, minor, patch }, index) =>
@@ -63,14 +60,6 @@ export function isSupportedCypherClawNodeVersion(value) {
     : version.major > CYPHERCLAW_HIGHEST_NODE_FLOOR.major;
 }
 
-/** Manifests may also name the last published runtime below the current floor. */
-export function isAcceptedCypherClawManifestNodeVersion(value) {
-  const normalized = typeof value === "string" ? value.trim().replace(/^v/, "") : "";
-  return (
-    HISTORICAL_CYPHERCLAW_MANIFEST_NODE_VERSIONS.includes(normalized) ||
-    isSupportedCypherClawNodeVersion(normalized)
-  );
-}
 export const CYPHERCLAW_INSTALL_ASSETS = [
   "install.sh",
   "install.ps1",
@@ -157,7 +146,7 @@ export function validateCypherClawReleaseManifest(value) {
   const manifest = record(value, "release manifest");
   if (
     manifest.schemaVersion !== 1 ||
-    !isAcceptedCypherClawManifestNodeVersion(manifest.nodeVersion)
+    !isSupportedCypherClawNodeVersion(manifest.nodeVersion)
   ) {
     throw new Error("Unsupported CypherClaw release manifest or Node runtime.");
   }

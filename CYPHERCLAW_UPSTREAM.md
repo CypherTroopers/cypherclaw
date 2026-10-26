@@ -9,8 +9,8 @@ This file owns the fork's source provenance and intake procedure. Update the ups
 | Source                  | Pin                                                                          |
 | ----------------------- | ---------------------------------------------------------------------------- |
 | Official repository     | `https://github.com/openclaw/openclaw.git`                                   |
-| Official stable release | [`v2026.10.6`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.6) |
-| Official peeled commit  | `fe06181dc5ecc01cf8904abbfc26925925efefbc`                                   |
+| Official stable release | [`v2026.10.7`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.7) |
+| Official peeled commit  | `157d8c2bc3ea2fa183afdc11088e69690bf8e64e`                                   |
 | Fork repository         | `https://github.com/CypherTroopers/cypherclaw.git`                           |
 
 ### Initial stable migration
@@ -59,7 +59,7 @@ The `v2026.10.6` intake merges official `fe06181dc5ecc01cf8904abbfc26925925efefb
 
 The four content conflicts combine the fork's About, Cypher, and wallet catalogs with upstream lazy catalog declarations and Secrets composition; use the upstream shared approval terminal-message owner with CypherClaw copy; and keep both install/restart failure coverage and the fork's failed-Gateway TUI launch guard. The Cypher English catalog is also included in its owner's source-hash dependencies. Node data and IPC paths, the updated genesis, unlocking any local account, physical Gateway shutdown verification, custom branding, wallet generation, and the six ColossusX tabs remain part of the fork.
 
-Shared state schema **20**, agent schema **25**, and update admission protocol **1** are unchanged. Existing migration, backup, admission, and rollback owners continue to control deployment. Upstream raises the source runtime floor to Node **24.22.1** or **26.12.1** and pins pnpm **12.15.0**. Fork installers and release jobs use private Node **24.22.1**. Historical manifests declaring **24.21.0** remain readable for baseline verification; new releases advertise their actual **24.22.1** runtime.
+Shared state schema **20**, agent schema **25**, and update admission protocol **1** are unchanged. Existing migration, backup, admission, and rollback owners continue to control deployment. Upstream raises the source runtime floor to Node **24.22.1** or **26.12.1** and pins pnpm **12.15.0**. Fork installers and release jobs use private Node **24.22.1**. That intake still accepted a historical manifest declaring **24.21.0** so the published 2026.10.5 baseline could load. The 2026.10.7 source removes that exception; new releases advertise their actual **24.22.1** runtime.
 
 **Packaged upgrade limitation:** published fork updaters that require manifest Node **24.21.0** reject a new **24.22.1** manifest before downloading the candidate. Candidate compatibility modules cannot repair that earlier gate. Those installations need a verified installer migration, or a separately prepared and authorized bridge release, before accepting this runtime transition. Do not rewrite the new manifest to advertise an unsupported runtime. Full installation migration and a published-driver × candidate upgrade have not been proven by this source intake. Preparing this source does not publish a release or activate a live Gateway.
 
@@ -71,6 +71,16 @@ Core, UI, scripts, and extensions type checks and scoped type-aware lint passed.
 
 The first sandbox build stopped in postbuild without child diagnostics. The official postbuild entry point and then the complete build passed on the supported host with the same production tree; the sandbox failure remains unclassified. An earlier test preparation attempt overlapped build output mutation and rejected its package topology before discovering tests; serializing artifact preparation and tests removed that fixture conflict. Native application builds, real-device behavior, OS-specific installer migration, and a live Gateway upgrade were not exercised.
 
+### October 2026.10.7 intake
+
+The `v2026.10.7` intake merges official `157d8c2bc3ea2fa183afdc11088e69690bf8e64e` into fork head `590bc14f612489dfdeb7069006124357db30ab2c`. Official `v2026.10.6` commit `fe06181dc5ecc01cf8904abbfc26925925efefbc` is an ancestor, so this regular merge retains both histories. The official delta contains 73 commits across 599 files. The published release is not a draft or prerelease.
+
+The only content conflict is `scripts/lib/update-compat-inventory.json`. Shared release records are unchanged. The resolved inventory keeps the published CypherClaw `2026.10.1` (`b7f56bc5b90f`) and `2026.10.2` (`ec944b6de83c`) compatibility releases and adds the official `2026.10.6` compatibility release. Package metadata keeps the fork identity, Cypher and wallet package files, and installer scripts, and takes the official version `2026.10.7` and `@openclaw/fs-safe` `0.26.0`. The macOS plist keeps CypherClaw permission copy and takes bundle version `2026.10.7` / `2026100700`. The update target keeps CypherClaw stable GitHub release selection and gains the official registry-package Node preflight, which stops before staging a release the managed service's Node cannot run. That preflight applies to registry package specs. A CypherClaw artifact URL still does not satisfy it. The shared-state worker contract keeps Cypher transfer operations and the official exited-lease outcome type.
+
+Shared state schema **20**, agent schema **25**, and update admission protocol **1** are unchanged. Node release floors remain **24.22.1** and **26.12.1**. This source no longer accepts a release manifest that names Node **24.21.0**. Packages already published as 2026.10.5 or earlier still carry that exact check inside the installed updater; publishing a new manifest cannot rewrite it. Those installations still use the installer migration. The published 2026.10.6 updater already accepts the supported range. This source intake does not publish a release or activate a live Gateway.
+
+Validation used Node **24.22.1** and `pnpm install --frozen-lockfile`. `pnpm exec vitest run src/cli/update-cli/update-command-node-engine-preflight.test.ts src/infra/cypherclaw-distribution.test.ts test/scripts/cypherclaw-release-validation.test.ts --maxWorkers=1` passed 51 tests in **17.31s**. `pnpm exec vitest run src/cli/update-cli/update-command.cypherclaw.test.ts --maxWorkers=1` passed 7 tests in **5.56s**. After this source stopped accepting a Node **24.21.0** manifest, `pnpm exec vitest run test/scripts/cypherclaw-release-validation.test.ts src/cli/update-cli/update-command.cypherclaw.test.ts --maxWorkers=1` passed 52 tests in **5.73s**. A complete build, UI payload measurement, branding byte comparison, and live Gateway upgrade were not run.
+
 ## Prepare the next stable intake
 
 Start with a clean checkout of the reviewed fork branch and verify `origin` is the CypherTroopers repository. Confirm the selected official release is published, is not a draft or prerelease, and belongs to the regular stable channel. Record its full peeled commit from the official tag. Moving official `main` and `release/*` branch tips are not intake targets.
@@ -78,7 +88,7 @@ Start with a clean checkout of the reviewed fork branch and verify `origin` is t
 Fetch only the selected tag into a private reference. Replace the example tag with the release selected for this intake:
 
 ```sh
-cypherclaw_tag=v2026.10.6
+cypherclaw_tag=v2026.10.7
 git fetch --no-tags --no-write-fetch-head https://github.com/openclaw/openclaw.git \
   "refs/tags/${cypherclaw_tag}:refs/cypherclaw/upstream/${cypherclaw_tag}"
 git rev-parse "refs/cypherclaw/upstream/${cypherclaw_tag}^{commit}"
