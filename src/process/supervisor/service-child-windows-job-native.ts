@@ -16,3 +16,21 @@ export function retainWindowsProcessJobUntilExit(_legacyKoffi?: unknown): void {
     job.close();
   }
 }
+
+// CypherClaw update-compat inventory still records these names through 2026.10.2
+// (including CypherClaw 10.1/10.2 packages). Official 11.5 dropped the chunks; this
+// fork keeps the published hashed imports bridgable until those releases age out.
+export function bindWindowsProcessJobToOwner(
+  _bindings?: unknown,
+  _owner?: unknown,
+): void {
+  retainWindowsProcessJobUntilExit();
+}
+
+export function createWindowsJobBindings(_koffi?: unknown): {
+  assertLayouts(): void;
+} {
+  return {
+    assertLayouts() {},
+  };
+}
