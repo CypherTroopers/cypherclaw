@@ -302,9 +302,9 @@ async function serving(prefix: string, release: Release, token: string, port: nu
   const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
   assert.equal(response.status, 200, "Control UI did not load");
   const html = await response.text();
+  // Match the official dashboard marker: boot shell content lives inside <openclaw-app>.
   assert(
-    html.includes("<title>CypherClaw Control</title>") &&
-      html.includes("<openclaw-app></openclaw-app>"),
+    html.includes("<title>CypherClaw Control</title>") && /<openclaw-app(?:\s|>)/u.test(html),
     "Control UI shell identity differs",
   );
   assert.equal(
