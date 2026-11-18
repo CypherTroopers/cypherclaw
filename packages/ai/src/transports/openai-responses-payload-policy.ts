@@ -1,10 +1,13 @@
+import { resolveModelServiceTierContextTokens } from "@openclaw/model-catalog-core/model-catalog-types";
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 /**
  * OpenAI Responses payload policy.
  * Classifies endpoint capabilities and applies store, prompt-cache,
  * server-compaction, service-tier, and reasoning payload rules.
  */
 import {
+  normalizeFastMode,
   normalizeOptionalLowercaseString,
   readStringValue,
 } from "@openclaw/normalization-core/string-coerce";
@@ -35,6 +38,7 @@ type OpenAIResponsesPayloadPolicy = {
   defaultManagedReasoningEffort: "none" | undefined;
   explicitContinuationOptIn: boolean;
   explicitStore: boolean | undefined;
+  requiresStatelessCompactionReplay: boolean;
   shouldStripDisabledReasoningPayload: boolean;
   shouldStripInputStatus: boolean;
   shouldStripPromptCache: boolean;
@@ -158,6 +162,8 @@ function resolveOpenAIResponsesPayloadCapabilities(model: OpenAIResponsesPayload
       OPENAI_RESPONSES_PROVIDERS.has(provider) &&
       usesKnownNativeOpenAIEndpoint,
     explicitContinuationOptIn,
+    requiresStatelessCompactionReplay:
+      endpointClass === "openai-public" || (isOpenAIProvider && endpointClass === "default"),
     shouldStripResponsesPromptCache,
     supportsResponsesStoreField,
     usesKnownNativeOpenAIRoute,
@@ -181,31 +187,91 @@ function resolveOpenAIResponsesCompactThreshold(model: {
   return 80_000;
 }
 
+export type OpenAIServiceTier = "auto" | "default" | "flex" | "priority" | "ultrafast";
+
+export function normalizeOpenAIServiceTier(value: unknown): OpenAIServiceTier | undefined {
+  const normalized = normalizeOptionalLowercaseString(value);
+  return normalized === "auto" ||
+    normalized === "default" ||
+    normalized === "flex" ||
+    normalized === "priority" ||
+    normalized === "ultrafast"
+    ? normalized
+    : undefined;
+}
+
+function resolveOpenAIRequestedServiceTier(
+  extraParams?: Record<string, unknown>,
+  serviceTiers?: readonly string[],
+): OpenAIServiceTier | undefined {
+  const explicitTier = normalizeOpenAIServiceTier(
+    extraParams?.serviceTier ?? extraParams?.service_tier,
+  );
+  const rawFastMode = extraParams?.fastMode ?? extraParams?.fast_mode;
+  const fastMode = normalizeFastMode(
+    typeof rawFastMode === "function" ? rawFastMode() : rawFastMode,
+  );
+  // Authored tiers remain operator-owned; model restrictions apply to speed overrides.
+  return fastMode === undefined || fastMode === "auto"
+    ? explicitTier
+    : fastMode === "ultrafast" && (!serviceTiers || serviceTiers.includes("ultrafast"))
+      ? "ultrafast"
+      : fastMode
+        ? "priority"
+        : explicitTier
+          ? "default"
+          : undefined;
+}
+
+/** Resolve the same speed-override-before-default-tier precedence used at request egress. */
+export function resolveOpenAIResponsesRequestContextTokens(
+  model: OpenAIResponsesPayloadModel,
+  extraParams?: Record<string, unknown>,
+  serviceTiers?: readonly string[],
+): number | undefined {
+  return resolveOpenAIResponsesPayloadCapabilities(model).allowsOpenAIServiceTier
+    ? resolveModelServiceTierContextTokens(
+        normalizeOptionalLowercaseString(model.provider),
+        resolveOpenAIRequestedServiceTier(extraParams, serviceTiers),
+      )
+    : undefined;
+}
+
 /** Resolve the server-compaction gate and effective threshold for a Responses route. */
 export function resolveOpenAIResponsesServerCompactionPlan(
   model: OpenAIResponsesPayloadModel,
   extraParams?: Record<string, unknown>,
 ): { enabled: boolean; threshold: number | undefined } {
   const provider = normalizeOptionalLowercaseString(model.provider);
-  const allowsResponsesStore =
-    resolveOpenAIResponsesPayloadCapabilities(model).allowsResponsesStore;
+  const capabilities = resolveOpenAIResponsesPayloadCapabilities(model);
   const configured = extraParams?.responsesServerCompaction;
   const enabled =
-    configured !== false && allowsResponsesStore && (configured === true || provider === "openai");
+    configured !== false &&
+    capabilities.allowsResponsesStore &&
+    (configured === true || provider === "openai");
   return {
     enabled,
     threshold: enabled
-      ? (parsePositiveInteger(extraParams?.responsesCompactThreshold) ??
-        resolveOpenAIResponsesCompactThreshold(model))
+      ? Math.min(
+          parsePositiveInteger(extraParams?.responsesCompactThreshold) ??
+            resolveOpenAIResponsesCompactThreshold(model),
+          (capabilities.allowsOpenAIServiceTier
+            ? resolveModelServiceTierContextTokens(
+                provider,
+                resolveOpenAIRequestedServiceTier(extraParams),
+              )
+            : undefined) ?? Infinity,
+        )
       : undefined,
   };
 }
 
-/** Resolve the Responses compact-endpoint gate for one route and compaction purpose. */
+/** Resolve the Responses compact-endpoint gate for one route. */
 export function resolveOpenAIResponsesCompactEndpointPlan(
   model: OpenAIResponsesPayloadModel,
   extraParams?: Record<string, unknown>,
-  purpose: "manual" | "budget" = "manual",
+  /** @deprecated The policy no longer depends on purpose. */
+  _purpose?: "manual" | "budget",
 ): { enabled: boolean } {
   const configured = extraParams?.responsesCompactEndpoint;
   const provider = typeof model.provider === "string" ? normalizeProviderId(model.provider) : "";
@@ -213,10 +279,7 @@ export function resolveOpenAIResponsesCompactEndpointPlan(
   const endpointClass = resolveOpenAIResponsesEndpointClass(model.baseUrl);
   const enabledByDefault =
     ((provider === "xai" || provider === "x-ai") && endpointClass === "xai-native") ||
-    (purpose === "budget" &&
-      provider === "openai" &&
-      api === "openai-responses" &&
-      endpointClass === "openai-public");
+    (provider === "openai" && api === "openai-responses" && endpointClass === "openai-public");
   return {
     enabled:
       isOpenAIResponsesApi(api) &&
@@ -310,6 +373,7 @@ export function resolveOpenAIResponsesPayloadPolicy(
         : undefined,
     explicitContinuationOptIn: capabilities.explicitContinuationOptIn,
     explicitStore,
+    requiresStatelessCompactionReplay: capabilities.requiresStatelessCompactionReplay,
     shouldStripDisabledReasoningPayload,
     shouldStripInputStatus,
     shouldStripPromptCache:
@@ -329,7 +393,15 @@ export function applyOpenAIResponsesPayloadPolicy(
   policy: OpenAIResponsesPayloadPolicy,
 ): void {
   if (policy.explicitStore !== undefined) {
-    payloadObj.store = policy.explicitStore;
+    // Storing a replayed checkpoint makes its next replay fail with item_conflict,
+    // even without item IDs. Stateless replay also recovers already-stored checkpoints.
+    payloadObj.store =
+      policy.explicitStore &&
+      !(
+        policy.requiresStatelessCompactionReplay &&
+        Array.isArray(payloadObj.input) &&
+        payloadObj.input.some((item) => isRecord(item) && item.type === "compaction")
+      );
   }
   if (policy.shouldStripStore) {
     delete payloadObj.store;

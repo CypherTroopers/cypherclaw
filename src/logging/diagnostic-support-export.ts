@@ -3,6 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { readRegularFileSync } from "@openclaw/fs-safe/advanced";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
+import { readNonBlankString } from "@openclaw/normalization-core/string-coerce";
 import { isChannelConfigMetadataKey } from "../channels/config-metadata.js";
 import { INCLUDE_KEY } from "../config/includes.js";
 import { parseConfigJson5 } from "../config/io.js";
@@ -252,18 +253,14 @@ function configReadErrorMessage(error: unknown, stat?: fs.Stats): string | undef
   return error instanceof Error ? error.message : String(error);
 }
 
-function readConfigExport(options: {
-  configPath: string;
-  env: NodeJS.ProcessEnv;
-  stateDir: string;
-}): ConfigExport {
-  const redactedConfigPath = redactPathForSupport(options.configPath, options);
+function readConfigExport(configPath: string, options: SupportRedactionContext): ConfigExport {
+  const redactedConfigPath = redactPathForSupport(configPath, options);
   let stat: fs.Stats | undefined;
   try {
-    assertNotUpdateCapturePath(options.configPath, options.stateDir);
-    stat = fs.statSync(options.configPath);
+    assertNotUpdateCapturePath(configPath, options.stateDir);
+    stat = fs.statSync(configPath);
     const { buffer } = readRegularFileSync({
-      filePath: options.configPath,
+      filePath: configPath,
       maxBytes: SUPPORT_EXPORT_CONFIG_MAX_BYTES,
     });
     const parsed = parseConfigJson5(buffer.toString("utf8"));
@@ -583,14 +580,13 @@ function resolveOutputPath(options: {
   now: Date;
 }): string {
   const filename = `${SUPPORT_EXPORT_PREFIX}${formatDiagnosticFilenameTimestamp(options.now)}-${process.pid}${SUPPORT_EXPORT_SUFFIX}`;
-  const raw = options.outputPath?.trim();
+  const raw = readNonBlankString(options.outputPath);
   if (!raw) {
     return path.join(options.stateDir, "logs", "support", filename);
   }
-  const resolved =
-    path.isAbsolute(raw) || raw.startsWith("~")
-      ? resolveHomeRelativePath(raw, { env: options.env })
-      : path.resolve(options.cwd, raw);
+  const resolved = raw.startsWith("~")
+    ? resolveHomeRelativePath(raw, { env: options.env })
+    : path.resolve(options.cwd, raw);
   try {
     if (fs.statSync(resolved).isDirectory()) {
       return path.join(resolved, filename);
@@ -623,7 +619,7 @@ export async function writeDiagnosticSupportExport(input: DiagnosticSupportExpor
     maxBytes: normalizePositiveInteger(options.logMaxBytes, DEFAULT_LOG_MAX_BYTES),
     redaction,
   });
-  const config = readConfigExport({ configPath, env, stateDir });
+  const config = readConfigExport(configPath, redaction);
   const [statusSnapshot, healthSnapshot] = await Promise.all([
     collectSupportSnapshot({
       path: "status/gateway-status.json",

@@ -148,6 +148,16 @@ export function applyConfigSnapshot(
   const currentRevisionHash = snapshot.configRevisionHash ?? snapshot.hash ?? null;
   if (snapshot.appliedConfigHash !== undefined) {
     state.configNeedsApply = currentRevisionHash !== snapshot.appliedConfigHash;
+    if (!state.configNeedsApply) {
+      state.configDeferredApplication = null;
+      if (state.configAutoSaveStatus === "deferred") {
+        state.configAutoSaveStatus = "idle";
+        state.lastError = null;
+      }
+    } else if (state.configDeferredApplication && !state.configFormDirty) {
+      state.configAutoSaveStatus = "deferred";
+      state.lastError = `${state.configDeferredApplication.reason} ${state.configDeferredApplication.appliesWhen}`;
+    }
   }
   const draftBaseHash = state.configDraftBaseHash ?? state.configSnapshot?.hash ?? null;
   setConfigSnapshot(state, snapshot);
@@ -308,6 +318,11 @@ export type ConfigSubmittedDraft = {
 
 export type ConfigWriteAck = { config: Record<string, unknown>; hash: string };
 
+// Gateway writes return persisted hashes; only a no-op patch omits one.
+export type ConfigPatchAck =
+  | { noop: true; config: Record<string, unknown> }
+  | (ConfigWriteAck & { noop?: false });
+
 export function isConfigWriteAck(value: unknown): value is ConfigWriteAck {
   return (
     isRecord(value) &&
@@ -428,6 +443,7 @@ function syncConfigDraft(state: RuntimeConfigState, nextForm: Record<string, unk
 export function resetStaleAutoSaveStatus(state: RuntimeConfigState) {
   if (
     state.configAutoSaveStatus === "saving" ||
+    state.configAutoSaveStatus === "deferred" ||
     state.configAutoSaveStatus === "conflict" ||
     state.configAutoSaveStatus === "paused"
   ) {

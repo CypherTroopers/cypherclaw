@@ -30,6 +30,7 @@ import { captureRequesterCronAuthorityAdmissionAssertion } from "../../agents/su
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { assertAgentRunLifecycleGenerationCurrent } from "../../infra/agent-events.js";
 import { claimAgentRunContext } from "../../infra/agent-run-registry.js";
+import { pluginInvocationContext } from "../../plugins/plugin-instance-scope.js";
 import { runWithGatewayDetachedWorkContinuation } from "../../process/gateway-work-admission.js";
 import { isSubagentCoordinationInputProvenance } from "../../sessions/input-provenance.js";
 import { createChatAbortOps } from "../chat-abort-ops.js";
@@ -175,13 +176,12 @@ export async function prepareAgentRunDispatch(
           }),
           isAbortable: () => isEmbeddedAgentRunAbortableForRunId(params.runId),
           onRemoved: () => clearEmbeddedAgentRunAbortabilityForRunId(params.runId),
-          onQueueTimeout: (entry) => {
-            abortChatRunById(createChatAbortOps(params.context), {
+          onQueueTimeout: (entry) =>
+            void abortChatRunById(createChatAbortOps(params.context), {
               runId: params.runId,
               sessionKey: entry.sessionKey,
               stopReason: "timeout",
-            });
-          },
+            }),
           controlUiVisible,
           kind: "agent",
           lifecycleGeneration: params.lifecycleGeneration,
@@ -390,26 +390,29 @@ export async function prepareAgentRunDispatch(
     replyDispatchRuntime = publishedRuntime;
     const acquireRuntime = (workspaceDir: string | undefined) =>
       runtimeLease.run(() =>
-        acquireAgentRunPreparedModelRuntime(
-          {
-            config: replyDispatchRuntime.config,
-            agentId: replyDispatchRuntime.agentId,
-            agentDir: replyDispatchRuntime.agentDir,
-            allowGatewaySubagentBinding: true,
-            workspaceDir: workspaceDir ?? replyDispatchRuntime.workspaceDir,
-            runtimePluginSelections: [
-              {
-                provider: resolvedRuntime.provider,
-                modelId: resolvedRuntime.model,
-                runtime: resolvedRuntime.harness,
-              },
-            ],
-          },
-          {
-            catalogMode: "static",
-            pluginGeneration: replyDispatchRuntime.pluginGeneration,
-            abortSignal: activeRunAbort.controller.signal,
-          },
+        // The selected run retains its own generation beyond this short dispatch lease.
+        pluginInvocationContext.exit(() =>
+          acquireAgentRunPreparedModelRuntime(
+            {
+              config: replyDispatchRuntime.config,
+              agentId: replyDispatchRuntime.agentId,
+              agentDir: replyDispatchRuntime.agentDir,
+              allowGatewaySubagentBinding: true,
+              workspaceDir: workspaceDir ?? replyDispatchRuntime.workspaceDir,
+              runtimePluginSelections: [
+                {
+                  provider: resolvedRuntime.provider,
+                  modelId: resolvedRuntime.model,
+                  runtime: resolvedRuntime.harness,
+                },
+              ],
+            },
+            {
+              catalogMode: "static",
+              pluginGeneration: replyDispatchRuntime.pluginGeneration,
+              abortSignal: activeRunAbort.controller.signal,
+            },
+          ),
         ),
       );
     if (canPrepareAgentSessionWorktree(params.resolvedSessionKey, params.sessionEntry)) {
@@ -443,7 +446,16 @@ export async function prepareAgentRunDispatch(
   let subagentAdmission: Awaited<ReturnType<typeof prepareGatewaySubagentRun>>;
   try {
     subagentAdmission = await prepareGatewaySubagentRun({
-      ...params,
+      cfg: params.cfg,
+      client: params.client,
+      resolvedSessionKey: params.resolvedSessionKey,
+      activeSessionAgentId: params.activeSessionAgentId,
+      inputProvenance: params.inputProvenance,
+      request: params.request,
+      isOneShotModelRun: params.isOneShotModelRun,
+      runId: params.runId,
+      getAdmittedSessionId: params.getAdmittedSessionId,
+      context: params.context,
       onParentResumeAdopted: (entry) => {
         adoptedParentResume = entry;
       },
@@ -564,7 +576,19 @@ export async function prepareAgentRunDispatch(
   }
   try {
     // The transport request ends at acceptance; execution retains this exact caller.
-    capturedOperator = await retainGatewayOperatorRun({ ...params, entry: activeRunAbort.entry });
+    capturedOperator = await retainGatewayOperatorRun({
+      ...params,
+      entry: activeRunAbort.entry,
+      abortSession: params.resolvedSessionKey
+        ? {
+            cfg: params.cfg,
+            storePath: params.lifecycleStorePath,
+            entry: params.sessionEntry,
+            canonicalKey: params.resolvedSessionKey,
+            agentId: params.activeSessionAgentId,
+          }
+        : undefined,
+    });
     const operatorAdmission = revalidateAdmission(userTurn);
     if (operatorAdmission !== true) {
       return await operatorAdmission;

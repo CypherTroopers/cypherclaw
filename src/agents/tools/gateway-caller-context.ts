@@ -48,7 +48,7 @@ import { readToolStringParam, type AnyAgentTool } from "./common.js";
 import type { GatewayToolCallerReceiptAdmission } from "./gateway-caller-receipt.types.js";
 
 type ReceiptAuthority = (() => boolean | void) &
-  Pick<SessionSourceAssertion, "prepareSessionSource" | "nativeSource" | "opaqueCommitGuard">;
+  Pick<SessionSourceAssertion, keyof SessionSourceAssertion>;
 
 type GatewayToolCallerIdentity = {
   personalToolParticipants?: ReplyTurnParticipants;
@@ -66,6 +66,8 @@ type GatewayToolCallerIdentity = {
   gatewayUiCommandTarget?: GatewayUiCommandTarget;
   /** Prepared requesting-tool posture; absent authority never bypasses approvals. */
   fullPermission?: boolean;
+  /** Host-held current delegation grant. A posture boolean alone never authorizes a write. */
+  assertAutoApproveChangesCurrent?: () => void;
   operationalRunInstance?: OperationalRunInstanceRef;
   embeddedRunToolAuthorityBinding?: EmbeddedRunToolAuthorityBinding;
   /** Exact run authority used to fence delegated system-agent approvals. */
@@ -228,6 +230,8 @@ export function captureGatewayToolReceiptAssertion(
   return Object.assign(() => assertAllowed(receipt()), {
     nativeSource: receipt.nativeSource,
     opaqueCommitGuard: receipt.opaqueCommitGuard,
+    assertScopeCurrent: receipt.assertScopeCurrent?.bind(receipt),
+    prepareSessionSourceScope: receipt.prepareSessionSourceScope?.bind(receipt),
     ...(prepare
       ? {
           async prepareSessionSource() {
@@ -235,6 +239,7 @@ export function captureGatewayToolReceiptAssertion(
             const release = prepared.release?.bind(prepared);
             const assertPrepared = prepared.assertPreparedCurrent?.bind(prepared);
             return {
+              ...prepared,
               nativeSource: prepared.nativeSource,
               opaqueCommitGuard: prepared.opaqueCommitGuard,
               checks: prepared.checks,
@@ -639,6 +644,13 @@ export async function withGatewayToolCallerIdentity<T>(
       personalToolIdentityScoped: inheritedValue("personalToolIdentityScoped"),
       personalToolSelection: inheritedValue("personalToolSelection"),
       ...(fullPermission !== undefined ? { fullPermission } : {}),
+      assertAutoApproveChangesCurrent:
+        inheritedOwner?.assertAutoApproveChangesCurrent || identity.assertAutoApproveChangesCurrent
+          ? () => {
+              inheritedOwner?.assertAutoApproveChangesCurrent?.();
+              identity.assertAutoApproveChangesCurrent?.();
+            }
+          : undefined,
       ...(operationalRunInstance ? { operationalRunInstance } : {}),
       ...(embeddedRunToolAuthorityBinding ? { embeddedRunToolAuthorityBinding } : {}),
       ...(approvalAuthority ? { approvalAuthority } : {}),
@@ -698,8 +710,7 @@ export function wrapToolWithGatewayCallerIdentity(
   }
   const wrapped: AnyAgentTool = {
     ...tool,
-    execute: async (...args) =>
-      await withGatewayToolCallerIdentity(identity, async () => await tool.execute?.(...args)),
+    execute: (...args) => withGatewayToolCallerIdentity(identity, () => tool.execute?.(...args)),
   };
   copyAgentToolMetadata(tool, wrapped, (source) =>
     wrapToolWithGatewayCallerIdentity(source, identity),

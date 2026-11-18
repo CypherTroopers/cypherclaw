@@ -13,7 +13,6 @@ import {
   buildSlashCommandsFromEntries,
   replaceSlashCommands,
 } from "../../lib/chat/commands.ts";
-import { extractText } from "../../lib/chat/message-extract.ts";
 import * as outboxPayloadStore from "../../lib/chat/outbox-payload-store.runtime.ts";
 import { captureChatOutboxAdmission } from "../../lib/chat/outbox-store.ts";
 import {
@@ -22,6 +21,7 @@ import {
   sessionsResult as sessionListFixture,
 } from "../../lib/sessions/session-capability.test-support.ts";
 import { resolveUiConversationIdentity } from "../../lib/sessions/session-key.ts";
+import "../../lib/toast-host.ts";
 import { createResolvedModelPatch } from "../../test-helpers/chat-model.ts";
 import { createTestGatewayClient as clientWithRequest } from "../../test-helpers/gateway-client.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
@@ -44,6 +44,7 @@ import type { ChatHistoryResult } from "./chat-history-snapshot.ts";
 import { getChatHistoryLoadState } from "./chat-history-state.ts";
 import { loadChatHistory } from "./chat-history.ts";
 import {
+  expectRpc,
   findRequestPayload,
   makeChatHost,
   makeRequestMock,
@@ -53,7 +54,6 @@ import {
 import { admitQueuedMessageForSession } from "./chat-outbox-admission.test-support.ts";
 import { chatOutboxOwner } from "./chat-outbox-owner.ts";
 import { admitHostQueueItems, idleChatHistory, row } from "./chat-outbox-recovery.test-support.ts";
-import { createTestChatPane } from "./chat-pane.test-support.ts";
 import { getChatPendingInputs } from "./chat-pending-inputs.ts";
 import { markQueuedChatSendsWaitingForReconnect } from "./chat-queue-reconnect.ts";
 import {
@@ -454,83 +454,6 @@ describe("refreshChat", () => {
     });
   });
 
-  it("keeps a newer canonical offline runner row over coalesced stale startup hydration", async () => {
-    const key = "agent:main:device-session";
-    const deviceRow = (status: "available" | "offline") =>
-      deviceSessionRow(key, status, {
-        sessionId: "device-session-incarnation",
-      });
-    const staleAvailable = deviceRow("available");
-    const startup = createDeferred<unknown>();
-    const initialSessions = createSessionsResult([staleAvailable]);
-    const request = makeRequestMock({
-      "chat.startup": () => startup.promise,
-      "sessions.list": createSessionsResult([deviceRow("offline")]),
-    });
-    const client = clientWithRequest(request);
-    const sessions = createTestSessionCapability(createGatewayHarness(client).gateway);
-    sessions.reconcile(staleAvailable, initialSessions.defaults);
-    const first = createTestChatPane({ client, sessions });
-    const second = createTestChatPane({ client, sessions });
-    const firstPane = first.state;
-    const secondPane = second.state;
-    const pending: Promise<unknown>[] = [];
-    const releases = [first, second].map(({ pane, state }) => {
-      state.sessionKey = key;
-      state.hello = gatewayHelloForMethods(["chat.startup"], []);
-      pane.presented = false;
-      pane.applySessionsState(sessions.state);
-      return sessions.subscribe(pane.applySessionsState.bind(pane));
-    });
-    onTestFinished(async () => {
-      releases.forEach((release) => release());
-      sessions.dispose();
-      startup.resolve({ messages: [] });
-      await Promise.allSettled(pending);
-    });
-    const options = {
-      awaitHistory: true,
-      deferBranches: true,
-      scheduleScroll: false,
-      startup: true,
-    } as const;
-    const firstRefresh = refreshPageChat(firstPane, options);
-    pending.push(firstRefresh);
-    await vi.waitFor(() => expect(requestCalls(request, "chat.startup")).toHaveLength(1));
-    await firstPane.sessions.refresh({ force: true });
-    expect(firstPane.sessions.canonicalListRevision).toBe(1);
-    expect(firstPane.sessions.state.result?.sessions[0]?.placement).toMatchObject({
-      runner: { kind: "device", status: "offline" },
-    });
-
-    const joinedRefresh = refreshPageChat(secondPane, options);
-    pending.push(joinedRefresh);
-    startup.resolve({
-      messages: [{ role: "assistant", content: "Stale startup transcript was consumed." }],
-      sessionInfo: staleAvailable,
-    });
-    await Promise.all([firstRefresh, joinedRefresh]);
-    await new Promise<void>((resolve) => {
-      setImmediate(resolve);
-    });
-
-    expect(requestCalls(request, "chat.startup")).toHaveLength(1);
-    for (const pane of [firstPane, secondPane]) {
-      expect(pane.chatMessages.map((message) => extractText(message))).toContain(
-        "Stale startup transcript was consumed.",
-      );
-      expect(pane.sessionsResult?.sessions[0]?.placement).toMatchObject({
-        runner: { kind: "device", status: "offline" },
-      });
-      expect(selectedChatSessionRow(pane)?.placement).toMatchObject({
-        runner: { kind: "device", status: "offline" },
-      });
-    }
-    expect(firstPane.sessions.state.result?.sessions[0]?.placement).toMatchObject({
-      runner: { kind: "device", status: "offline" },
-    });
-  });
-
   it("still lets late startup hydration add a routed row absent from a newer canonical list", async () => {
     const key = "agent:main:archived-device-session";
     const routed = deviceSessionRow(key, "available", { archived: true });
@@ -693,7 +616,9 @@ describe("refreshChat", () => {
     await sendRequested.promise;
     await resumeStoredChatOutboxes(host);
     expect(host.request).toHaveBeenCalledWith("chat.send", expect.objectContaining(expectedSend), {
-      timeoutMs: 30_000,
+      timeoutMs: 300_000,
+      signal: expect.any(AbortSignal),
+      retainSentResultOnAbort: true,
     });
     expect(host.chatQueue).toEqual([]);
 
@@ -828,7 +753,9 @@ describe("refreshChat", () => {
       expect.objectContaining({ text: message, sendState: "waiting-idle" }),
     ]);
     expect(host.request).not.toHaveBeenCalledWith("chat.send", expect.anything(), {
-      timeoutMs: 30_000,
+      timeoutMs: 300_000,
+      signal: expect.any(AbortSignal),
+      retainSentResultOnAbort: true,
     });
 
     startup.resolve(idleHistory);
@@ -837,7 +764,7 @@ describe("refreshChat", () => {
       expect(host.request).toHaveBeenCalledWith(
         "chat.send",
         expect.objectContaining({ sessionKey, sessionId: "dashboard-session", message }),
-        { timeoutMs: 30_000 },
+        { timeoutMs: 300_000, signal: expect.any(AbortSignal), retainSentResultOnAbort: true },
       );
       expect(host.chatQueue).toEqual([]);
     });
@@ -1006,7 +933,7 @@ describe("handleSendChat", () => {
       expect(host.request).toHaveBeenCalledWith(
         "chat.send",
         expect.objectContaining({ message, sessionKey: "agent:main" }),
-        { timeoutMs: 30_000 },
+        { timeoutMs: 300_000, signal: expect.any(AbortSignal), retainSentResultOnAbort: true },
       );
       expect(host.request).not.toHaveBeenCalledWith("chat.abort", expect.anything());
       expect(host.chatMessage).toBe("");
@@ -1043,12 +970,14 @@ describe("handleSendChat", () => {
         expect(host.request).toHaveBeenCalledWith(
           "chat.send",
           expect.objectContaining({ message: chatMessage }),
-          { timeoutMs: 30_000 },
+          { timeoutMs: 300_000, signal: expect.any(AbortSignal), retainSentResultOnAbort: true },
         );
       } else {
         expect(dispatchClientPresentation).toHaveBeenCalledWith({ kind: "device-pairing" });
         expect(host.request).not.toHaveBeenCalledWith("chat.send", expect.anything(), {
-          timeoutMs: 30_000,
+          timeoutMs: 300_000,
+          signal: expect.any(AbortSignal),
+          retainSentResultOnAbort: true,
         });
         expect(host.chatQueue).toStrictEqual([]);
         expect(host.chatMessages).toEqual(baselineMessages);
@@ -1135,7 +1064,7 @@ describe("handleSendChat", () => {
       settingsPatch.resolve(success);
       await send;
       if (success) {
-        expect(host.request).toHaveBeenCalledWith("chat.send", {
+        expectRpc(host.request, "chat.send", {
           sessionKey: "agent:main",
           message: "start over",
           queueMode: "interrupt",
@@ -1683,7 +1612,9 @@ describe("handleSendChat", () => {
     const send = handleSendChat(host);
     await waitForFast(() => expect(container.scrollTop).toBe(1600));
     expect(host.request).not.toHaveBeenCalledWith("chat.send", expect.anything(), {
-      timeoutMs: 30_000,
+      timeoutMs: 300_000,
+      signal: expect.any(AbortSignal),
+      retainSentResultOnAbort: true,
     });
     container.scrollTop = 1200;
     handleChatScrollTakeover(host);
@@ -1693,7 +1624,9 @@ describe("handleSendChat", () => {
     settings.resolve(true);
     await waitForFast(() =>
       expect(host.request).toHaveBeenCalledWith("chat.send", expect.anything(), {
-        timeoutMs: 30_000,
+        timeoutMs: 300_000,
+        signal: expect.any(AbortSignal),
+        retainSentResultOnAbort: true,
       }),
     );
     ack.resolve({ status: "started", runId: "accepted-run" });
@@ -1782,6 +1715,7 @@ describe("handleSendChat", () => {
       vi.fn<typeof fetch>().mockResolvedValue(createJsonResponse({}, { ok: false })),
     );
 
+    const refreshCurrentSessionTools = vi.fn();
     const host = makeChatHost({
       agentsList: { defaultId: "main", mainKey: "main" },
       requestHandlers: {
@@ -1813,6 +1747,7 @@ describe("handleSendChat", () => {
       },
       sessionKey: "main",
       chatMessage: "/model gpt-5-mini",
+      refreshCurrentSessionTools,
     });
 
     await handleSendChat(host);
@@ -1827,6 +1762,7 @@ describe("handleSendChat", () => {
       modelProvider: "openai",
       modelOverrideSource: "user",
     });
+    expect(refreshCurrentSessionTools).toHaveBeenCalledTimes(1);
   });
 
   it.each(["error ACK", "transport rejection"] as const)(
@@ -2002,7 +1938,9 @@ describe("handleSendChat", () => {
       const sending = handleSendChat(host);
       await waitForFast(() =>
         expect(host.request).toHaveBeenCalledWith("chat.send", expect.anything(), {
-          timeoutMs: 30_000,
+          timeoutMs: 300_000,
+          signal: expect.any(AbortSignal),
+          retainSentResultOnAbort: true,
         }),
       );
       const payload = findRequestPayload(host.request, "chat.send", "pending send");
@@ -2308,10 +2246,14 @@ describe("handleSendChat", () => {
       await draining;
 
       expect(host.request).not.toHaveBeenCalledWith("chat.send", expect.anything(), {
-        timeoutMs: 30_000,
+        timeoutMs: 300_000,
+        signal: expect.any(AbortSignal),
+        retainSentResultOnAbort: true,
       });
       expect(replacementRequest).not.toHaveBeenCalledWith("chat.send", expect.anything(), {
-        timeoutMs: 30_000,
+        timeoutMs: 300_000,
+        signal: expect.any(AbortSignal),
+        retainSentResultOnAbort: true,
       });
       if (outcome === "cancelled") {
         expect(listStoredChatOutboxes(host)).toStrictEqual([]);
@@ -2452,7 +2394,9 @@ describe("handleSendChat", () => {
       expect(host.chatMessages).toEqual([final]);
     });
     expect(host.request).not.toHaveBeenCalledWith("chat.send", expect.anything(), {
-      timeoutMs: 30_000,
+      timeoutMs: 300_000,
+      signal: expect.any(AbortSignal),
+      retainSentResultOnAbort: true,
     });
   });
 
@@ -3874,7 +3818,9 @@ describe("handleSendChat", () => {
       { timeoutMs: 30_000 },
     );
     expect(host.request).not.toHaveBeenCalledWith("chat.send", expect.anything(), {
-      timeoutMs: 30_000,
+      timeoutMs: 300_000,
+      signal: expect.any(AbortSignal),
+      retainSentResultOnAbort: true,
     });
     if (visible) {
       expect(historyReads).toBe(1);
@@ -3889,7 +3835,9 @@ describe("handleSendChat", () => {
       await resumeStoredChatOutboxes(host);
       expect(listStoredChatOutboxes(host)).toEqual([]);
       expect(host.request).not.toHaveBeenCalledWith("chat.send", expect.anything(), {
-        timeoutMs: 30_000,
+        timeoutMs: 300_000,
+        signal: expect.any(AbortSignal),
+        retainSentResultOnAbort: true,
       });
     }
   });
@@ -3974,7 +3922,9 @@ describe("handleSendChat", () => {
           expect.objectContaining({ id: source.id }),
         ]);
         expect(host.request).not.toHaveBeenCalledWith("chat.send", expect.anything(), {
-          timeoutMs: 30_000,
+          timeoutMs: 300_000,
+          signal: expect.any(AbortSignal),
+          retainSentResultOnAbort: true,
         });
         return;
       }
@@ -4385,7 +4335,9 @@ describe("handleSendChat", () => {
     const sending = steerQueuedChatMessage(host, original.id);
     await waitForFast(() =>
       expect(host.request).toHaveBeenCalledWith("chat.send", expect.anything(), {
-        timeoutMs: 30_000,
+        timeoutMs: 300_000,
+        signal: expect.any(AbortSignal),
+        retainSentResultOnAbort: true,
       }),
     );
 

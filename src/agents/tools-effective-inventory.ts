@@ -20,10 +20,11 @@ import { withPluginRuntimeGenerationScope } from "../plugins/runtime/generation-
 import { resolveAgentDir, resolveAgentWorkspaceDir, resolveSessionAgentId } from "./agent-scope.js";
 import { createOpenClawCodingToolsInternalAsync } from "./agent-tools.js";
 import { hasAnyAuthProfileStoreSourceAsync } from "./auth-profiles/source-check.js";
-import { resolveConversationCapabilityProfile } from "./conversation-capability-profile.js";
+import { prepareConversationCapabilityProfile } from "./conversation-capability-profile.js";
 import { resolveModelAsync } from "./embedded-agent-runner/model.js";
 import { resolveBundledStaticCatalogModel } from "./embedded-agent-runner/model.static-catalog.js";
 import { normalizeStaticProviderModelId } from "./model-ref-shared.js";
+import { runInPreparedModelRuntimeLease } from "./prepared-model-runtime-generation-scope.js";
 import { acquireReadOnlyPreparedModelRuntime } from "./prepared-model-runtime.js";
 import { createToolAccessDiagnostics } from "./tool-access-diagnostics.js";
 import { normalizeToolPolicyName } from "./tool-policy.js";
@@ -60,7 +61,7 @@ function buildToolInventoryNotices(params: {
   cfg: OpenClawConfig;
   profile: string;
   entries: EffectiveToolInventoryEntry[];
-  effectivePolicy: ReturnType<typeof resolveConversationCapabilityProfile>["policy"];
+  effectivePolicy: Awaited<ReturnType<typeof prepareConversationCapabilityProfile>>["policy"];
 }): EffectiveToolInventoryNotice[] | undefined {
   const hasBrowserTool = params.entries.some(
     (entry) => normalizeToolPolicyName(entry.id) === "browser",
@@ -250,13 +251,17 @@ export async function acquireEffectiveToolInventoryRuntimeModelContext(
   let transferred = false;
   try {
     const stores = lease.snapshot.createStores();
-    const resolved = await resolveModelAsync(provider, modelId, agentDir, params.cfg, {
-      agentId,
-      workspaceDir,
-      authStorage: stores.authStorage,
-      modelRegistry: stores.modelRegistry,
-      preparedModelRuntime: lease.snapshot,
-    });
+    const resolved = await runInPreparedModelRuntimeLease(lease, () =>
+      withPluginRuntimeGenerationScope(lease.snapshot, () =>
+        resolveModelAsync(provider, modelId, agentDir, params.cfg, {
+          agentId,
+          workspaceDir,
+          authStorage: stores.authStorage,
+          modelRegistry: stores.modelRegistry,
+          preparedModelRuntime: lease.snapshot,
+        }),
+      ),
+    );
     const runtimeModel = resolved.model as ProviderRuntimeModel | undefined;
     if (!runtimeModel) {
       return { run: (project) => project({}), [Symbol.asyncDispose]: async () => {} };
@@ -269,7 +274,9 @@ export async function acquireEffectiveToolInventoryRuntimeModelContext(
         if (released) {
           throw new Error("Tool inventory model context has been released");
         }
-        return withPluginRuntimeGenerationScope(lease.snapshot, () => project(context));
+        return runInPreparedModelRuntimeLease(lease, () =>
+          withPluginRuntimeGenerationScope(lease.snapshot, () => project(context)),
+        );
       },
       [Symbol.asyncDispose]() {
         released = true;
@@ -335,12 +342,12 @@ export async function resolveEffectiveToolInventory(
 
   const capabilityProfile =
     params.conversationCapabilityProfile ??
-    resolveConversationCapabilityProfile({
+    (await prepareConversationCapabilityProfile({
       ...params,
       config: params.cfg,
       agentId,
       agentAccountId: params.accountId,
-    });
+    }));
   const diagnostics = createToolAccessDiagnostics({ profiles: capabilityProfile.policy.profiles });
   const effectiveTools = await createOpenClawCodingToolsInternalAsync(
     {

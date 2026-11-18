@@ -13,6 +13,10 @@ import {
 import { formatErrorMessage } from "./errors.js";
 import { registerNodeSqliteDisposeCallback } from "./kysely-sync-cache-state.js";
 import { compareValidSemver } from "./semver.js";
+import {
+  bindSqliteDatabaseAdmission,
+  prepareSqliteDatabaseAdmission,
+} from "./sqlite-database-admission.js";
 import { registerSqliteReaderConnection } from "./sqlite-reader-lifecycle.js";
 import { isSqliteWalResetSafeVersion } from "./sqlite-runtime-version.js";
 import { trackSqliteSchema } from "./sqlite-schema-facts.js";
@@ -22,7 +26,6 @@ const require = createRequire(import.meta.url);
 let validatedSqliteModule: typeof import("node:sqlite") | undefined;
 let extensionLoadingSupported = false;
 let jsonbSupported = false;
-let walCheckpointNoopSupported = false;
 // Unqualified runtimes cannot confirm native disposal until the owning worker exits.
 export let bunSqliteNativeCleanupPending = false;
 
@@ -165,7 +168,6 @@ function assertSafeSqliteRuntime(sqlite: typeof import("node:sqlite")): void {
   if (inherited) {
     assertSqliteWalResetSafeVersion(inherited.version, process.versions.node);
     jsonbSupported = (compareValidSemver(inherited.version, "3.45.0") ?? -1) >= 0;
-    walCheckpointNoopSupported = (compareValidSemver(inherited.version, "3.53.0") ?? -1) >= 0;
     extensionLoadingSupported = inherited.extensionLoadingSupported;
     validatedSqliteModule = sqlite;
     return;
@@ -176,11 +178,10 @@ function assertSafeSqliteRuntime(sqlite: typeof import("node:sqlite")): void {
   let version: string;
   let extensions: boolean;
   try {
-    const row = database
-      .prepare(
-        "SELECT sqlite_version() AS version, sqlite_compileoption_used('OMIT_LOAD_EXTENSION') AS omitted",
-      )
-      .get() as { version?: unknown; omitted?: unknown } | undefined;
+    const statement = database.prepare(
+      "SELECT sqlite_version() AS version, sqlite_compileoption_used('OMIT_LOAD_EXTENSION') AS omitted",
+    );
+    const row = statement.get() as { version?: unknown; omitted?: unknown } | undefined;
     version = typeof row?.version === "string" ? row.version : "unknown";
     assertSqliteWalResetSafeVersion(version, process.versions.node);
     extensions = row?.omitted === 0;
@@ -188,7 +189,6 @@ function assertSafeSqliteRuntime(sqlite: typeof import("node:sqlite")): void {
     database.close();
   }
   jsonbSupported = (compareValidSemver(version, "3.45.0") ?? -1) >= 0;
-  walCheckpointNoopSupported = (compareValidSemver(version, "3.53.0") ?? -1) >= 0;
   extensionLoadingSupported = extensions;
   validatedSqliteModule = sqlite;
   setEnvironmentData(SQLITE_NATIVE_RUNTIME_ADMISSION_KEY, {
@@ -229,12 +229,6 @@ export function supportsNodeSqliteJsonb(): boolean {
   return jsonbSupported;
 }
 
-/** Older SQLite versions can interpret NOOP as a mutating checkpoint mode. */
-export function supportsNodeSqliteWalCheckpointNoop(): boolean {
-  requireNodeSqlite();
-  return walCheckpointNoopSupported;
-}
-
 /** Open node:sqlite through OpenClaw's runtime and filesystem-location boundary. */
 export function openNodeSqliteDatabase(
   location: string,
@@ -244,9 +238,40 @@ export function openNodeSqliteDatabase(
   // Callers may pass file: URIs or already-namespaced paths from specialized
   // resolvers; location normalization must remain idempotent for those forms.
   const resolvedLocation = resolveNodeSqliteLocation(location);
+  const identity =
+    options?.open === false
+      ? undefined
+      : prepareSqliteDatabaseAdmission(resolvedLocation, { create: options?.readOnly !== true });
   const database = new sqlite.DatabaseSync(resolvedLocation, options ?? {});
+  if (database.isOpen) {
+    try {
+      bindSqliteDatabaseAdmission(database, identity);
+    } catch (error) {
+      database.close();
+      throw error;
+    }
+  }
+  database.open = () => {
+    const reopenedIdentity = prepareSqliteDatabaseAdmission(resolvedLocation, {
+      create: options?.readOnly !== true,
+    });
+    sqlite.DatabaseSync.prototype.open.call(database);
+    try {
+      bindSqliteDatabaseAdmission(database, reopenedIdentity);
+    } catch (error) {
+      database.close();
+      throw error;
+    }
+  };
   // Schema tracking must precede the statement-cache authorizer wrapper.
-  trackSqliteSchema(database, sqlite);
+  trackSqliteSchema(
+    database,
+    {
+      DatabaseSync: sqlite.DatabaseSync,
+      StatementSync: sqlite.StatementSync,
+    },
+    options?.readOnly !== true,
+  );
   if (!getSqliteRuntimeCapabilities().explicitSqliteCloseReleasesNativeResources) {
     registerNodeSqliteDisposeCallback(database, () => {
       bunSqliteNativeCleanupPending = true;

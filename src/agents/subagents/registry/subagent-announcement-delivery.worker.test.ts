@@ -26,7 +26,10 @@ import { setTestEnvValue, withEnvAsync } from "../../../test-utils/env.js";
 import { loadAgentRuntimePluginRegistryHandle } from "../../runtime-plugins.js";
 import { isSubagentRegistryWriteCommand } from "../../subagent-test-fixtures.test-helpers.js";
 import { subagentRuns } from "./subagent-registry-memory.js";
-import { restoreSubagentRunsFromDisk } from "./subagent-registry-persistence.js";
+import {
+  mutateSubagentRuns,
+  restoreSubagentRunsFromDisk,
+} from "./subagent-registry-persistence.js";
 import { subscribeSubagentRunChanges } from "./subagent-registry-publication.js";
 import * as registryReads from "./subagent-registry-read-cache.js";
 import * as registryRead from "./subagent-registry-read.js";
@@ -131,6 +134,8 @@ async function registerCompletion(
   await registerSubagentRun({
     runId,
     childSessionKey,
+    childAgentId: "main",
+    sessionEntry: { sessionId: `${runId}-session`, lifecycleRevision: "original-child" },
     requesterSessionKey: options.requesterSessionKey ?? "agent:main:main",
     requesterAgentId: "main",
     requesterDisplayKey: "main",
@@ -384,6 +389,41 @@ it("defers registered parent delivery until its descendant settles without host 
   });
 });
 
+it("retries parent delivery without waiting for a suspended descendant's cleanup", async () => {
+  const parent = await registerCompletion("suspended-descendant-parent");
+  const child = await registerCompletion("suspended-descendant-child", {
+    requesterSessionKey: parent.childSessionKey,
+  });
+  await mutateSubagentRuns([child.runId], (rows) => {
+    const entry = rows.get(child.runId)!;
+    return {
+      value: undefined,
+      postimages: new Map<string, SubagentRunRecord>([
+        [
+          child.runId,
+          {
+            ...entry,
+            execution: { status: "terminal", endedAt: Date.now() },
+            delivery: { status: "suspended", suspendedAt: Date.now() },
+          },
+        ],
+      ]),
+    };
+  });
+  fixture.announce.mockResolvedValue("retryable");
+  fixture.wake.mockResolvedValue(false);
+  completeRegistered(parent);
+  await fixture.settle();
+  const records = loadSubagentRegistryFromSqlite();
+  expect(records.get(parent.runId)).toMatchObject({
+    delivery: { status: "pending", attemptCount: 1 },
+  });
+  expect(records.get(parent.runId)?.wakeOnDescendantSettle).toBeUndefined();
+  expect(records.get(child.runId)?.delivery?.status).toBe("suspended");
+  expect(records.get(child.runId)?.cleanupCompletedAt).toBeUndefined();
+  expect(turns.start).not.toHaveBeenCalled();
+});
+
 it("keeps a delivered announcement fenced when its committed native receipt is unreadable", async () => {
   const run = await registerCompletion("uncertain-announcement-receipt", {
     cleanup: "delete",
@@ -530,6 +570,8 @@ it("refuses an old registered wake after its descendant read outlives a successo
       expect(loadSubagentRegistryFromSqlite().get(run.runId)?.requesterSettleWake).toBeDefined();
       await registerSubagentRun({
         ...run,
+        childAgentId: "main",
+        sessionEntry: original.childSessionIdentity,
         requesterSessionKey: "agent:main:main",
         requesterAgentId: "main",
         requesterDisplayKey: "main",
@@ -643,6 +685,8 @@ it.for(["current", "successor", "revoked", "source switched"] as const)(
       if (change === "successor") {
         authorityChange = registerSubagentRun({
           ...run,
+          childAgentId: "main",
+          sessionEntry: original.childSessionIdentity,
           requesterSessionKey: "agent:main:main",
           requesterAgentId: "main",
           requesterDisplayKey: "main",

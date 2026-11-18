@@ -43,17 +43,29 @@ import {
   shouldIgnorePostCompletionAnnounceForSession,
 } from "../registry/subagent-registry-read.js";
 import { deleteSubagentSessionForCleanup } from "../registry/subagent-session-cleanup.js";
-import { getSubagentDepthFromSessionStore } from "../spawn/subagent-depth.js";
+import { getSubagentDepthFromSessionStoreInWorker } from "../spawn/subagent-depth.js";
 import type { SpawnSubagentMode } from "../spawn/subagent-spawn.types.js";
 import type { SubagentRunOutcome } from "../subagent-run-outcome.types.js";
+import {
+  hasAnnounceSendEvidence,
+  isPermanentAnnounceDeliveryError,
+  SourceOwnerChangedError,
+  summarizeDeliveryError,
+} from "./subagent-announce-delivery-retry.js";
 import {
   deliverSubagentAnnouncement,
   loadRequesterSessionEntry,
   loadSessionEntryByKey,
 } from "./subagent-announce-delivery.js";
-import { hasUsableSessionEntry } from "./subagent-announce-delivery.runtime.js";
+import {
+  hasUsableSessionEntry,
+  withSubagentRequesterSource,
+} from "./subagent-announce-delivery.runtime.js";
 import { runDescendantWake } from "./subagent-announce-descendant-wake.js";
-import type { SubagentAnnounceDeliveryResult } from "./subagent-announce-dispatch.js";
+import {
+  sourceOwnerChangedResult,
+  type SubagentAnnounceDeliveryResult,
+} from "./subagent-announce-dispatch.js";
 import {
   resolveAnnounceOrigin,
   resolveSubagentCompletionOrigin,
@@ -122,6 +134,7 @@ function stripAndClassifyReply(text: string): string | null {
 type SubagentAnnounceFlowParams = {
   childSessionKey: string;
   childAgentId?: string;
+  childSessionIdentity?: { sessionId: string; lifecycleRevision?: string };
   childRunId: string;
   runTimeoutSeconds?: number;
   requesterSessionKey: string;
@@ -177,6 +190,20 @@ async function runSubagentAnnounceFlowBound(
   params: SubagentAnnounceFlowParams,
 ): Promise<SubagentAnnounceFlowOutcome> {
   let announceOutcome: SubagentAnnounceFlowOutcome = "retryable";
+  let deliveryResultReported = false;
+  const reportDeliveryResult = async (delivery: SubagentAnnounceDeliveryResult) => {
+    if (deliveryResultReported) {
+      return;
+    }
+    deliveryResultReported = true;
+    // A receipt observer may fail after handoff. Keep the transport outcome
+    // authoritative so cleanup does not replay work the requester already consumed.
+    announceOutcome =
+      delivery.reason === "requester_turn_pending"
+        ? "requester_turn_pending"
+        : (delivery.disposition ?? (delivery.delivered ? "delivered" : "retryable"));
+    await params.onDeliveryResult?.(delivery);
+  };
   const expectsCompletionMessage = params.expectsCompletionMessage === true;
   let shouldDeleteChildSession = params.cleanup === "delete";
   const childSessionEffectsAllowed = () =>
@@ -193,7 +220,6 @@ async function runSubagentAnnounceFlowBound(
     (ownResult?.isCurrent() ?? true) &&
     isChildResultsCurrent();
   let childSessionId: string | undefined;
-  let childSessionLifecycleRevision: string | undefined;
   try {
     let targetRequesterSessionKey = params.requesterSessionKey;
     let targetRequesterAgentId = params.requesterAgentId;
@@ -209,7 +235,6 @@ async function runSubagentAnnounceFlowBound(
       typeof childSessionEntry?.sessionId === "string" && childSessionEntry.sessionId.trim()
         ? childSessionEntry.sessionId.trim()
         : undefined;
-    childSessionLifecycleRevision = normalizeOptionalString(childSessionEntry?.lifecycleRevision);
     const settleTimeoutMs = Math.min(Math.max(params.timeoutMs, 1), 120_000);
     let reply =
       params.terminalReply?.disposition === "visible"
@@ -240,7 +265,7 @@ async function runSubagentAnnounceFlowBound(
     if (failedTerminalOutcome && !params.terminalReply) {
       reply = undefined;
     }
-    let requesterDepth = getSubagentDepthFromSessionStore(targetRequesterSessionKey, {
+    let requesterDepth = await getSubagentDepthFromSessionStoreInWorker(targetRequesterSessionKey, {
       cfg: getRuntimeConfig(),
       agentId: targetRequesterAgentId,
     });
@@ -266,20 +291,26 @@ async function runSubagentAnnounceFlowBound(
       }
 
       const childSessionCurrent = await prepareChildSessionEffects();
+      const assertChildSessionCurrent = () => {
+        if (!childSessionEffectsAllowed()) {
+          throw new Error("Subagent child-session effects are no longer current.");
+        }
+      };
       const pendingChildDescendantRuns =
         !childSessionCurrent || !childSessionEffectsAllowed()
           ? 0
-          : Math.max(
-              0,
-              await countPendingDescendantRuns(params.childSessionKey, () => {
-                if (!childSessionEffectsAllowed()) {
-                  throw new Error("Subagent child-session effects are no longer current.");
-                }
-              }),
-            );
+          : await countPendingDescendantRuns(params.childSessionKey, assertChildSessionCurrent);
       if (pendingChildDescendantRuns > 0) {
+        // Suspended descendants keep the child session for recovery but cannot hold this completion.
         shouldDeleteChildSession = false;
-        return "retryable";
+        const unsettledDescendantRuns = await countPendingDescendantRuns(
+          params.childSessionKey,
+          assertChildSessionCurrent,
+          { excludeSuspendedDelivery: true },
+        );
+        if (unsettledDescendantRuns > 0) {
+          return "retryable";
+        }
       }
 
       if (
@@ -381,6 +412,7 @@ async function runSubagentAnnounceFlowBound(
         params.childSessionKey,
         params.timeoutMs,
         outcome,
+        params.childAgentId,
       );
       // Empty remains the authoritative terminal fact. Transcript text is a
       // timeout-only progress hint and must never reclassify silence as output.
@@ -395,7 +427,9 @@ async function runSubagentAnnounceFlowBound(
         (await prepareChildSessionEffects()) &&
         childSessionEffectsAllowed()
       ) {
-        reply = await readSubagentOutput(params.childSessionKey, outcome);
+        reply = await readSubagentOutput(params.childSessionKey, outcome, {
+          childAgentId: params.childAgentId,
+        });
       }
 
       if (
@@ -406,6 +440,7 @@ async function runSubagentAnnounceFlowBound(
       ) {
         reply = await readLatestSubagentOutputWithRetry({
           sessionKey: params.childSessionKey,
+          childAgentId: params.childAgentId,
           maxWaitMs: params.timeoutMs,
           outcome,
         });
@@ -494,10 +529,13 @@ async function runSubagentAnnounceFlowBound(
           targetRequesterAgentId = fallback.requesterAgentId;
           targetRequesterOrigin =
             normalizeDeliveryContext(fallback.requesterOrigin) ?? targetRequesterOrigin;
-          requesterDepth = getSubagentDepthFromSessionStore(targetRequesterSessionKey, {
-            cfg: getRuntimeConfig(),
-            agentId: targetRequesterAgentId,
-          });
+          requesterDepth = await getSubagentDepthFromSessionStoreInWorker(
+            targetRequesterSessionKey,
+            {
+              cfg: getRuntimeConfig(),
+              agentId: targetRequesterAgentId,
+            },
+          );
           requesterIsSubagent = requesterIsInternalSession();
         }
       }
@@ -510,6 +548,7 @@ async function runSubagentAnnounceFlowBound(
         ? undefined
         : await buildCompactAnnounceStatsLine({
             sessionKey: params.childSessionKey,
+            childAgentId: params.childAgentId,
             startedAt: params.startedAt,
             endedAt: params.endedAt,
           });
@@ -517,115 +556,124 @@ async function runSubagentAnnounceFlowBound(
       (await prepareChildSessionEffects()) && childSessionEffectsAllowed()
         ? candidateStatsLine
         : undefined;
-    // Send to the requester session. For nested subagents this is an internal
-    // follow-up injection (deliver=false) so the orchestrator receives it.
-    let directOrigin = targetRequesterOrigin;
-    if (!requesterIsSubagent) {
-      const { entry } = loadRequesterSessionEntry(
-        targetRequesterSessionKey,
-        targetRequesterAgentId,
-      );
-      directOrigin = resolveAnnounceOrigin(entry, targetRequesterOrigin);
-    }
-    const candidateCompletionDirectOrigin =
-      expectsCompletionMessage && !requesterIsSubagent && params.completionTarget !== "parent"
-        ? !(await prepareChildSessionEffects()) || !childSessionEffectsAllowed()
-          ? targetRequesterOrigin
-          : await resolveSubagentCompletionOrigin({
-              childSessionKey: params.childSessionKey,
-              requesterSessionKey: targetRequesterSessionKey,
-              requesterOrigin: directOrigin,
-              childRunId: params.childRunId,
-              spawnMode: params.spawnMode,
-              expectsCompletionMessage,
-            })
-        : targetRequesterOrigin;
-    const completionDirectOrigin =
-      (await prepareChildSessionEffects()) && childSessionEffectsAllowed()
-        ? candidateCompletionDirectOrigin
-        : targetRequesterOrigin;
-    const completionChannel = normalizeMessageChannel(completionDirectOrigin?.channel);
-    const modelRouteChange =
-      params.terminalReply?.disposition === "visible"
-        ? params.terminalReply.modelRouteChange
-        : undefined;
-    const replyInstruction = buildAnnounceReplyInstruction({
-      requesterIsSubagent,
-      completionTarget: params.completionTarget,
-      modelRouteChange,
-      // Nested and local operator parents may report the route fact. External
-      // channel parents receive it only as private orchestration context.
-      preserveModelRouteNotice:
-        requesterIsSubagent ||
-        !completionChannel ||
-        !isDeliverableMessageChannel(completionChannel),
-    });
-    const internalEvents: AgentInternalEvent[] = [
-      {
-        type: "task_completion",
-        source: "subagent",
-        announceType: "subagent task",
-        childSessionKey: params.childSessionKey,
-        childSessionId: announceSessionId,
-        taskLabel,
-        status: outcome.status,
-        statusLabel,
-        result: findings,
-        ...(childResultText ? {} : { noVisibleResult: true }),
-        modelRouteChange,
-        statsLine,
-        replyInstruction,
-      },
-    ];
-    const triggerMessage =
-      formatAgentInternalEventsForPrompt(internalEvents) ||
-      "A background task finished. Process the completion update now.";
-    const directIdempotencyKey = buildAnnounceIdempotencyKey(announceId);
-    let deliveryResultReported = false;
-    const reportDeliveryResult = async (delivery: SubagentAnnounceDeliveryResult) => {
-      if (deliveryResultReported) {
-        return;
-      }
-      deliveryResultReported = true;
-      await params.onDeliveryResult?.(delivery);
-    };
-    const delivery = await deliverSubagentAnnouncement({
-      requesterSessionKey: targetRequesterSessionKey,
-      requesterAgentId: targetRequesterAgentId,
-      triggerMessage,
-      internalEvents,
-      requesterSessionOrigin: targetRequesterOrigin,
-      completionDirectOrigin,
-      directOrigin,
-      sourceSessionKey: params.childSessionKey,
-      sourceRunId: params.childRunId,
-      sourceTool: "subagent_announce",
-      isSourceSessionEffectsAllowed: completionDeliveryAllowed,
-      isCompletionOwnedByRequesterYield: params.isCompletionOwnedByRequesterYield,
+    await withSubagentRequesterSource(
       targetRequesterSessionKey,
-      requesterIsSubagent,
-      expectsCompletionMessage,
-      completionTarget: params.completionTarget,
-      completionRequesterSessionId: params.completionRequesterSessionId,
-      completionRequesterLifecycleRevision: params.completionRequesterLifecycleRevision,
-      directIdempotencyKey,
-      onDeliveryResult: reportDeliveryResult,
-      signal: params.signal,
-      onExecutionStarted: params.onExecutionStarted,
-      resolveGatewayContext: params.resolveGatewayContext,
-    });
-    await reportDeliveryResult(delivery);
-    announceOutcome =
-      delivery.reason === "requester_turn_pending"
-        ? "requester_turn_pending"
-        : (delivery.disposition ?? (delivery.delivered ? "delivered" : "retryable"));
+      targetRequesterAgentId,
+      async (isRequesterCurrent) => {
+        // Send to the requester session. For nested subagents this is an internal
+        // follow-up injection (deliver=false) so the orchestrator receives it.
+        let directOrigin = targetRequesterOrigin;
+        if (!requesterIsSubagent) {
+          const { entry } = await loadRequesterSessionEntry(
+            targetRequesterSessionKey,
+            targetRequesterAgentId,
+          );
+          directOrigin = resolveAnnounceOrigin(entry, targetRequesterOrigin);
+        }
+        const candidateCompletionDirectOrigin =
+          expectsCompletionMessage && !requesterIsSubagent && params.completionTarget !== "parent"
+            ? !(await prepareChildSessionEffects()) || !childSessionEffectsAllowed()
+              ? targetRequesterOrigin
+              : await resolveSubagentCompletionOrigin({
+                  childSessionKey: params.childSessionKey,
+                  requesterSessionKey: targetRequesterSessionKey,
+                  requesterOrigin: directOrigin,
+                  childRunId: params.childRunId,
+                  spawnMode: params.spawnMode,
+                  expectsCompletionMessage,
+                })
+            : targetRequesterOrigin;
+        const completionDirectOrigin =
+          (await prepareChildSessionEffects()) && childSessionEffectsAllowed()
+            ? candidateCompletionDirectOrigin
+            : targetRequesterOrigin;
+        const completionChannel = normalizeMessageChannel(completionDirectOrigin?.channel);
+        const modelRouteChange =
+          params.terminalReply?.disposition === "visible"
+            ? params.terminalReply.modelRouteChange
+            : undefined;
+        const replyInstruction = buildAnnounceReplyInstruction({
+          requesterIsSubagent,
+          completionTarget: params.completionTarget,
+          modelRouteChange,
+          // Nested and local operator parents may report the route fact. External
+          // channel parents receive it only as private orchestration context.
+          preserveModelRouteNotice:
+            requesterIsSubagent ||
+            !completionChannel ||
+            !isDeliverableMessageChannel(completionChannel),
+        });
+        const internalEvents: AgentInternalEvent[] = [
+          {
+            type: "task_completion",
+            source: "subagent",
+            announceType: "subagent task",
+            childSessionKey: params.childSessionKey,
+            childSessionId: announceSessionId,
+            taskLabel,
+            status: outcome.status,
+            statusLabel,
+            result: findings,
+            ...(childResultText ? {} : { noVisibleResult: true }),
+            modelRouteChange,
+            statsLine,
+            replyInstruction,
+          },
+        ];
+        const triggerMessage =
+          formatAgentInternalEventsForPrompt(internalEvents) ||
+          "A background task finished. Process the completion update now.";
+        const directIdempotencyKey = buildAnnounceIdempotencyKey(announceId);
+        const delivery = await deliverSubagentAnnouncement({
+          requesterSessionKey: targetRequesterSessionKey,
+          requesterAgentId: targetRequesterAgentId,
+          triggerMessage,
+          internalEvents,
+          requesterSessionOrigin: targetRequesterOrigin,
+          completionDirectOrigin,
+          directOrigin,
+          sourceSessionKey: params.childSessionKey,
+          sourceRunId: params.childRunId,
+          sourceTool: "subagent_announce",
+          isSourceSessionEffectsAllowed: () =>
+            isRequesterCurrent?.() !== false && completionDeliveryAllowed(),
+          isCompletionOwnedByRequesterYield: params.isCompletionOwnedByRequesterYield,
+          targetRequesterSessionKey,
+          requesterIsSubagent,
+          expectsCompletionMessage,
+          completionTarget: params.completionTarget,
+          completionRequesterSessionId: params.completionRequesterSessionId,
+          completionRequesterLifecycleRevision: params.completionRequesterLifecycleRevision,
+          directIdempotencyKey,
+          onDeliveryResult: reportDeliveryResult,
+          signal: params.signal,
+          onExecutionStarted: params.onExecutionStarted,
+          resolveGatewayContext: params.resolveGatewayContext,
+        });
+        await reportDeliveryResult(delivery);
+      },
+    );
   } catch (err) {
     shouldDeleteChildSession = false;
     if (hasSqliteWorkerOutcomeUnknown(err)) {
       throw err;
     }
     defaultRuntime.error?.(`Subagent announce failed: ${String(err)}`);
-    // Best-effort follow-ups; ignore failures to avoid breaking the caller response.
+    if (!deliveryResultReported) {
+      await reportDeliveryResult(
+        err instanceof SourceOwnerChangedError
+          ? sourceOwnerChangedResult()
+          : {
+              delivered: false,
+              path: "none",
+              error: summarizeDeliveryError(err),
+              disposition:
+                hasAnnounceSendEvidence(err) || isPermanentAnnounceDeliveryError(err)
+                  ? "permanent_failure"
+                  : "retryable",
+            },
+      );
+    }
   } finally {
     if (
       shouldDeleteChildSession &&
@@ -642,8 +690,8 @@ async function runSubagentAnnounceFlowBound(
         childSessionKey: params.childSessionKey,
         childAgentId: params.childAgentId,
         spawnMode: params.spawnMode,
-        expectedSessionId: childSessionId,
-        expectedLifecycleRevision: childSessionLifecycleRevision,
+        expectedSessionId: params.childSessionIdentity?.sessionId,
+        expectedLifecycleRevision: params.childSessionIdentity?.lifecycleRevision,
       });
     }
   }

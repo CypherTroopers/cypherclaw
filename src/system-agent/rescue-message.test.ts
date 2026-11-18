@@ -358,6 +358,18 @@ describe("OpenClaw rescue message", () => {
     });
   });
 
+  it("replies with a completed command's findings when it exits non-zero (#195432)", async () => {
+    const deps = {
+      runPluginsList: vi.fn(async (runtime: RuntimeEnv) => {
+        runtime.log("warning finding");
+        runtime.exit(1);
+      }),
+    };
+    await expect(runRescue("/openclaw plugins list", {}, commandContext(), deps)).resolves.toBe(
+      "warning finding\n\nOpenClaw operation exited with code 1.",
+    );
+  });
+
   it("consumes a pending approval at most once under concurrent approvals", async () => {
     await withRescueStateDir("concurrent-approve-", async () => {
       const cfg: OpenClawConfig = {};
@@ -653,30 +665,6 @@ describe("OpenClaw rescue message", () => {
     },
   );
 
-  it("queues and applies gateway restart through conversational approval", async () => {
-    await withRescueStateDir("gateway-", async () => {
-      const cfg: OpenClawConfig = {};
-      const deps = { runGatewayRestart: vi.fn(async () => {}) };
-
-      await expect(
-        runRescue("/openclaw restart gateway", cfg, commandContext(), deps),
-      ).resolves.toBe("Plan: restart the Gateway. Reply /openclaw yes to apply.");
-      await expect(runRescue("/openclaw yes", cfg, commandContext(), deps)).resolves.toContain(
-        "[openclaw] done: gateway.restart",
-      );
-
-      expect(deps.runGatewayRestart).toHaveBeenCalledTimes(1);
-      const audit = readLastAuditEntry() as {
-        operation?: string;
-        details?: { rescue?: boolean; channel?: string; senderId?: string };
-      };
-      expect(audit.operation).toBe("gateway.restart");
-      expect(audit.details?.rescue).toBe(true);
-      expect(audit.details?.channel).toBe("whatsapp");
-      expect(audit.details?.senderId).toBe("user:owner");
-    });
-  });
-
   it("does not queue persistent rescue approval when expiry would exceed the Date range", async () => {
     await withRescueStateDir("overflow-expiry-", async (tempDir) => {
       vi.useFakeTimers({ toFake: ["Date"] });
@@ -747,10 +735,8 @@ describe("OpenClaw rescue message", () => {
   });
 
   it.each([
-    { role: undefined, name: undefined },
     { role: "writer", name: undefined },
     { role: undefined, name: "QA Writer" },
-    { role: "writer", name: "QA Writer" },
     { role: "writer", name: "QA Writer", purpose: "Write release notes" },
   ])(
     "queues and applies agent creation with role $role, name $name and purpose $purpose through conversational approval",

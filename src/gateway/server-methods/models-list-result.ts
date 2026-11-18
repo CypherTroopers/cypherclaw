@@ -66,6 +66,10 @@ import {
 } from "./models-list-result.owner.js";
 import { prepareModelPickerRuntimeChoices } from "./models-list-runtime-choices.js";
 
+type StatedRuntimeModelChoice = ModelChoice & {
+  agentRuntime: NonNullable<ModelChoice["agentRuntime"]>;
+};
+
 type PreparedModelsListResult = {
   read: () => ModelsListResult;
   isCurrent: () => boolean;
@@ -108,9 +112,7 @@ async function prepareOwnedModelsListResult({
   authority,
   sessionEntry,
   useRequesterDefaults,
-  currentConfig,
   publishedOwner,
-  requestConfig,
   profiles,
   view,
   refresh,
@@ -127,11 +129,9 @@ async function prepareOwnedModelsListResult({
   preparedPluginRegistry,
 }: ModelsListOwner): Promise<PreparedModelsListResult> {
   const preparedOwnerIsCurrent = preparedProjectionOwner?.isCurrent;
-  // Native readiness belongs to the prepared generation, even across config publication.
+  // Mid-read config changes are best effort; prepared catalog and account authority still apply.
   const isCurrent = () =>
-    currentConfig() === requestConfig &&
-    preparedOwnerIsCurrent?.() === true &&
-    publicationScope?.isCurrent?.() !== false;
+    preparedOwnerIsCurrent?.() === true && publicationScope?.isCurrent?.() !== false;
   if (!metadataSnapshot || !preparedAuthStore) {
     throw new Error("Gateway model catalog owner omitted prepared metadata or auth state");
   }
@@ -229,12 +229,7 @@ async function prepareOwnedModelsListResult({
     ...preparedCatalog.catalog,
     ...projector.snapshot.entries,
   ]);
-  const evaluateNative: typeof projector.evaluateNative = (entry, host, runtimeId) => {
-    const native = projector.evaluateNative(entry, host, runtimeId);
-    return native !== host && currentConfig() !== requestConfig
-      ? { ...native, availability: false }
-      : native;
-  };
+  const { evaluateNative } = projector;
   const { normalizeProvider, providerFilter, matchesProvider } = createModelsListProviderFilter({
     config: cfg,
     metadataSnapshot,
@@ -350,7 +345,7 @@ async function prepareOwnedModelsListResult({
     });
     const catalogResolver = createThinkingCatalogResolver(catalog);
     // Route rows retain identity across reads; keep display/thinking work outside the hot overlay.
-    const prepared = new WeakMap<ModelCatalogEntry, Map<string, ModelChoice>>();
+    const prepared = new WeakMap<ModelCatalogEntry, Map<string, StatedRuntimeModelChoice>>();
     return (
       entry: ModelCatalogEntry,
       evaluation: ModelAuthAvailabilityEvaluation,
@@ -369,20 +364,20 @@ async function prepareOwnedModelsListResult({
         const capabilityProvider = capableProviders?.resolveProvider(entry.provider);
         const selectedRuntime = runtimeChoice
           ? { id: runtimeChoice, source: "model" as const }
-          : resolveCatalogDecisionRuntime({
+          : (resolveCatalogDecisionRuntime({
               cfg,
               agentId,
               entry,
               evaluation,
               pluginRegistry: preparedPluginRegistry,
-            });
-        const agentRuntime = selectedRuntime
-          ? preparedPluginRegistry
-            ? withPluginRuntimeRegistryScope(preparedPluginRegistry, () =>
-                projectWorkerPlacementAgentRuntime(selectedRuntime),
-              )
-            : projectWorkerPlacementAgentRuntime(selectedRuntime)
-          : undefined;
+              resolveOpenAIProviderRoutes: decisions.resolveOpenAIProviderRoutes,
+            }) ?? { id: "openclaw", source: "implicit" as const });
+        // State implicit placement facts as well; clients must not infer them from omission.
+        const agentRuntime = preparedPluginRegistry
+          ? withPluginRuntimeRegistryScope(preparedPluginRegistry, () =>
+              projectWorkerPlacementAgentRuntime(selectedRuntime),
+            )
+          : projectWorkerPlacementAgentRuntime(selectedRuntime);
         const thinkingProfile =
           typeof publicEntry.reasoning !== "boolean"
             ? undefined
@@ -391,7 +386,7 @@ async function prepareOwnedModelsListResult({
                 agentId,
                 provider: entry.provider,
                 model: entry.id,
-                agentRuntime: selectedRuntime?.id ?? "openclaw",
+                agentRuntime: selectedRuntime.id,
                 modelCatalog: runtimeChoice ? [entry] : catalog,
                 catalogResolver: runtimeChoice
                   ? createThinkingCatalogResolver([entry])
@@ -407,8 +402,16 @@ async function prepareOwnedModelsListResult({
         });
         preparedEntry = {
           ...buildPublicModelProjection(publicEntry, { includeDetails }),
+          ...(manualSelectionAllowed
+            ? {
+                manualSelectionAllowed: manualSelectionAllowed({
+                  provider: entry.provider,
+                  model: entry.id,
+                }),
+              }
+            : {}),
           ...(configuredEntry?.tags.size ? { tags: [...configuredEntry.tags] } : {}),
-          ...(agentRuntime ? { agentRuntime } : {}),
+          agentRuntime,
           ...thinkingProfile,
           ...(fastModeState.source === "default" ? {} : { effectiveFastMode: fastModeState.mode }),
           ...(capabilityProvider && apiKeyProviders.has(capabilityProvider)
@@ -418,15 +421,15 @@ async function prepareOwnedModelsListResult({
             : {}),
           ...(view === "provider-config" && entry.input?.length ? { input: entry.input } : {}),
         };
-        const entries = prepared.get(entry) ?? new Map<string, ModelChoice>();
+        const entries = prepared.get(entry) ?? new Map<string, StatedRuntimeModelChoice>();
         entries.set(runtimeKey, preparedEntry);
         prepared.set(entry, entries);
       }
-      // Legacy views require a boolean; inventory consumers preserve unknown state.
-      const projectedAvailability = preserveUnknownAvailability
-        ? evaluation.availability
-        : (evaluation.availability ?? false);
-      const speedPolicy = fastMode(entry, evaluation, preparedEntry.agentRuntime?.id);
+      const projectedAvailability =
+        preserveUnknownAvailability || evaluation.runtimeAuth?.source === "native"
+          ? evaluation.availability
+          : (evaluation.availability ?? false);
+      const speedPolicy = fastMode(entry, evaluation, preparedEntry.agentRuntime.id);
       const supportsFastMode = speedPolicy.supportsFastMode;
       const serviceTiers = projectModelServiceTiers({
         config: cfg,
@@ -456,33 +459,24 @@ async function prepareOwnedModelsListResult({
               baseUrl: route.baseUrl,
             })
           : undefined;
-      return Object.assign(
-        {},
-        preparedEntry,
-        manualSelectionAllowed
-          ? {
-              manualSelectionAllowed: manualSelectionAllowed({
-                provider: entry.provider,
-                model: entry.id,
-              }),
-            }
-          : {},
-        supportsFastMode === undefined ? {} : { supportsFastMode },
-        speedPolicy.supportsServiceTierRecovery === true
+      return {
+        ...preparedEntry,
+        ...(supportsFastMode === undefined ? {} : { supportsFastMode }),
+        ...(speedPolicy.supportsServiceTierRecovery === true
           ? { supportsServiceTierRecovery: true }
-          : {},
-        serviceTiers === undefined ? {} : { serviceTiers },
-        serviceTierObservation ? { serviceTierObservation } : {},
-        projectedAvailability === undefined ? {} : { available: projectedAvailability },
-        projectedAvailability === false && evaluation.unavailableReason
+          : {}),
+        ...(serviceTiers === undefined ? {} : { serviceTiers }),
+        ...(serviceTierObservation ? { serviceTierObservation } : {}),
+        ...(projectedAvailability === undefined ? {} : { available: projectedAvailability }),
+        ...(projectedAvailability === false && evaluation.unavailableReason
           ? {
               unavailableReason: evaluation.unavailableReason,
               ...(evaluation.unavailableUntil !== undefined
                 ? { unavailableUntil: evaluation.unavailableUntil }
                 : {}),
             }
-          : {},
-      );
+          : {}),
+      };
     };
   };
 
@@ -576,6 +570,7 @@ async function prepareOwnedModelsListResult({
               modelId: entry.id,
               modelApi: entry.api,
               modelBaseUrl: entry.baseUrl,
+              resolveOpenAIProviderRoutes: projector.resolveOpenAIProviderRoutes,
             }).runtime
           : undefined;
         const preparedHost = evaluateEntry(entry, variants, baseRuntime);

@@ -7,6 +7,7 @@ import { expect, vi } from "vitest";
 import { ConnectErrorDetailCodes } from "../../../packages/gateway-protocol/src/connect-error-details.js";
 import {
   installMockGateway,
+  startCopiedProductionControlUiE2eServer,
   startProductionControlUiE2eServer,
 } from "../test-helpers/control-ui-e2e.ts";
 
@@ -204,10 +205,12 @@ export function phoneProofIdentity(): Pick<
   };
 }
 
-export async function startPhoneProofServer(buildId: string) {
+export async function startPhoneProofServer(buildId: string, productionRoot?: string) {
   const buildDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-login-gate-e2e-"));
   try {
-    const server = await startProductionControlUiE2eServer(buildDir, buildId);
+    const server = productionRoot
+      ? await startCopiedProductionControlUiE2eServer(productionRoot, buildDir, buildId)
+      : await startProductionControlUiE2eServer(buildDir, buildId);
     return {
       baseUrl: server.baseUrl,
       close: async () => {
@@ -426,55 +429,17 @@ export async function renderLoginGate(
 }
 
 export async function mountLoginGate(page: Page, lastError: string | null): Promise<void> {
-  if (lastError === null) {
-    // Auth failure can render the gate while startup still owns the connecting splash.
-    await page.waitForFunction(
-      () =>
-        document.querySelector<HTMLElement & { startupPending: boolean }>("openclaw-app")
-          ?.startupPending === false,
-    );
-  }
+  await page.waitForFunction(() => window.openclawControlUi?.snapshot().booted === true);
   await page.evaluate(async (failureMessage) => {
     await customElements.whenDefined("openclaw-login-gate");
-    const app = document.querySelector<
-      HTMLElement & {
-        runtime: { context: { gateway: { stop(): void } } };
-        requestUpdate(): void;
-        updateComplete: Promise<unknown>;
-      }
-    >("openclaw-app")!;
-    if (failureMessage === null) {
-      // The app must also own the no-error state before it can render the gate again.
-      app.runtime.context.gateway.stop();
-      await app.updateComplete;
-    }
-    // Keep the production app wrapper: it owns the safe-area and viewport budget.
+    // This remaining Lit component owns its fixture props; keep all real root callbacks.
     const gate = document.querySelector("openclaw-login-gate") as
       | (HTMLElement & { props: Record<string, unknown>; updateComplete: Promise<unknown> })
       | null;
     if (!gate) {
       throw new Error("Missing mounted login gate");
     }
-    gate.props = {
-      resourceBasePath: "",
-      connected: false,
-      lastError: failureMessage,
-      lastErrorCode: null,
-      hasToken: false,
-      hasPassword: false,
-      gatewayUrl: "ws://127.0.0.1:18789",
-      secret: "",
-      showGatewaySecret: false,
-      onGatewayUrlChange: () => {},
-      onSecretChange: () => {},
-      onToggleGatewaySecret: () => {},
-      onConnect: gate.props.onConnect,
-    };
+    gate.props = { ...gate.props, lastError: failureMessage, lastErrorCode: null };
     await gate.updateComplete;
-    if (failureMessage === null) {
-      app.requestUpdate();
-      await app.updateComplete;
-      await gate.updateComplete;
-    }
   }, lastError);
 }

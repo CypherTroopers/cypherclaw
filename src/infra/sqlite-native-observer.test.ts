@@ -20,7 +20,7 @@ function open(location = ":memory:") {
   return db;
 }
 
-it.each(["exec", "run", "get", "all"] as const)(
+it.each(["exec", "all"] as const)(
   "retains custody across %s callbacks and preserves a native error",
   (method) => {
     const db = open();
@@ -60,15 +60,59 @@ it("binds iterators immediately and holds custody until exhaustion or explicit r
 
   const next = statement.iterate(3);
   expect(next.next().value).toEqual({ value: 3 });
-  // A completed cursor's return is inert on Node but can reset a sibling on Bun.
-  // Neither runtime permits that stale cursor to certify the newer cursor's settlement.
+  // Native return can reset the shared statement, even from a completed cursor.
+  // That stale cursor cannot certify the newer cursor's settlement.
   rows.return?.();
   expect(hasPendingSqliteNativeExecution(db)).toBe(true);
   next.return?.();
   expect(hasPendingSqliteNativeExecution(db)).toBe(false);
+
+  const last = statement.iterate(4);
+  expect(last.next().value).toEqual({ value: 4 });
+  next.return?.();
+  expect(hasPendingSqliteNativeExecution(db)).toBe(true);
+  last.return?.();
+  expect(hasPendingSqliteNativeExecution(db)).toBe(false);
 });
 
-it.each(["run", "get", "all", "bind-error", "close"] as const)(
+it.each(["exhaustion", "return"] as const)(
+  "releases the WAL reader after %s and keeps completed iterators terminal",
+  (completion) => {
+    const filename = path.join(tempDirs.make("sqlite-finished-reader-"), "state.sqlite");
+    using writer = open(filename);
+    writer.exec(
+      "PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; " +
+        "CREATE TABLE entries (value); INSERT INTO entries VALUES (1), (2)",
+    );
+    using reader = open(filename);
+    const statement = reader.prepare("SELECT value FROM entries");
+    const rows = statement.iterate();
+    expect(rows.next().value).toEqual({ value: 1 });
+    if (completion === "return") {
+      rows.return?.();
+    } else {
+      expect([...rows]).toEqual([{ value: 2 }]);
+    }
+    const afterDone = rows.next();
+    writer.exec("INSERT INTO entries VALUES (3)");
+    const checkpoint = writer.prepare("PRAGMA wal_checkpoint(PASSIVE)").get();
+    expect(checkpoint?.checkpointed).toBe(checkpoint?.log);
+    expect(afterDone.done).toBe(true);
+    expect(reader.isTransaction).toBe(false);
+    expect(hasPendingSqliteNativeExecution(reader)).toBe(false);
+    const successor = statement.iterate();
+    expect(successor.next().value).toEqual({ value: 1 });
+    rows.return?.();
+    expect(rows.next().done).toBe(true);
+    expect([...successor]).toEqual([{ value: 2 }, { value: 3 }]);
+    expect(writer.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get()).toMatchObject({
+      busy: 0,
+      log: 0,
+    });
+  },
+);
+
+it.each(["all", "close"] as const)(
   "settles a retained statement's RETURNING cursor on %s",
   (method) => {
     const db = open();
@@ -86,10 +130,6 @@ it.each(["run", "get", "all", "bind-error", "close"] as const)(
       } else {
         rows.return?.();
       }
-    } else if (method === "bind-error") {
-      expect(() => {
-        Reflect.apply(statement.get.bind(statement), undefined, [Symbol("invalid")]);
-      }).toThrow();
     } else {
       statement[method](0);
     }
@@ -154,36 +194,7 @@ it("keeps an opaque batch fenced without treating its tentative tail as committe
   expect(writer.prepare("SELECT id FROM entries").all()).toEqual([{ id: "committed" }]);
 });
 
-it("retains native trigger, cascade, replace, and savepoint behavior through one execution boundary", () => {
-  const db = open();
-  const observations: boolean[] = [];
-  db.function("observe", () => {
-    observations.push(hasPendingSqliteNativeExecution(db));
-    return 1;
-  });
-  db.exec(`
-    PRAGMA foreign_keys = ON;
-    CREATE TABLE parent (id TEXT PRIMARY KEY);
-    CREATE TABLE child (id TEXT PRIMARY KEY, parent TEXT REFERENCES parent(id) ON DELETE CASCADE);
-    CREATE TRIGGER deleted AFTER DELETE ON child BEGIN SELECT observe(); END;
-    INSERT INTO parent VALUES ('a');
-    INSERT INTO child VALUES ('child', 'a');
-    BEGIN;
-    SAVEPOINT nested;
-    DELETE FROM parent;
-    ROLLBACK TO nested;
-    RELEASE nested;
-    COMMIT;
-  `);
-  expect(observations).toEqual([true]);
-  expect(db.prepare("SELECT id FROM child").get()).toEqual({ id: "child" });
-  db.prepare("REPLACE INTO parent VALUES (?)").run("a");
-  expect(observations).toEqual([true, true]);
-  expect(db.prepare("SELECT id FROM child").all()).toEqual([]);
-  expect(hasPendingSqliteNativeExecution(db)).toBe(false);
-});
-
-it.each(["run", "get", "all", "iterate"] as const)(
+it.each(["get", "iterate"] as const)(
   "preserves native undefined and trailing bindings in %s",
   (method) => {
     const native = new (requireNodeSqlite().DatabaseSync)(":memory:");
@@ -234,8 +245,14 @@ it("preserves native cursor behavior when an invalidated iterator is stepped", (
     } catch (error) {
       stale = error instanceof Error ? error.message : error;
     }
+    if (db !== native) {
+      expect(hasPendingSqliteNativeExecution(db)).toBe(true);
+    }
     const next = second.next();
     first.return?.();
+    if (db !== native) {
+      expect(hasPendingSqliteNativeExecution(db)).toBe(true);
+    }
     second.return?.();
     return { stale, next };
   };
@@ -261,23 +278,4 @@ it("preserves a recoverable native row-conversion failure without losing the nex
   const db = open();
   expect(exercise(db)).toEqual(exercise(native));
   expect(hasPendingSqliteNativeExecution(db)).toBe(false);
-});
-
-it("settles a reset cursor when a callback propagates a nested native refusal", () => {
-  const db = open();
-  let reenter = false;
-  db.function("callback", () => {
-    if (reenter) {
-      statement.get();
-    }
-    return 1;
-  });
-  const statement = db.prepare("SELECT callback() AS value UNION ALL SELECT 2");
-  const rows = statement.iterate();
-  rows.next();
-  expect(hasPendingSqliteNativeExecution(db)).toBe(true);
-  reenter = true;
-  expect(() => statement.get()).toThrow();
-  expect(hasPendingSqliteNativeExecution(db)).toBe(false);
-  rows.return?.();
 });

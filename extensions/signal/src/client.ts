@@ -133,7 +133,6 @@ function initiateSignalHttp(
   const client = url.protocol === "https:" ? https : http;
   options.assertDirectAdapterHandoff?.();
   return new Promise((resolve, reject) => {
-    let settled = false;
     const deadline = setTimeout(() => {
       request?.destroy(new Error(`Signal HTTP exceeded deadline after ${timeoutMs}ms`));
     }, timeoutMs);
@@ -142,21 +141,9 @@ function initiateSignalHttp(
       clearTimeout(deadline);
       request?.setTimeout(0);
     };
-    const rejectOnce = (error: unknown) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
+    const rejectResponse = (error: unknown) => {
       cleanup();
       reject(toErrorObject(error, "Non-Error rejection"));
-    };
-    const resolveOnce = (response: SignalHttpResponse) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      resolve(response);
     };
     const maxResponseBytes = Math.floor(
       asPositiveFiniteNumber(options.maxResponseBytes) ?? DEFAULT_SIGNAL_HTTP_RESPONSE_MAX_BYTES,
@@ -177,14 +164,15 @@ function initiateSignalHttp(
             const error = new Error("Signal HTTP response exceeded size limit");
             request?.destroy(error);
             res.destroy(error);
-            rejectOnce(error);
+            rejectResponse(error);
             return;
           }
           chunks.push(next);
         });
-        res.on("error", rejectOnce);
+        res.on("error", rejectResponse);
         res.on("end", () => {
-          resolveOnce({
+          cleanup();
+          resolve({
             status: res.statusCode ?? 0,
             body: Buffer.concat(chunks),
           });
@@ -194,7 +182,7 @@ function initiateSignalHttp(
     request.setTimeout(timeoutMs, () => {
       request?.destroy(new Error(`Signal HTTP timed out after ${timeoutMs}ms`));
     });
-    request.on("error", rejectOnce);
+    request.on("error", rejectResponse);
     if (options.body !== undefined) {
       request.write(options.body);
     }
@@ -275,6 +263,7 @@ function openSignalEventStream(
   url: URL,
   abortSignal?: AbortSignal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  lastEventId?: string,
 ): Promise<{ response: IncomingMessage; cleanup: () => void }> {
   assertSignalHttpProtocol(url, "SSE");
   if (abortSignal?.aborted) {
@@ -317,7 +306,10 @@ function openSignalEventStream(
       url,
       {
         method: "GET",
-        headers: { Accept: "text/event-stream" },
+        headers: {
+          Accept: "text/event-stream",
+          ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
+        },
       },
       (res) => {
         const status = res.statusCode ?? 0;
@@ -356,6 +348,7 @@ export async function streamSignalEvents(params: {
   account?: string;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
+  lastEventId?: string;
   onEvent: (event: SignalSseEvent) => unknown;
   onStreamOpen?: () => void;
 }): Promise<void> {
@@ -371,6 +364,7 @@ export async function streamSignalEvents(params: {
     url,
     params.abortSignal,
     params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    params.lastEventId,
   );
   params.onStreamOpen?.();
   const decoder = new TextDecoder();
@@ -380,7 +374,7 @@ export async function streamSignalEvents(params: {
   let currentEventDataBytes = 0;
 
   const flushEvent = async () => {
-    if (!currentEvent.data && !currentEvent.event && !currentEvent.id) {
+    if (!currentEvent.data && !currentEvent.event && currentEvent.id === undefined) {
       return;
     }
     await params.onEvent({
@@ -416,7 +410,7 @@ export async function streamSignalEvents(params: {
         throw new Error("Signal SSE event data exceeded size limit");
       }
       currentEvent.data = currentEvent.data ? `${currentEvent.data}${segment}` : segment;
-    } else if (field === "id") {
+    } else if (field === "id" && !value.includes("\0")) {
       currentEvent.id = value;
     }
   };
@@ -457,6 +451,4 @@ export async function streamSignalEvents(params: {
   } finally {
     cleanup();
   }
-
-  await flushEvent();
 }

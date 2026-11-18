@@ -117,6 +117,13 @@ kubectl exec -n openclaw deploy/openclaw -- rm /home/node/.openclaw/openclaw.jso
 kubectl rollout restart -n openclaw deploy/openclaw
 ```
 
+Keep `openclaw.json.last-good` and the `openclaw.json.bak*` backups when reseeding.
+A valid replacement does not need a `meta` block: `openclaw doctor --fix` keeps
+it, and the Gateway promotes it to last-good after it starts successfully.
+Truncated or invalid configs still use backup recovery. If recovery replaces a
+file, the warning names the saved `openclaw.json.clobbered.*` original and explains
+how to copy it back after correcting the reported problem.
+
 Deployments created from the previous template applied ConfigMap edits on every pod start (and discarded any config changes made through OpenClaw). If you relied on that flow, use the reseed commands above after ConfigMap edits.
 
 ### Add providers
@@ -166,6 +173,20 @@ To expose the gateway through an Ingress or load balancer:
 - Change the gateway bind in `scripts/k8s/manifests/configmap.yaml` from `loopback` to a non-loopback bind that matches your deployment model.
 - Keep gateway auth enabled and use a proper TLS-terminated entrypoint.
 - Configure the Control UI for remote access using the supported web security model (for example HTTPS/Tailscale Serve and explicit allowed origins when needed).
+
+### Private recovery capture permissions
+
+A volume remount with `fsGroup` can add group permissions and a setgid bit to
+existing directories. Before an admitted Doctor repair takes its original-state
+capture, OpenClaw restores the existing, installation-owned
+`<state-dir>.update-captures` root to private mode. It does not walk the capture
+tree or change the state root, ownership, or shared-volume layout.
+
+Symlinked roots, foreign-owned roots, and roots carrying world permission bits
+are not repaired automatically. The capture owner still refuses unsafe mount
+ancestry; mode repair does not make a shared or replaceable ancestor trusted.
+If Doctor reports that its original-state capture is unavailable, take a verified
+backup and correct the reported storage layout before retrying.
 
 ## Re-deploy
 

@@ -15,6 +15,7 @@ import { appendMemoryWikiLog } from "./log.js";
 import { forEachMarkdownCodeRange } from "./markdown-links.js";
 import {
   createWikiPageFilename,
+  extractHumanNotesBlock,
   HUMAN_START_MARKER,
   HUMAN_END_MARKER,
   preserveHumanNotesBlock,
@@ -26,6 +27,7 @@ import {
 } from "./markdown.js";
 import { resolveMemoryWikiTimestamp } from "./time.js";
 import {
+  readExistingWikiPage,
   readExistingWikiPageUtf8,
   readWikiPageStat,
   writeGuardedVaultPage,
@@ -322,7 +324,12 @@ async function writeOkfConceptPage(params: {
 }): Promise<{ changed: boolean; created: boolean }> {
   const vault = await fsRoot(params.vaultRoot);
   const pageStat = await readWikiPageStat(vault, params.pagePath);
-  const existing = pageStat ? await readExistingWikiPageUtf8(vault, params.pagePath, () => "") : "";
+  const existing = pageStat
+    ? await readExistingWikiPage(
+        () => vault.readText(params.pagePath),
+        (error) => error instanceof FsSafeError && error.code === "not-found",
+      )
+    : "";
   const nextRendered = preserveHumanNotesBlock(params.content, existing, {
     producerMarkdown: true,
   });
@@ -364,9 +371,12 @@ async function removeStaleOkfConceptPages(params: {
     if (params.currentPagePaths.has(pagePath)) {
       continue;
     }
-    const raw = await vault.readText(pagePath).catch(() => "");
+    const raw = await readExistingWikiPageUtf8(vault, pagePath, () => "");
     const parsed = parseWikiMarkdown(raw);
-    if (asNullableRecord(parsed.frontmatter.okf)?.bundleKey === params.bundleKey) {
+    if (
+      asNullableRecord(parsed.frontmatter.okf)?.bundleKey === params.bundleKey &&
+      !extractHumanNotesBlock(raw, { producerMarkdown: true })
+    ) {
       await vault.remove(pagePath);
       removedPagePaths.push(pagePath);
     }

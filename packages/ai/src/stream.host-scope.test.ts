@@ -76,6 +76,30 @@ function deferred() {
 }
 
 describe("runtime-owned transport host", () => {
+  it("shares default and scoped host policy with duplicated transport modules", async () => {
+    const duplicate = (await import(
+      /* @vite-ignore */ new URL("./host.ts?duplicate-host-scope", import.meta.url).href
+    )) as typeof import("./host.js");
+    const registry = registryFor(async () => {
+      await Promise.resolve();
+      return duplicate.getAiTransportHost().resolveSecretSentinel("request");
+    });
+    const runtime = createLlmRuntime(registry);
+    duplicate.configureAiTransportHost({ resolveSecretSentinel: (value) => "default:" + value });
+    expect((await runtime.completeSimple(model, { messages: [] })).content).toEqual([
+      { type: "text", text: "default:request" },
+    ]);
+    const scoped = createNodeLlmRuntime(registry, {
+      resolveSecretSentinel: (value) => "scoped:" + value,
+    });
+    expect((await scoped.completeSimple(model, { messages: [] })).content).toEqual([
+      { type: "text", text: "scoped:request" },
+    ]);
+    expect(duplicate.getDefaultAiTransportHost().resolveSecretSentinel("request")).toBe(
+      "default:request",
+    );
+  });
+
   it.each([false, true])("accepts frozen provider streams (scoped=%s)", async (scoped) => {
     const observations: string[] = [];
     const observe = (operation: string) =>
@@ -294,7 +318,7 @@ describe("runtime-owned transport host", () => {
     }
   });
 
-  it("binds and cleans ordinary streams across default host replacement", async () => {
+  it("binds ordinary streams to their host and cleans the current default", async () => {
     const owners: object[] = [];
     const unregister = registerSessionResourceCleanup((_sessionId, owner) => {
       if (owner) {
@@ -303,7 +327,6 @@ describe("runtime-owned transport host", () => {
     });
     try {
       configureAiTransportHost({ resolveSecretSentinel: (value) => "first:" + value });
-      const firstHost = getDefaultAiTransportHost();
       const runtime = createLlmRuntime(
         registryFor(async (value) => getAiTransportHost().resolveSecretSentinel(value)),
       );
@@ -320,15 +343,7 @@ describe("runtime-owned transport host", () => {
       runtime.cleanupSessionResources("shared");
       runtime.cleanupSessionResources("shared");
 
-      expect(owners).toEqual([firstHost, replacementHost, replacementHost]);
-
-      owners.length = 0;
-      runtime.streamSimple(model, { messages: [] }, { apiKey: "opaque", sessionId: "package" });
-      configureAiTransportHost({ resolveSecretSentinel: (value) => "latest:" + value });
-      const latestHost = getDefaultAiTransportHost();
-      cleanupSessionResources("package");
-      runtime.cleanupSessionResources("package");
-      expect(owners).toEqual([latestHost]);
+      expect(owners).toEqual([replacementHost, replacementHost]);
     } finally {
       unregister();
     }

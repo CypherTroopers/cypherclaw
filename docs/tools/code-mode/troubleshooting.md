@@ -72,6 +72,13 @@ Failure origin is separate from replay safety. When `bridgeDispatchStarted` is
 or another action that changes state—even for a guest error. A failed `exec`
 does not by itself prove that a message was not delivered.
 
+If a new observer fails with `too many suspended code mode runs`, the observed
+workload has not necessarily failed. Resume an existing Code Mode `runId` with
+`wait`. To collect an already-dispatched process, submit a new `exec` with outer
+`awaitResults: true` and poll the original process `sessionId`; required-completion
+cells do not need a suspended-run slot. Do not relaunch the workload to recover
+its output. Process retention and expiry still apply.
+
 ## Telemetry
 
 Each result's `telemetry` field reports: hidden catalog size and a source
@@ -114,6 +121,20 @@ tool inputs beyond existing OpenClaw trajectory policy.
 
 ## Debugging
 
+Bridge rejections are logged at error level under `agents/code-mode`, including
+when the guest catches the rejection. The server record preserves the original
+error class, message, and stack head before guest projection and output limits.
+It includes session, agent-run, Code Mode run, outer tool-call, bridge-request,
+and executor worker identifiers when available. No debug flag is required. File
+logs retain the raw diagnostic; log exports apply their normal redaction.
+
+Node worker heap exhaustion reports `runtime_unavailable` with the configured
+heap allowance and guidance to paginate results or retain less guest data.
+Check completed actions before retrying: worker termination does not undo
+dispatched tools. Worker lifecycle retirement reason `failure` records native
+worker failure, including heap exhaustion; it is separate from an ordinary
+tool rejection reported with `failurePhase: "bridge"`.
+
 JavaScript failure frames labeled `openclaw-code-mode:user.js` use line numbers
 from the submitted JavaScript, excluding internal wrappers and headless setup,
 including after `wait`. Internal wrapper and controller frames are
@@ -136,6 +157,6 @@ This logs a capped, redacted JSON snapshot of the model request; use it only
 while debugging, since prompts and message text can still appear.
 
 For stream debugging, use `OPENCLAW_DEBUG_SSE=peek` to log the first five
-redacted SSE events. Code mode also fails closed if the final provider
-payload does not contain exactly one `exec`, one `wait`, and only approved
+redacted SSE events. Code mode also rejects the final provider
+payload if it does not contain exactly one `exec`, one `wait`, and only approved
 direct-only tools after the code-mode surface has activated.

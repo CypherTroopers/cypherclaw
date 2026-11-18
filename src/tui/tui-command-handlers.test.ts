@@ -787,12 +787,15 @@ describe("tui command handlers", () => {
     await h.sendMessage("must not reach parent");
     await h.handleCommand("/new");
     expect(h.sendChat).not.toHaveBeenCalled();
-    expect(h.createSession).toHaveBeenCalledExactlyOnceWith({
-      key: expect.stringMatching(/^tui-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/),
-      agentId: "work",
-      parentSessionKey: "global",
-      succeedsParent: true,
-    });
+    expect(h.createSession).toHaveBeenCalledExactlyOnceWith(
+      {
+        key: expect.stringMatching(/^tui-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/),
+        agentId: "work",
+        parentSessionKey: "global",
+        succeedsParent: true,
+      },
+      { sessionKey: "global", agentId: "work" },
+    );
     expect(h.addSystem).toHaveBeenCalledWith("session change in progress; wait for /new to finish");
     creation.resolve({ ok: true, key: "agent:work:tui-created" });
     await creating;
@@ -839,6 +842,27 @@ describe("tui command handlers", () => {
     expect(h.state.currentSessionKey).toBe(result.key);
     expect(h.state.currentSessionId).toBe(result.entry.sessionId);
     expect(h.addSystem).toHaveBeenCalledWith("session agent:main:replacement reset");
+  });
+
+  it("forwards /reset soft to the gateway instead of resetting the session", async () => {
+    const h = createTuiCommandHandlersHarness();
+    await h.handleCommand("/reset soft please reload");
+    expectSendChatFields(h.sendChat, {
+      sessionKey: "agent:main:main",
+      message: "/reset soft please reload",
+    });
+    expect(h.sendChat).toHaveBeenCalledOnce();
+    expect(h.resetSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects /reset soft in local mode without resetting the session", async () => {
+    const h = createTuiCommandHandlersHarness({ opts: { local: true } });
+    await h.handleCommand("/reset soft please reload");
+    expect(h.sendChat).not.toHaveBeenCalled();
+    expect(h.resetSession).not.toHaveBeenCalled();
+    expect(h.addSystem).toHaveBeenCalledWith(
+      "/reset soft is not available in local embedded mode; message not sent",
+    );
   });
 
   it("reloads a global session after /reset returns no session entry", async () => {

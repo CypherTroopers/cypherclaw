@@ -13,6 +13,8 @@ import {
   createPluginMetadataSnapshotFixture as createPluginMetadataSnapshot,
 } from "../plugins/plugin-metadata.test-support.js";
 import { registerConfigJsonOutputTests } from "./config-cli.json-output.test-support.js";
+import { registerConfigMutationSchemaTests } from "./config-cli.mutation-schema.test-support.js";
+import { registerProviderEnvTests } from "./config-cli.provider-env.test-support.js";
 import {
   readConfigCliSnapshotWithMetadata,
   type ConfigCliSnapshotReader,
@@ -34,6 +36,12 @@ const mockReadConfigFileSnapshot = vi.fn<ConfigCliSnapshotReader>();
 const mockWriteConfigFile = vi.fn<ConfigCliWriter>(async () => {});
 const mockResolveSecretRefValue = vi.fn();
 const mockCheckTouchedTextModelRefs = vi.fn();
+
+// mock-isolation: Process-level ownership is covered by config-state-owner.process.test.ts.
+vi.mock("./local-state-owner.js", () => ({
+  runWithLocalStateOwner: ({ runLocal }: { runLocal: () => Promise<void> }) => runLocal(),
+}));
+
 const mockReadBestEffortRuntimeConfigSchema = vi.fn();
 const mockLoadPluginMetadataSnapshot = vi.fn((_configForTest: unknown) =>
   createPluginMetadataSnapshot(),
@@ -111,8 +119,10 @@ vi.mock("../secrets/resolve.js", () => ({
   resolveSecretRefValue: (...args: unknown[]) => mockResolveSecretRefValue(...args),
 }));
 
-vi.mock("../config/runtime-schema.js", () => ({
-  readBestEffortRuntimeConfigSchema: () => mockReadBestEffortRuntimeConfigSchema(),
+vi.mock("../config/runtime-schema.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../config/runtime-schema.js")>()),
+  readBestEffortRuntimeConfigSchema: (...args: unknown[]) =>
+    mockReadBestEffortRuntimeConfigSchema(...args),
 }));
 
 vi.mock("./config-model-validation.js", () => ({
@@ -410,6 +420,16 @@ describe("config cli", () => {
     mockCheckTouchedTextModelRefs.mockResolvedValue({ refsChecked: 0, refsTotal: 0, errors: [] });
   });
 
+  registerConfigMutationSchemaTests({
+    runConfigCommand,
+    runConfigSet,
+    setSnapshot,
+    firstWrittenConfig,
+    writeTempJson5File,
+    mockReadBestEffortRuntimeConfigSchema,
+    mockWriteConfigFile,
+  });
+
   describe("config mutations", () => {
     it.each([
       {
@@ -640,7 +660,7 @@ describe("config cli", () => {
       await expect(runConfigCommand(["config", "get", "gateway.port", "--json"])).rejects.toThrow(
         ExitError,
       );
-      expect(mockReadConfigFileSnapshot).toHaveBeenCalledWith({ observe: false });
+      expect(mockReadConfigFileSnapshot.mock.calls.at(-1)?.[0]?.observe).toBe(false);
       expect(mockWriteStdout).not.toHaveBeenCalled();
       expect(mockError).not.toHaveBeenCalled();
       expect(parseLastLogPayload()).toMatchObject({
@@ -901,40 +921,23 @@ describe("config cli", () => {
       });
     });
 
-    it.each([
-      [
-        "leading equals",
-        "=SYNTHETIC_PROVIDER_ENV_SECRET",
-        "--provider-env expects KEY=*** entries.",
-      ],
-      [
-        "whitespace key",
-        "   =SYNTHETIC_PROVIDER_ENV_SECRET",
-        "--provider-env key must not be empty.",
-      ],
-    ])("does not disclose provider env values for a %s entry", async (_name, entry, message) => {
-      const secret = "SYNTHETIC_PROVIDER_ENV_SECRET";
-
-      await expect(
-        runConfigSet(
-          "secrets.providers.runner",
-          "--provider-source",
-          "exec",
-          "--provider-command",
-          "/usr/bin/env",
-          "--provider-env",
-          entry,
-          "--dry-run",
-        ),
-      ).rejects.toThrow(ExitError);
-
-      expect(mockReadConfigFileSnapshot).not.toHaveBeenCalled();
-      expect(mockWriteConfigFile).not.toHaveBeenCalled();
-      expect(JSON.stringify(mockLog.mock.calls)).not.toContain(secret);
-      expect(JSON.stringify(mockWriteStdout.mock.calls)).not.toContain(secret);
-      expect(JSON.stringify(mockError.mock.calls)).not.toContain(secret);
-      expectErrorIncludes(message);
-    });
+    registerProviderEnvTests(() => ({
+      runConfigSet,
+      setGatewaySnapshot,
+      createProviderCommand: () => {
+        const command = path.join(tempDirs.make("openclaw-config-provider-env-"), "resolver");
+        writeSecurePluginEntrypoint(command, "// Fixture command; never executed.\n");
+        return command;
+      },
+      firstWrittenConfig,
+      mockReadConfigFileSnapshot,
+      mockWriteConfigFile,
+      mockLog,
+      mockWriteStdout,
+      mockError,
+      expectErrorIncludes,
+      ExitError,
+    }));
 
     it.skipIf(process.platform === "win32")(
       "rejects an unsafe exec provider command before writing",
@@ -1437,34 +1440,6 @@ describe("config cli", () => {
       expectErrorIncludes("Dry run failed: 1 SecretRef assignment(s) could not be resolved.");
       expectErrorIncludes(message);
     });
-
-    it("canonicalizes schema-backed numeric agent list indexes before writing", async () => {
-      mockReadBestEffortRuntimeConfigSchema.mockResolvedValueOnce({
-        schema: {
-          type: "object",
-          properties: {
-            agents: {
-              type: "object",
-              properties: {
-                list: {
-                  type: "array",
-                  items: { type: "object", properties: { id: { type: "string" } } },
-                },
-              },
-            },
-          },
-        },
-      });
-      const resolved: OpenClawConfig = {};
-      setSnapshot(resolved, resolved);
-
-      await runConfigSet("agents.list.0.id", '"tech"', "--strict-json");
-
-      expect(mockWriteConfigFile).toHaveBeenCalledTimes(1);
-      const written = firstWrittenConfig();
-      expect(written.agents?.entries).toEqual({ tech: {} });
-      expect(written.agents).not.toHaveProperty("list");
-    });
   });
 
   describe("path hardening", () => {
@@ -1637,7 +1612,7 @@ describe("config cli", () => {
       const written = firstWrittenConfig();
       // The real writer's roster-loss guard is exercised by config-cli.integration.test.ts.
       expect(written.agents?.entries).toEqual({ "agent-a": {}, "agent-c": {} });
-      expect(firstWriteConfigOptions()).toEqual({ auditOrigin: "cli" });
+      expect(firstWriteConfigOptions()).toEqual({ auditOrigin: "cli", observe: false });
     });
   });
 

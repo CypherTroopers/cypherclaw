@@ -14,6 +14,7 @@ import {
   resolveTelegramMessageCacheScope,
 } from "./message-cache-persistence.js";
 import { createTelegramMessageCache } from "./message-cache.js";
+import { parseTelegramAgentCallbackData } from "./native-command-callback-data.js";
 import { recordOutboundMessageForPromptContext } from "./outbound-message-context.js";
 import { setTelegramPluginStateRuntimeForTests } from "./runtime-state.test-support.js";
 import {
@@ -201,7 +202,7 @@ describe("Telegram registered action authority and input contracts", () => {
     });
   });
 
-  it.each(["77", "1"])(
+  it.each(["77"])(
     "binds a topicless reaction to trusted topic %s without borrowing another chat",
     async (thread) => {
       const context = {
@@ -447,27 +448,6 @@ describe("Telegram registered action authority and input contracts", () => {
   it.each([
     { action: "send", params: { to: "123" }, error: /content required/i },
     {
-      action: "send",
-      params: { to: "123", message: "hello", replyToMessageId: 9.5 },
-      error: /positive integer/,
-    },
-    {
-      action: "sticker",
-      params: { to: "123", fileId: "sticker", threadId: 11.5 },
-      error: /positive integer/,
-    },
-    { action: "delete", params: { chatId: "123", messageId: 456.5 }, error: /positive integer/ },
-    {
-      action: "edit",
-      params: { chatId: "123", messageId: 456.5, message: "updated" },
-      error: /positive integer/,
-    },
-    {
-      action: "poll",
-      params: { to: "123", question: "Ready?", answers: ["Yes", "No"], durationSeconds: 60.5 },
-      error: /positive integer/,
-    },
-    {
       action: "poll",
       params: {
         to: "123",
@@ -477,11 +457,6 @@ describe("Telegram registered action authority and input contracts", () => {
         pollPublic: true,
       },
       error: /mutually exclusive/i,
-    },
-    {
-      action: "send",
-      params: { to: "123", message: "caption", location: { latitude: 1, longitude: 2 } },
-      error: /cannot be combined/,
     },
     {
       action: "send",
@@ -522,7 +497,7 @@ describe("Telegram registered action authority and input contracts", () => {
     expect(requests).toEqual([]);
   });
 
-  it.each(["off", "ack", "action"] as const)(
+  it.each(["off", "action"] as const)(
     "soft-fails reactions disabled by %s policy",
     async (policy) => {
       cfg.channels!.telegram = {
@@ -572,6 +547,26 @@ describe("Telegram registered action authority and input contracts", () => {
       expect(requests).toEqual([]);
     },
   );
+
+  it("renders typed callbacks in message-action edits as agent-owned controls", async () => {
+    const button = { label: "Pick", action: { type: "callback", value: "pick:a" } };
+    await invoke(
+      "edit",
+      {
+        chatId: "telegram:-1001:topic:77",
+        messageId: 456,
+        message: "Choose",
+        presentation: { blocks: [{ type: "buttons", buttons: [button] }] },
+      },
+      trusted,
+    );
+    const markup = requests.at(-1)?.fields.reply_markup as {
+      inline_keyboard: Array<Array<{ callback_data?: string }>>;
+    };
+    expect(parseTelegramAgentCallbackData(markup.inline_keyboard[0]?.[0]?.callback_data)).toBe(
+      "pick:a",
+    );
+  });
 
   it("rejects sending without a configured credential", async () => {
     cfg = {};

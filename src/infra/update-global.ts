@@ -23,7 +23,7 @@ import type { CommandRunner } from "./update-global-command-runner.js";
 import type { GlobalInstallManager } from "./update-global-env.js";
 import {
   resolvePnpmGlobalDirFromGlobalRoot,
-  resolvePnpmHome,
+  resolvePnpmCommand,
 } from "./update-native-package-owner.js";
 import {
   inspectNpmLauncher,
@@ -834,16 +834,14 @@ function normalizeGlobalInstallCommand(
   managerOrCommand: GlobalInstallManager | ResolvedGlobalInstallCommand,
   pkgRoot?: string | null,
 ): ResolvedGlobalInstallCommand {
-  const pnpmHome = resolvePnpmHome(inferPnpmGlobalRootFromPackageRoot(pkgRoot));
-  const pnpm =
-    pnpmHome && path.join(pnpmHome, "bin", process.platform === "win32" ? "pnpm.cmd" : "pnpm");
+  const pnpm = resolvePnpmCommand(inferPnpmGlobalRootFromPackageRoot(pkgRoot));
   return typeof managerOrCommand === "string"
     ? {
         manager: managerOrCommand,
         command:
           managerOrCommand === "npm"
             ? (resolvePreferredNpmCommand(pkgRoot) ?? managerOrCommand)
-            : managerOrCommand === "pnpm" && pnpm && fsSync.existsSync(pnpm)
+            : managerOrCommand === "pnpm" && pnpm
               ? pnpm
               : managerOrCommand === "bun" && process.versions.bun
                 ? process.execPath
@@ -1188,7 +1186,7 @@ export async function cleanupGlobalRenameDirs(params: {
     }
     const target = path.join(root, entry);
     try {
-      const stat = await fs.lstat(target);
+      const stat = await fs.lstat(target, { bigint: true });
       if (!stat.isDirectory()) {
         continue;
       }
@@ -1201,7 +1199,7 @@ export async function cleanupGlobalRenameDirs(params: {
       if (Date.now() >= inspectionDeadline) {
         break;
       }
-      const current = await fs.lstat(target);
+      const current = await fs.lstat(target, { bigint: true });
       if (!current.isDirectory() || !sameFileIdentity(stat, current)) {
         continue;
       }

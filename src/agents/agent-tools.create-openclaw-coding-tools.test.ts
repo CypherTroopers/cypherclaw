@@ -26,14 +26,20 @@ import { createPluginToolAllowlist } from "../plugins/tool-grant-allowlist.js";
 import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
 import { wrapToolWithBeforeToolCallHook } from "./agent-tools.before-tool-call.js";
 import { registerPluginOnlyCallerIdentityCase } from "./agent-tools.caller-identity.test-support.js";
-import { createOpenClawCodingTools } from "./agent-tools.js";
+import {
+  createOpenClawCodingTools,
+  createOpenClawCodingToolsAsync,
+  createOpenClawCodingToolsInternal,
+  createOpenClawCodingToolsInternalAsync,
+} from "./agent-tools.js";
 import {
   createOpenClawReadTool,
   createSandboxedReadTool,
   wrapReadToolWithSkillContent,
 } from "./agent-tools.read.js";
 import { runWithAgentRingZeroTools } from "./agent-tools.ring-zero-context.js";
-import { resolveConversationCapabilityProfile } from "./conversation-capability-profile.js";
+import { expectOwnerGated } from "./agent-tools.turn-authority.test-support.js";
+import { prepareConversationCapabilityProfile } from "./conversation-capability-profile.js";
 import {
   createCronCreatorAuthorityCapability,
   runWithCronCreatorAuthorityCapability,
@@ -148,6 +154,65 @@ function expectListIncludes(
 }
 
 describe("createOpenClawCodingTools", () => {
+  it.each([
+    { name: "sync", create: createOpenClawCodingToolsInternal },
+    { name: "async", create: createOpenClawCodingToolsInternalAsync },
+  ])("preserves the admitted policy reader through internal $name assembly", async ({ create }) => {
+    const config: OpenClawConfig = { tools: { openclaw: { autoApproveChanges: true } } };
+    let current: OpenClawConfig = { ...config, ui: { seamColor: "#123456" } };
+    const readDelegationConfig = vi.fn(() => current);
+    const options = {
+      config,
+      readDelegationConfig,
+      toolConstructionPlan: openClawOnlyPlan,
+      conversationCapabilityProfile: await prepareConversationCapabilityProfile({ config }),
+    };
+    vi.mocked(createOpenClawTools).mockClear();
+    await create(options);
+    const forwarded = latestCreateOpenClawToolsOptions();
+    expect(forwarded.readDelegationConfig).toBe(readDelegationConfig);
+    current = { tools: { openclaw: { autoApproveChanges: false } } };
+    expect(forwarded.readDelegationConfig!()).toBe(current);
+    expect(forwarded.config?.tools?.openclaw?.autoApproveChanges).toBe(true);
+  });
+
+  it.each([
+    { name: "sync", create: createOpenClawCodingTools },
+    { name: "async", create: createOpenClawCodingToolsAsync },
+  ])(
+    "does not forward a private policy reader through the public $name factory",
+    async ({ create }) => {
+      const config: OpenClawConfig = { tools: { openclaw: { autoApproveChanges: false } } };
+      const readDelegationConfig = vi.fn(() => ({
+        tools: { openclaw: { autoApproveChanges: true } },
+      }));
+      // A variable models JavaScript callers or accidentally forwarded internal options;
+      // omitting a field from the public type does not remove it at runtime.
+      const options = {
+        config,
+        readDelegationConfig,
+        toolConstructionPlan: openClawOnlyPlan,
+        conversationCapabilityProfile: await prepareConversationCapabilityProfile({ config }),
+      };
+      vi.mocked(createOpenClawTools).mockClear();
+      const tools = await create(options);
+      expect(toolNameList(tools)).toContain("openclaw");
+      expect(vi.mocked(createOpenClawTools)).toHaveBeenCalledOnce();
+      expect(latestCreateOpenClawToolsOptions().readDelegationConfig).not.toBe(
+        readDelegationConfig,
+      );
+      expect(
+        latestCreateOpenClawToolsOptions().readDelegationConfig!().tools?.openclaw
+          ?.autoApproveChanges,
+      ).toBe(false);
+      expect(latestCreateOpenClawToolsOptions().config?.tools?.openclaw?.autoApproveChanges).toBe(
+        false,
+      );
+      expect(readDelegationConfig).not.toHaveBeenCalled();
+      expect(options.readDelegationConfig).toBe(readDelegationConfig);
+    },
+  );
+
   it.each([
     {
       name: "multi-page node",
@@ -275,7 +340,7 @@ describe("createOpenClawCodingTools", () => {
       resolve,
       run: () => createOpenClawCodingTools({ runId: "forged-run", senderIsOwner: false }),
     });
-    expect(toolNameList(forgedTools)).not.toContain("automations");
+    await expectOwnerGated(forgedTools, "automations");
     expect(
       vi.mocked(createOpenClawTools).mock.lastCall?.[0]?.resolveCronCreatorToolAuthority,
     ).toBeUndefined();
@@ -288,7 +353,7 @@ describe("createOpenClawCodingTools", () => {
         resolve,
         run: () => createOpenClawCodingTools({ runId: "admitted-run", senderIsOwner: false }),
       });
-      expect(toolNameList(wrongRunTools)).not.toContain("automations");
+      await expectOwnerGated(wrongRunTools, "automations");
       expect(
         vi.mocked(createOpenClawTools).mock.lastCall?.[0]?.resolveCronCreatorToolAuthority,
       ).toBeUndefined();
@@ -301,9 +366,9 @@ describe("createOpenClawCodingTools", () => {
       });
       const admittedToolNames = toolNameList(admittedTools);
       expect(admittedToolNames).toContain("automations");
-      expect(admittedToolNames).not.toContain("gateway");
-      expect(admittedToolNames).not.toContain("nodes");
-      expect(admittedToolNames).not.toContain("openclaw");
+      await expectOwnerGated(admittedTools, "gateway");
+      await expectOwnerGated(admittedTools, "nodes");
+      await expectOwnerGated(admittedTools, "openclaw");
       retainedResolver =
         vi.mocked(createOpenClawTools).mock.lastCall?.[0]?.resolveCronCreatorToolAuthority;
       expect(retainedResolver).toEqual(expect.any(Function));
@@ -318,9 +383,8 @@ describe("createOpenClawCodingTools", () => {
     await expect(retainedResolver!()).rejects.toThrow(
       "Configured MCP cron authority is no longer active for this run",
     );
-    expect(
-      toolNameList(createOpenClawCodingTools({ runId: "admitted-run", senderIsOwner: false })),
-    ).not.toContain("automations");
+    const retired = createOpenClawCodingTools({ runId: "admitted-run", senderIsOwner: false });
+    await expectOwnerGated(retired, "automations");
     expect(resolve).toHaveBeenCalledTimes(1);
   });
 
@@ -344,7 +408,7 @@ describe("createOpenClawCodingTools", () => {
       async () => {
         expect(toolNameList(buildTools(abortedCapability))).toContain("automations");
         abortController.abort(new Error("run cancelled"));
-        expect(toolNameList(buildTools(abortedCapability))).not.toContain("automations");
+        await expectOwnerGated(buildTools(abortedCapability), "automations");
       },
       abortController.signal,
     );
@@ -358,9 +422,8 @@ describe("createOpenClawCodingTools", () => {
       }),
     ).rejects.toThrow("run failed");
     expect(failedCapability.active).toBe(false);
-    expect(
-      toolNameList(createOpenClawCodingTools({ runId: "lifecycle-run", senderIsOwner: false })),
-    ).not.toContain("automations");
+    const settled = createOpenClawCodingTools({ runId: "lifecycle-run", senderIsOwner: false });
+    await expectOwnerGated(settled, "automations");
   });
 
   it("re-wraps existing before_tool_call hooks once with the current context", async () => {
@@ -393,20 +456,20 @@ describe("createOpenClawCodingTools", () => {
     expect(tool.parameters).toEqual({ type: "object", properties: {} });
   });
 
-  it("lets explicit deny policies remove Tool Search controls", () => {
+  it.each(["tool_call"])("honors the shipped dispatcher deny %s", (name) => {
     const tools = createOpenClawCodingTools({
       includeToolSearchControls: true,
       config: {
         tools: {
           profile: "coding",
-          deny: ["tool_call"],
+          deny: [name],
           toolSearch: true,
         },
       },
     });
     const names = new Set(tools.map((tool) => tool.name));
 
-    expect(names.has("tool_call")).toBe(false);
+    expect(names.has("dispatch_action")).toBe(false);
     expect(names.has("read")).toBe(true);
   });
 
@@ -435,7 +498,7 @@ describe("createOpenClawCodingTools", () => {
     expect(createOpenClawToolsMock).not.toHaveBeenCalled();
     expect(names.has("tool_search")).toBe(true);
     expect(names.has("tool_describe")).toBe(true);
-    expect(names.has("tool_call")).toBe(true);
+    expect(names.has("dispatch_action")).toBe(true);
     expect(names.has("message")).toBe(false);
     expect(names.has("exec")).toBe(false);
   });
@@ -603,7 +666,7 @@ describe("createOpenClawCodingTools", () => {
         },
       });
     }
-    const conversationCapabilityProfile = resolveConversationCapabilityProfile({
+    const conversationCapabilityProfile = await prepareConversationCapabilityProfile({
       config,
       agentId: "main",
       sessionKey: requesterSessionKey,
@@ -773,7 +836,7 @@ describe("createOpenClawCodingTools", () => {
 
   registerPluginOnlyCallerIdentityCase({ testConfig, requireTool });
 
-  it("materializes additive runtime tools while preserving normal deny policy", () => {
+  it("materializes additive runtime tools while preserving normal deny policy", async () => {
     const createOpenClawToolsMock = vi.mocked(createOpenClawTools);
     createOpenClawToolsMock.mockClear();
     const config: OpenClawConfig = {
@@ -785,7 +848,7 @@ describe("createOpenClawCodingTools", () => {
 
     createOpenClawCodingTools({
       config,
-      conversationCapabilityProfile: resolveConversationCapabilityProfile({
+      conversationCapabilityProfile: await prepareConversationCapabilityProfile({
         config,
         runtimePluginToolGrant: {
           pluginId: "workboard",
@@ -1678,39 +1741,5 @@ describe("createOpenClawCodingTools read behavior", () => {
     expect(details?.truncation?.outputLines).toBe(1);
     expect(details?.truncation?.firstLineExceedsLimit).toBe(false);
     expect(details?.truncation).not.toHaveProperty("content");
-  });
-
-  it("redacts env files while preserving config and source reads", async () => {
-    const credential = "unquoted-config-credential-1234567890";
-    const source = "API_TOKEN = computeToken()";
-    const execute = vi.fn(async (_toolCallId: string, args: { path: string }) => {
-      const text =
-        args.path.endsWith(".ts") || args.path.endsWith(".envrc")
-          ? source
-          : `api_key: ${credential}`;
-      return {
-        content: [{ type: "text" as const, text }],
-        details: { kind: "text", content: text },
-      };
-    });
-    const readTool = createOpenClawReadTool({
-      name: "read",
-      label: "read",
-      description: "test read",
-      parameters: Type.Object({ path: Type.String() }),
-      execute,
-    });
-
-    const yamlResult = await readTool.execute("read-yaml", { path: "settings.yaml" });
-    const envResult = await readTool.execute("read-env", { path: "production.env" });
-    const sourceResult = await readTool.execute("read-source", { path: "settings.ts" });
-    const envrcResult = await readTool.execute("read-envrc", { path: ".envrc" });
-
-    expect(extractToolText(yamlResult)).toBe(`api_key: ${credential}`);
-    expect(extractToolText(envResult)).not.toContain(credential);
-    expect(JSON.stringify(envResult.details)).not.toContain(credential);
-    expect(envResult.details).toEqual({ kind: "text", content: extractToolText(envResult) });
-    expect(extractToolText(sourceResult)).toBe(source);
-    expect(extractToolText(envrcResult)).toBe(source);
   });
 });

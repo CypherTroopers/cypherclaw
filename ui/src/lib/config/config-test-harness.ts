@@ -17,6 +17,7 @@ export function createGatewayHarness(client: GatewayBrowserClient) {
     phase: ApplicationGatewayPhase;
     sessionKey: string;
     hello?: GatewayHelloOk | null;
+    pluginCapabilities?: { generation?: number } | null;
   } = { client, phase: "connected", sessionKey: "main", hello: configGatewayHello() };
   const listeners = new Set<(next: typeof snapshot) => void>();
   return {
@@ -33,12 +34,14 @@ export function createGatewayHarness(client: GatewayBrowserClient) {
       connected: boolean,
       nextClient: GatewayBrowserClient = client,
       hello?: GatewayHelloOk | null,
+      pluginCapabilities?: { generation?: number } | null,
     ) => {
       snapshot = {
         client: nextClient,
         phase: connected ? "connected" : "reconnecting",
         sessionKey: "main",
         hello: hello === undefined ? configGatewayHello() : hello,
+        pluginCapabilities,
       };
       for (const listener of listeners) {
         listener(snapshot);
@@ -83,7 +86,14 @@ export function createConfigServerMock() {
     }
     return {};
   });
-  return { request, submissions, currentHash: () => `hash-${hashCounter}` };
+  return {
+    request,
+    submissions,
+    currentHash: () => `hash-${hashCounter}`,
+    markApplied: () => {
+      appliedHash = `hash-${hashCounter}`;
+    },
+  };
 }
 
 /**
@@ -126,7 +136,9 @@ export function createDeferredSetServerMock(firstAckConfig?: Record<string, unkn
   return { request, submissions, applySubmissions, firstSet };
 }
 
-export function createConfigCapabilityHarness(request: GatewayBrowserClient["request"]) {
+export function createConfigCapabilityHarness(
+  request: (...args: Parameters<GatewayBrowserClient["request"]>) => Promise<unknown>,
+) {
   const client = { request } as unknown as GatewayBrowserClient;
   const { gateway, publish } = createGatewayHarness(client);
   return { runtimeConfig: createRuntimeConfigCapability(gateway), publish };

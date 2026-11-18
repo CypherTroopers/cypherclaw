@@ -1,5 +1,5 @@
 import type { ChatCompletionChunk } from "openai/resources/chat/completions.js";
-import { expect } from "vitest";
+import { afterAll, expect } from "vitest";
 import {
   configureAiTransportHost,
   getAiTransportHost,
@@ -130,6 +130,11 @@ configureAiTransportHost({
   },
 });
 
+// This fixture overrides the process-shared host only for its importing test file.
+afterAll(() => {
+  configureAiTransportHost(baseTestHost);
+});
+
 export function makeCompletionsModel(
   overrides: Partial<Model<"openai-completions">> = {},
 ): Model<"openai-completions"> {
@@ -200,17 +205,6 @@ export async function* streamChunks(chunks: readonly unknown[]): AsyncGenerator<
   for (const chunk of chunks) {
     yield chunk as never;
   }
-}
-
-export function neverYieldsStream(): AsyncIterable<unknown> {
-  return {
-    [Symbol.asyncIterator]() {
-      return {
-        next: async () => await new Promise<IteratorResult<unknown>>(() => {}),
-        return: async () => ({ done: true, value: undefined }),
-      };
-    },
-  };
 }
 
 export function expectRecordFields(record: unknown, expected: Record<string, unknown>) {

@@ -64,7 +64,8 @@ function managedService(
     }),
     readLoadState: async () => ({ status: running ? "loaded" : "not-loaded" }),
     isLoaded: async () => running,
-    isEnabled: async () => running,
+    // Native autostart is policy, not the current process running state.
+    isEnabled: vi.fn(async () => initiallyRunning),
     stop,
     restart,
   };
@@ -259,6 +260,37 @@ describe("Doctor invoked by the published 2026.6.33 updater", () => {
     },
   );
 
+  it("refuses automatic restoration when native autostart policy drifts during repair", async () => {
+    vi.spyOn(runtimePaths, "resolveNodeRuntimeInfo").mockResolvedValue({
+      status: "supported",
+      version: "26.8.1",
+      sqliteVersion: "3.53.4",
+      sqliteProbe: { available: true, version: "3.53.4", text: true, blob: true, json: true },
+      nodeSharedSqlite: false,
+    });
+    await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+      await state.writeConfig({});
+      const events: string[] = [];
+      const service = managedService(state, true, events);
+      inspectStaleBuild();
+      mocks.runContributions.mockImplementation(async () => {
+        events.push("repair");
+        service.isEnabled.mockResolvedValue(false);
+      });
+      const runtime = { log: vi.fn(), error: vi.fn(), exit: vi.fn() };
+
+      await expect(
+        runDoctorHealthFlow(runtime, { repair: true, nonInteractive: true }),
+      ).rejects.toThrow("Gateway native autostart policy changed during Doctor repair");
+
+      expect(events).toEqual(["stop", "repair"]);
+      expect(service.stop).toHaveBeenCalledOnce();
+      expect(service.restart).not.toHaveBeenCalled();
+      expect(mocks.waitForGatewayHealthyRestart).not.toHaveBeenCalled();
+      expect(mocks.outro).not.toHaveBeenCalledWith("Doctor complete.");
+    });
+  });
+
   it.each(["running", "stopped"] as const)(
     "records unverified restoration after offline repair when the service is %s",
     async (serviceStatus) => {
@@ -311,7 +343,9 @@ describe("Doctor invoked by the published 2026.6.33 updater", () => {
             result: expect.objectContaining({
               status: "ok",
               warnings: expect.arrayContaining([
-                expect.stringContaining("Gateway started but readiness was not verified"),
+                expect.stringContaining(
+                  "Gateway started after Doctor maintenance, but readiness was not verified",
+                ),
                 expect.stringContaining("synthetic readiness failure"),
                 expect.stringContaining(
                   formatCliCommand("openclaw gateway status --deep", state.env),
@@ -354,7 +388,7 @@ describe("Doctor invoked by the published 2026.6.33 updater", () => {
         expect(mocks.waitForGatewayHealthyRestart).toHaveBeenCalledOnce();
         expect(service.restart).toHaveBeenCalledOnce();
         expect(runtime.log).not.toHaveBeenCalledWith(
-          "Gateway restarted and verified after Doctor repair.",
+          "Gateway restarted and verified after Doctor maintenance.",
         );
       });
     },

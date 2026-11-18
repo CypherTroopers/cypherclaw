@@ -22,6 +22,7 @@ import {
   useNoBundledPlugins,
   writePlugin,
 } from "../plugins/loader.test-fixtures.js";
+import { pluginInvocationContext } from "../plugins/plugin-instance-scope.js";
 import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
 import type { PluginRegistry } from "../plugins/registry-types.js";
 import { setActivePluginRegistry } from "../plugins/runtime.js";
@@ -30,6 +31,10 @@ import {
   getPluginRuntimeGenerationRegistry,
   withPluginRuntimeGenerationScope,
 } from "../plugins/runtime/generation-scope.js";
+import {
+  createColdPluginFixture,
+  isColdPluginRuntimeLoaded,
+} from "../plugins/test-helpers/cold-plugin-fixtures.js";
 import { AsyncWorkScope, trackAsyncWork } from "../shared/async-work-scope.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { withEnvAsync } from "../test-utils/env.js";
@@ -75,6 +80,8 @@ function nativeImageFixture(
     setupTailReads: 0,
     reasoningOnly: false,
     calls: 0,
+    readInvocation: () => pluginInvocationContext.getStore(),
+    streamRetainedInstances: [] as string[],
     setupReads: 0,
     watchCancellation: false,
     holdWork: false,
@@ -155,6 +162,7 @@ module.exports = { id: ${JSON.stringify(id)}, register(api) {
               state.workSettled.resolve();
             });
         }
+        state.streamRetainedInstances = state.readInvocation()?.retainedInstances?.map((instance) => instance.pluginId) ?? [];
         state.calls++;
         state.started.resolve();
         try {
@@ -275,6 +283,78 @@ afterEach(async () => {
   resetPluginLoaderTestStateForTest();
 });
 afterAll(cleanupPluginLoaderFixturesForTest);
+
+it("keeps internally acquired execution custody through image streaming and tracked tails", async () => {
+  const fixture = nativeImageFixture();
+  try {
+    await fixture.environment(async () => {
+      useNoBundledPlugins();
+      fixture.state.holdWork = true;
+      const result = describeImageWithModelCore(fixture.request);
+      try {
+        await fixture.state.started.promise;
+        expect(fixture.state.streamRetainedInstances).toContain(fixture.id);
+        fixture.state.finish.resolve();
+        expect(await result).toMatchObject({ text: "native image 42" });
+        expect(fixture.state.connections[0]!.database.isOpen).toBe(true);
+        fixture.state.finishWork.resolve();
+        await fixture.state.workSettled.promise;
+      } finally {
+        fixture.state.finish.resolve();
+        fixture.state.finishWork.resolve();
+        await result;
+      }
+    });
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+it("describes images without evaluating configured memory or context plugins", async () => {
+  const fixture = nativeImageFixture();
+  const agentOwners = ["memory", "context"].map((kind) => {
+    const rootDir = path.join(fixture.dir, kind);
+    fs.mkdirSync(rootDir);
+    return createColdPluginFixture({
+      rootDir,
+      pluginId: `expensive-${kind}`,
+      manifest: kind === "memory" ? { kind: "memory" } : {},
+      runtimeMessage: "Image descriptions must not evaluate agent-owned plugins",
+    });
+  });
+  const cfg: OpenClawConfig = {
+    ...fixture.config,
+    plugins: {
+      allow: [fixture.id, ...agentOwners.map((plugin) => plugin.pluginId)],
+      load: {
+        paths: [
+          ...(fixture.config.plugins?.load?.paths ?? []),
+          ...agentOwners.map((plugin) => plugin.rootDir),
+        ],
+      },
+      slots: { memory: "expensive-memory", contextEngine: "expensive-context" },
+      entries: Object.fromEntries(
+        agentOwners.map((plugin) => [plugin.pluginId, { enabled: true }]),
+      ),
+    },
+  };
+  try {
+    await fixture.environment(async () => {
+      useNoBundledPlugins();
+      fixture.state.finish.resolve();
+      expect(
+        await describeImageWithModelCore({ ...fixture.request, cfg, timeoutMs: 30_000 }),
+      ).toMatchObject({
+        text: "native image 42",
+      });
+      for (const owner of agentOwners) {
+        expect(isColdPluginRuntimeLoaded(owner)).toBe(false);
+      }
+    });
+  } finally {
+    fixture.cleanup();
+  }
+});
 
 it("does not dispatch an image completion retired during transport initialization", async () => {
   const fixture = nativeImageFixture();

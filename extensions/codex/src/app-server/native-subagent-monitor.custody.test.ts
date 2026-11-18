@@ -6,11 +6,14 @@ import {
   ensureCodexAppServerClientRuntime,
   hasCodexAppServerLiveThread,
   isCodexAppServerLiveThreadClaimed,
+  isCodexAppServerLiveThreadProtected,
   protectCodexAppServerLiveThread,
   releaseCodexAppServerLiveThread,
   retainCodexAppServerLiveThread,
 } from "./client-runtime.js";
+import { createNativeSubagentCompletionCustodyFixture as createCustody } from "./native-subagent-custody.test-support.js";
 import { createCodexNativeSubagentHistoryOwner } from "./native-subagent-history-owner.js";
+import { codexNativeSubagentMonitorRuntime } from "./native-subagent-monitor.js";
 import {
   closeAgentNotification,
   registerDetachedChild,
@@ -35,6 +38,8 @@ import type {
 import type { CodexServerNotification } from "./protocol.js";
 import { matchesCodexNativeSubagentSubmissionBinding } from "./session-binding-record.js";
 import { createCodexTestBindingStore } from "./session-binding.test-helpers.js";
+import { createCodexThreadLifecycleTimingTracker } from "./thread-lifecycle-timing.js";
+import { releaseCodexBoundLiveThread } from "./thread-lifecycle-warm.js";
 
 function spawnNotification(
   childThreadId = "child-thread",
@@ -47,45 +52,6 @@ function spawnNotification(
       turnId,
       item: directSpawnItem("v2", "parent-thread", childThreadId),
     },
-  };
-}
-
-function createCustody() {
-  const holds: AgentHarnessCompletionCustody[] = [];
-  const executions = new Set<AgentHarnessCompletionCustody>();
-  const released = createDeferred<void>();
-  const retain = (settled = false): AgentHarnessCompletionCustody => {
-    const lifetime = new AbortController();
-    const hold: AgentHarnessCompletionCustody = {
-      signal: lifetime.signal,
-      isCurrent: () => !lifetime.signal.aborted,
-      retain() {
-        lifetime.signal.throwIfAborted();
-        return retain(!executions.has(hold));
-      },
-      settleExecution: () => {
-        executions.delete(hold);
-      },
-      release() {
-        executions.delete(hold);
-        lifetime.abort();
-        if (holds.every((entry) => entry.signal.aborted)) {
-          released.resolve();
-        }
-      },
-    };
-    holds.push(hold);
-    if (!settled) {
-      executions.add(hold);
-    }
-    return hold;
-  };
-  return {
-    root: retain(),
-    holds,
-    executions,
-    released: released.promise,
-    live: () => holds.filter((hold) => !hold.signal.aborted),
   };
 }
 
@@ -121,7 +87,8 @@ describe("native assignment completion custody", () => {
         completionScope: createCompletionScope("agent:main:original"),
         agentId: "main",
         claimDirectChild,
-        assertCurrent: () => {
+        assertCurrentAsync: async () => {
+          await Promise.resolve();
           if (!current) {
             throw new Error("Caller registration is no longer current");
           }
@@ -475,7 +442,7 @@ describe("Codex native parent retirement", () => {
   );
 });
 
-async function createSubmissionFixture() {
+async function createSubmissionFixture(acknowledgePredecessor = true) {
   const identity = { kind: "session" as const, agentId: "main", sessionId: "parent-session" };
   const binding = {
     threadId: "parent-thread",
@@ -515,6 +482,7 @@ async function createSubmissionFixture() {
         throw new Error("Submission binding changed.");
       }
     },
+    assertCurrentAsync: async () => submissionStore.assertCurrent(),
     read: () => bindingStore.readNativeSubagentSubmissions(identity, owner),
     record: (receipt, guard) =>
       bindingStore.mutate(
@@ -549,6 +517,7 @@ async function createSubmissionFixture() {
     },
   });
   onTestFinished(async () => {
+    await codexNativeSubagentMonitorRuntime.retireParent(client as never, binding.threadId);
     client.close();
     await parent.unregister();
   });
@@ -562,28 +531,32 @@ async function createSubmissionFixture() {
       items: [{ id: "a", type: "agentMessage", text: "result A" }],
     }),
   );
-  await client.notify({
-    method: "item/completed",
-    params: {
-      threadId: binding.threadId,
-      turnId: "parent-turn-a",
-      item: {
-        type: "collabAgentToolCall",
-        tool: "wait",
-        status: "completed",
-        senderThreadId: binding.threadId,
-        receiverThreadIds: ["child-thread"],
-        agentsStates: { "child-thread": { status: "completed", message: "result A" } },
+  const acknowledgeInitialResult = (turnId = "parent-turn-a") =>
+    client.notify({
+      method: "item/completed",
+      params: {
+        threadId: binding.threadId,
+        turnId,
+        item: {
+          type: "collabAgentToolCall",
+          tool: "wait",
+          status: "completed",
+          senderThreadId: binding.threadId,
+          receiverThreadIds: ["child-thread"],
+          agentsStates: { "child-thread": { status: "completed", message: "result A" } },
+        },
       },
-    },
-  });
-  await vi.waitFor(() =>
-    expect(isCodexAppServerLiveThreadClaimed(client as never, "child-thread")).toBe(false),
-  );
-  expect(holds).toEqual({ client: 0, parent: 0, child: 0 });
+    });
+  if (acknowledgePredecessor) {
+    await acknowledgeInitialResult();
+    await vi.waitFor(() =>
+      expect(isCodexAppServerLiveThreadClaimed(client as never, "child-thread")).toBe(false),
+    );
+    expect(holds).toEqual({ client: 0, parent: 0, child: 0 });
+  }
   runtime.deliverAgentHarnessCompletion.mockClear();
 
-  const submit = async (submissionId: string) => {
+  const submit = async (submissionId: string, detach = true) => {
     parent.bindTurn("parent-turn-b");
     await client.notify({
       method: "item/completed",
@@ -609,9 +582,11 @@ async function createSubmissionFixture() {
         submissionId,
       }),
     );
-    await parent.unregister();
-    expect(submissionStore.read()).toHaveLength(1);
-    expect(holds).toEqual({ client: 0, parent: 0, child: 0 });
+    await vi.waitFor(async () => expect(await submissionStore.read()).toHaveLength(1));
+    if (detach) {
+      await parent.unregister();
+      expect(holds).toEqual({ client: 0, parent: 0, child: 0 });
+    }
   };
   return {
     client,
@@ -622,15 +597,61 @@ async function createSubmissionFixture() {
     submissionStore,
     unsubscribe,
     submit,
+    acknowledgeInitialResult,
   };
 }
+
+it.each([true, false])(
+  "allows parent resume with an unacknowledged follow-up (predecessor acknowledged first=%s)",
+  async (acknowledgeFirst) => {
+    vi.useFakeTimers();
+    const fixture = await createSubmissionFixture(acknowledgeFirst);
+    const { client, parent, runtime, holds, consume, submissionStore } = fixture;
+    runtime.deliverAgentHarnessCompletion.mockResolvedValue({
+      delivered: false,
+      path: "direct",
+      error: "requester temporarily unavailable",
+    });
+    await fixture.submit("turn-b", false);
+    await startTurn(client, "turn-b");
+    if (!acknowledgeFirst) {
+      await fixture.acknowledgeInitialResult("parent-turn-b");
+    }
+    await parent.unregister();
+    const releaseForResume = () =>
+      releaseCodexBoundLiveThread({
+        client: client as never,
+        threadId: "parent-thread",
+        lifecycleTiming: createCodexThreadLifecycleTimingTracker({ enabled: false }),
+      });
+    await expect(releaseForResume()).rejects.toThrow("claimed by active work; stop it first");
+    const receipt = structuredClone(await submissionStore.read());
+    await completeTurn(client, "turn-b", "result B");
+
+    await expect(releaseForResume()).resolves.toBe(true);
+    expect(holds.parent).toBe(0);
+    expect(isCodexAppServerLiveThreadProtected(client as never, "child-thread")).toBe(false);
+    expect(await submissionStore.read()).toEqual(receipt);
+    expect(consume).not.toHaveBeenCalled();
+    expect(runtime.deliverAgentHarnessCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({ result: "result B" }),
+    );
+
+    runtime.deliverAgentHarnessCompletion.mockResolvedValue({ delivered: true, path: "direct" });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(async () => expect(await submissionStore.read()).toEqual([]));
+    await completeTurn(client, "turn-b", "result B");
+    expect(consume).toHaveBeenCalledOnce();
+    expect(holds).toEqual({ client: 0, parent: 0, child: 0 });
+  },
+);
 
 it("stops observing opaque receipts when existing warm subscriptions expire", async () => {
   const fixture = await createSubmissionFixture();
   const { client, runtime, holds, consume, submissionStore, unsubscribe } = fixture;
   vi.useFakeTimers({ shouldClearNativeTimers: true });
   await fixture.submit("815dc55d-2d19-4bfe-9fd3-038ce4d6aada");
-  const receipt = structuredClone(submissionStore.read());
+  const receipt = structuredClone(await submissionStore.read());
   const reads = () =>
     client.request.mock.calls.filter(([method]) => method === "thread/read").length;
   // The existing client-runtime owner expires unprotected subscriptions after 30 minutes.
@@ -647,11 +668,11 @@ it("stops observing opaque receipts when existing warm subscriptions expire", as
   await vi.advanceTimersByTimeAsync(300_000);
   expect(reads()).toBe(readsAtExpiry);
   expect(holds).toEqual({ client: 0, parent: 0, child: 0 });
-  expect(submissionStore.read()).toEqual(receipt);
+  expect(await submissionStore.read()).toEqual(receipt);
   expect(consume).not.toHaveBeenCalled();
   expect(runtime.deliverAgentHarnessCompletion).not.toHaveBeenCalled();
   await client.notify(turnStartedNotification(receipt[0]!.submissionId));
-  expect(submissionStore.read()).toEqual(receipt);
+  expect(await submissionStore.read()).toEqual(receipt);
   expect(holds).toEqual({ client: 0, parent: 0, child: 0 });
 });
 
@@ -663,7 +684,7 @@ it("admits a delayed exact start under warm backing and retains its completion o
   await fixture.submit("turn-b");
   await client.notify(turnStartedNotification("turn-b"));
   const runId = "codex-thread:child-thread:turn:turn-b";
-  expect(submissionStore.read()).toHaveLength(1);
+  expect(await submissionStore.read()).toHaveLength(1);
   expect(isCodexAppServerLiveThreadClaimed(client as never, "child-thread")).toBe(true);
   expect(holds.client).toBe(1);
   expect(holds.parent).toBe(1);
@@ -677,7 +698,7 @@ it("admits a delayed exact start under warm backing and retains its completion o
       items: [{ id: "b", type: "agentMessage", text: "result B" }],
     }),
   );
-  await vi.waitFor(() => expect(submissionStore.read()).toEqual([]));
+  await vi.waitFor(async () => expect(await submissionStore.read()).toEqual([]));
   expect(runtime.deliverAgentHarnessCompletion).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({ childSessionKey: runId, result: "result B" }),
   );
@@ -828,7 +849,8 @@ describe("Codex native transient predecessor anchor", () => {
       let parentRegistered = true;
       const submissionStore = {
         assertCurrent: () => {},
-        read: () => [...receipts.values()],
+        assertCurrentAsync: async () => {},
+        read: async () => [...receipts.values()],
         record: vi.fn<CodexNativeSubagentSubmissionStore["record"]>(async (receipt, guard) => {
           guard();
           ownerStatesAtRecord.push(parentRegistered);
@@ -903,7 +925,8 @@ describe("Codex native transient predecessor anchor", () => {
     let recordCompletion: Promise<boolean> | undefined;
     const submissionStore = {
       assertCurrent: () => {},
-      read: () => [...receipts.values()],
+      assertCurrentAsync: async () => {},
+      read: async () => [...receipts.values()],
       record: vi.fn<CodexNativeSubagentSubmissionStore["record"]>((receipt, guard) => {
         recordCompletion = (async () => {
           recordEntered.resolve();

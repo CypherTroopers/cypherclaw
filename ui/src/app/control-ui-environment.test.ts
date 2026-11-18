@@ -1,48 +1,22 @@
 /* @vitest-environment jsdom */
 
+import { createComponent, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  CONTROL_UI_BOOTSTRAP_CONFIG_PATH,
-  type ControlUiBootstrapConfig,
-  type ControlUiEnvironment,
+import type {
+  ControlUiBootstrapConfig,
+  ControlUiEnvironment,
 } from "../../../src/gateway/control-ui-bootstrap-contract.js";
-import "../components/app-topbar.ts";
-import "../components/sidebar-agent-card.ts";
+import "../components/app-topbar-solid.tsx";
+import { SidebarAgentCard } from "../components/sidebar-agent-card.tsx";
 import { setupSidebarTest } from "../test-helpers/app-sidebar-setup.ts";
+import { mountSolid } from "../test-helpers/mount-solid.ts";
+import { waitForSolid } from "../test-helpers/solid-settle.ts";
 import { createApplicationConfigCapability } from "./config.ts";
 
 type EnvironmentElement = HTMLElement & {
   environment?: ControlUiEnvironment | null;
-  subtitle?: string;
-  agentName?: string;
-  avatarText?: string;
   updateComplete: Promise<boolean>;
 };
-
-function bootstrapAndFaviconFetch(bootstraps: ControlUiBootstrapConfig[]) {
-  const responses = [...bootstraps];
-  return vi.fn<typeof fetch>(async (input) => {
-    if (input === "/favicon.svg") {
-      return new Response(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M0 0h32v32H0z"/></svg>',
-      );
-    }
-    expect(input).toBe(CONTROL_UI_BOOTSTRAP_CONFIG_PATH);
-    return new Response(JSON.stringify(responses.shift()));
-  });
-}
-
-function waitForComposedFavicon(icon: HTMLLinkElement): Promise<void> {
-  return new Promise((resolve) => {
-    const observer = new MutationObserver(() => {
-      if (icon.getAttribute("href")?.startsWith("data:image/svg+xml,")) {
-        observer.disconnect();
-        resolve();
-      }
-    });
-    observer.observe(icon, { attributes: true, attributeFilter: ["href"] });
-  });
-}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -67,13 +41,25 @@ describe("Control UI environment presentation", () => {
     document.head.append(favicon);
     document.documentElement.style.setProperty("--control-ui-environment-amber", "#f59e0b");
 
-    const sidebar = document.createElement("openclaw-sidebar-agent-card") as EnvironmentElement;
-    sidebar.agentName = "OpenClaw";
-    sidebar.avatarText = "O";
-    sidebar.subtitle = "Assistant";
+    const [cardEnvironment, setCardEnvironment] = createSignal<ControlUiEnvironment | null>(null);
+    const { container: sidebar } = mountSolid(() =>
+      createComponent(SidebarAgentCard, {
+        agentId: "main",
+        agentName: "OpenClaw",
+        avatarUrl: null,
+        avatarAuthReady: false,
+        avatarText: "O",
+        menuOpen: false,
+        menuUnread: false,
+        switcherAvailable: false,
+        get environment() {
+          return cardEnvironment();
+        },
+      }),
+    );
     const topbar = document.createElement("openclaw-app-topbar") as EnvironmentElement;
-    document.body.append(sidebar, topbar);
-    await Promise.all([sidebar.updateComplete, topbar.updateComplete]);
+    document.body.append(topbar);
+    await topbar.updateComplete;
 
     expect(document.querySelector(".control-ui-environment-stripe")).toBeNull();
     expect(document.querySelector(".control-ui-environment-pill")).toBeNull();
@@ -87,22 +73,25 @@ describe("Control UI environment presentation", () => {
       environment,
       seamColor: "#123456",
     };
-    vi.stubGlobal("fetch", bootstrapAndFaviconFetch([payload]));
-    const composedFavicon = waitForComposedFavicon(favicon);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(payload))),
+    );
     const config = createApplicationConfigCapability({ resourceBasePath: "" });
     await config.refresh();
     await vi.dynamicImportSettled();
-    await composedFavicon;
-    sidebar.environment = config.current.environment;
+    setCardEnvironment(config.current.environment);
     topbar.environment = config.current.environment;
-    await Promise.all([sidebar.updateComplete, topbar.updateComplete]);
+    await topbar.updateComplete;
 
     expect(document.querySelector(".control-ui-environment-stripe")).not.toBeNull();
     expect(document.documentElement.style.getPropertyValue("--control-ui-environment-color")).toBe(
       "var(--control-ui-environment-amber)",
     );
     expect(document.documentElement.style.getPropertyValue("--ring")).toBe("#123456");
-    expect(sidebar.querySelector(".control-ui-environment-pill")?.textContent).toBe("edge");
+    await waitForSolid(() =>
+      expect(sidebar.querySelector(".control-ui-environment-pill")?.textContent).toBe("edge"),
+    );
     expect(sidebar.querySelector(".sidebar-agent-card__avatar--environment")).not.toBeNull();
     expect(topbar.querySelector(".control-ui-environment-pill")?.textContent).toBe("edge");
     expect(favicon.href).toContain("data:image/svg+xml,");
@@ -130,20 +119,19 @@ describe("Control UI environment presentation", () => {
     };
     vi.stubGlobal(
       "fetch",
-      bootstrapAndFaviconFetch([
-        { ...bootstrap, environment: { label: "edge", color: "amber" } },
-        bootstrap,
-      ]),
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ ...bootstrap, environment: { label: "edge", color: "amber" } }),
+          ),
+        )
+        .mockResolvedValueOnce(new Response(JSON.stringify(bootstrap))),
     );
-    const composedFavicons = Promise.all([
-      waitForComposedFavicon(svgFavicon),
-      waitForComposedFavicon(pngFavicon),
-    ]);
     const config = createApplicationConfigCapability({ resourceBasePath: "" });
 
     await config.refresh();
     await vi.dynamicImportSettled();
-    await composedFavicons;
 
     expect(document.querySelector(".control-ui-environment-stripe")).not.toBeNull();
     expect(svgFavicon.getAttribute("href")).toContain("data:image/svg+xml,");

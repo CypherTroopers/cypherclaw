@@ -44,10 +44,17 @@ const OPENCLAW_OAUTH_ANTHROPIC_BETAS = [
 
 type DynamicFastMode = boolean | (() => boolean | undefined);
 
-/** Publish installed-version evidence; the transport owns the floor and billing snapshot. */
+/**
+ * Publish the newest known Claude Code version (installed CLI or the version
+ * Anthropic last required) and collect new requirements; the transport owns
+ * the floor, the retry, and the billing snapshot.
+ */
 export function createAnthropicClaudeCodeIdentityWrapper(
   baseStreamFn: StreamFn | undefined,
-  resolveVersion: () => Promise<string | undefined>,
+  identity: {
+    resolveVersion: () => Promise<string | undefined>;
+    record: (version: string) => void;
+  },
   sourceApi?: ProviderWrapStreamFnContext["sourceApi"],
 ): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
@@ -59,15 +66,16 @@ export function createAnthropicClaudeCodeIdentityWrapper(
     ) {
       return underlying(model, context, options);
     }
-    return resolveVersion().then((version) =>
-      underlying(
-        model,
-        context,
-        version
-          ? { ...options, headers: { ...options?.headers, "user-agent": `claude-cli/${version}` } }
-          : options,
-      ),
-    );
+    return identity.resolveVersion().then((version) => {
+      const requestOptions = {
+        ...options,
+        ...(version
+          ? { headers: { ...options?.headers, "user-agent": `claude-cli/${version}` } }
+          : {}),
+        onClaudeCodeVersionRequired: identity.record,
+      };
+      return underlying(model, context, requestOptions);
+    });
   };
 }
 
@@ -223,7 +231,11 @@ function createAnthropicCompactionWrapper(
 ): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
   return (model, context, options) => {
-    const compaction = resolveAnthropicServerCompactionPlan(model, extraParams, options?.apiKey);
+    const compaction = resolveAnthropicServerCompactionPlan(
+      model,
+      extraParams,
+      options?.apiKey ?? getEnvApiKey(model.provider),
+    );
     if (!compaction.enabled) {
       return underlying(model, context, options);
     }
@@ -297,9 +309,7 @@ export function resolveAnthropicServiceTier(
   return normalized;
 }
 
-export function wrapAnthropicProviderStream(
-  ctx: ProviderWrapStreamFnContext,
-): StreamFn | undefined {
+export function wrapAnthropicProviderStream(ctx: ProviderWrapStreamFnContext): StreamFn {
   const anthropicBetas = resolveAnthropicBetas(ctx.extraParams, ctx.modelId);
   const needsAnthropicBetaWrapper =
     anthropicBetas !== undefined ||
@@ -309,7 +319,7 @@ export function wrapAnthropicProviderStream(
   const hasFastModeParam =
     ctx.extraParams !== undefined &&
     (Object.hasOwn(ctx.extraParams, "fastMode") || Object.hasOwn(ctx.extraParams, "fast_mode"));
-  return composeProviderStreamWrappers(
+  const wrapped = composeProviderStreamWrappers(
     ctx.streamFn,
     needsAnthropicBetaWrapper
       ? (streamFn) => createAnthropicBetaHeadersWrapper(streamFn, anthropicBetas ?? [])
@@ -325,9 +335,8 @@ export function wrapAnthropicProviderStream(
             ctx.extraParams,
           )
       : undefined,
-    ctx.extraParams?.anthropicServerCompaction === true
-      ? (streamFn) => createAnthropicCompactionWrapper(streamFn, ctx.extraParams)
-      : undefined,
-    createAnthropicThinkingPrefillWrapper,
+    // The shared plan owns the default, opt-out, and per-request auth/route gates.
+    (streamFn) => createAnthropicCompactionWrapper(streamFn, ctx.extraParams),
   );
+  return createAnthropicThinkingPrefillWrapper(wrapped);
 }

@@ -1,5 +1,7 @@
 import { toUSVString } from "node:util";
 import { sql } from "kysely";
+import { engineIndexHint } from "../../infra/database-engine/index-hint.js";
+import { jsonNativeFieldsValid, jsonPickObject } from "../../infra/database-engine/json-values.js";
 import { iterateSqliteQuerySync, sqliteStringSet } from "../../infra/kysely-sync.js";
 import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { getSessionKysely } from "./session-accessor.sqlite-scope.js";
@@ -17,6 +19,7 @@ const maintenanceFields = [
   "lastInteractionAt",
   "sessionStartedAt",
   "pinnedAt",
+  "sidebarRoot",
   "spawnedBy",
   "parentSessionKey",
   "modelSelectionLocked",
@@ -32,19 +35,18 @@ const maintenanceFields = [
 function maintenanceCandidates(database: Pick<OpenClawAgentDatabase, "db">) {
   // json_each preserves absent/null fields and JSON subtypes. Uncertified rows
   // keep the full parser contract, including malformed and overdepth payloads.
+  const entry =
+    /* kysely-allow-raw: fixed canonical metadata column. */ sql.ref<string>("entry_json");
   const projection =
-    /* kysely-allow-raw: maintenance reads only phase facts from certified rows. */ sql<string>`CASE WHEN entry_valid = 1 AND json_valid(entry_json)
-    THEN (SELECT json_group_object(key, CASE type
-      WHEN 'object' THEN json(value) WHEN 'array' THEN json(value)
-      WHEN 'true' THEN json('true') WHEN 'false' THEN json('false')
-      ELSE value END) FROM json_each(entry_json) WHERE key IN (${sql.join(maintenanceFields)}))
-    ELSE entry_json END`.as("entry_json");
+    /* kysely-allow-raw: exceptional metadata remains canonical text for the existing parser. */ sql<string>`CASE WHEN entry_valid = 1 AND ${jsonNativeFieldsValid(database.db, entry)} THEN ${jsonPickObject(database.db, entry, maintenanceFields)} ELSE entry_json END`.as(
+      "entry_json",
+    );
   return getSessionKysely(database.db)
     .selectFrom("session_nodes")
     .select([projection, "current_session_id", "session_key", "updated_at", "archived_at"])
     .modifyEnd(
       /* kysely-allow-raw: stream age bounds without sorting the entire active store. */
-      sql`INDEXED BY idx_agent_session_nodes_updated_at`,
+      engineIndexHint(database.db, "idx_agent_session_nodes_updated_at"),
     );
 }
 
@@ -129,25 +131,31 @@ export function readSessionMaintenanceAgeCandidates(params: {
 
 export function readSessionMaintenanceCapCandidates(params: {
   database: Pick<OpenClawAgentDatabase, "db">;
+  activeSessionKeys: readonly string[];
   excludedKeys: ReadonlySet<string>;
   overflow: number;
-  preserveKeys?: ReadonlySet<string>;
+  readPreserveKeys: () => ReadonlySet<string> | undefined;
   preserveRecentMs?: number | null;
-}): Record<string, SessionEntry> {
+  deferArchiving?: boolean;
+}): { store: Record<string, SessionEntry>; durableNoCandidates: boolean } {
   if (params.overflow <= 0) {
-    return {};
+    return { store: {}, durableNoCandidates: false };
   }
   const db = getSessionKysely(params.database.db);
+  const activeKeys = new Set(
+    params.activeSessionKeys.map(normalizeStoreSessionKey).filter(Boolean),
+  );
   // Only push down keys unchanged by Node/SQLite text conversion; retain exact membership below.
   const excludedKeys = [...params.excludedKeys].filter(
     (key) => toUSVString(key) === key && !key.includes("\0") && !/[\uFFFE\uFFFF]/u.test(key),
   );
   const selected: Array<{
     key: string;
-    keyBytes: Buffer;
+    keyBytes: Uint8Array;
     entry: SessionEntry;
     activityAt: number;
   }> = [];
+  let durableNoCandidates = true;
   for (const row of iterateSqliteQuerySync(
     params.database.db,
     db
@@ -164,7 +172,6 @@ export function readSessionMaintenanceCapCandidates(params: {
       .orderBy("updated_at", "asc")
       .orderBy("session_key", "desc"),
   )) {
-    const keyBytes = Buffer.from(row.key_bytes);
     const worst = selected.at(-1);
     // Activity is at least updatedAt; equal lower bounds follow descending keys.
     // Once neither can improve the worst selected row, the indexed scan is done.
@@ -172,7 +179,7 @@ export function readSessionMaintenanceCapCandidates(params: {
       selected.length === params.overflow &&
       worst &&
       (row.updated_at > worst.activityAt ||
-        (row.updated_at === worst.activityAt && Buffer.compare(keyBytes, worst.keyBytes) <= 0))
+        (row.updated_at === worst.activityAt && Buffer.compare(row.key_bytes, worst.keyBytes) <= 0))
     ) {
       break;
     }
@@ -180,12 +187,30 @@ export function readSessionMaintenanceCapCandidates(params: {
       continue;
     }
     const entry = parseSessionEntryJson(row);
-    if (!entry || shouldPreserveMaintenanceEntry({ ...params, key: row.session_key, entry })) {
+    if (!entry) {
+      durableNoCandidates = false;
+      continue;
+    }
+    if (shouldPreserveMaintenanceEntry({ key: row.session_key, entry, preserveRecentMs: null })) {
+      continue;
+    }
+    // Intrinsic protection needs no runtime snapshot; runtime/recent protection can end on its own.
+    durableNoCandidates = false;
+    if (
+      activeKeys.has(row.session_key) ||
+      shouldPreserveMaintenanceEntry({
+        key: row.session_key,
+        entry,
+        preserveKeys: params.readPreserveKeys(),
+        preserveRecentMs: params.preserveRecentMs,
+        deferArchiving: params.deferArchiving,
+      })
+    ) {
       continue;
     }
     const candidate = {
       key: row.session_key,
-      keyBytes,
+      keyBytes: row.key_bytes,
       entry,
       activityAt: getSessionMaintenanceActivityAt(entry),
     };
@@ -211,9 +236,12 @@ export function readSessionMaintenanceCapCandidates(params: {
     }
   }
   // The phase owner reverses this original SQLite key order to resolve activity ties.
-  return Object.fromEntries(
-    selected
-      .toSorted((left, right) => Buffer.compare(left.keyBytes, right.keyBytes))
-      .map(({ key, entry }) => [key, entry]),
-  );
+  return {
+    store: Object.fromEntries(
+      selected
+        .toSorted((left, right) => Buffer.compare(left.keyBytes, right.keyBytes))
+        .map(({ key, entry }) => [key, entry]),
+    ),
+    durableNoCandidates,
+  };
 }

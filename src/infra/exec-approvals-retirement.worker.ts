@@ -7,9 +7,8 @@ import type {
   WorkerOperationHandlers,
   WorkerWriteOperationContext,
 } from "../state/worker-operation-registry.js";
-import { resolveExecApprovalsDisplayPath } from "./exec-approvals-config.js";
 import type { ExecApprovalsAgent } from "./exec-approvals-core.js";
-import { assertNoPendingLegacyExecApprovals } from "./exec-approvals-migration-gate.js";
+import { execApprovalsPublication } from "./exec-approvals-publication.js";
 import {
   ExecApprovalsMutationFencedError,
   serializeExecApprovals,
@@ -29,7 +28,6 @@ function retireAgentPolicies(
   input: RetirementInput,
   context: WorkerWriteOperationContext,
 ): RemovedExecApprovalPolicies {
-  assertNoPendingLegacyExecApprovals({ env: context.stateOptions().env });
   const { guard } = input;
   const agentId = guard.predicate.agentId;
   if (guard.lease.scope !== "core:agent-deletion" || guard.lease.key !== agentId) {
@@ -39,41 +37,42 @@ function retireAgentPolicies(
     (database) => {
       assertOpenClawStateLeaseWorkerOwnedInTransaction(database.db, guard.lease);
       assertAgentDeletionWorkerPredicate(database, guard.predicate);
-      const current = snapshotFromExecApprovalsDatabase(
-        database.db,
-        resolveExecApprovalsDisplayPath(context.stateOptions().env),
-      );
-      const matches = (key: string) => {
-        const normalized = normalizeAgentIdStrict(key);
-        return normalized.ok && normalized.value === agentId;
-      };
-      const entries =
-        input.action === "remove"
-          ? Object.entries(current.file.agents ?? {}).filter(([key]) => matches(key))
-          : input.entries;
-      const agents = { ...current.file.agents };
-      for (const [key, policy] of entries) {
-        // The journal authorizes only this agent's aliases. Restoration cannot overwrite a new policy.
-        if (
-          !matches(key) ||
-          (input.action === "restore" &&
-            agents[key] !== undefined &&
-            !isDeepStrictEqual(agents[key], policy))
-        ) {
-          throw new ExecApprovalsMutationFencedError();
+      const captured = execApprovalsPublication.capture(database.db, () => {
+        const current = snapshotFromExecApprovalsDatabase(database.db, context.stateOptions().env);
+        const matches = (key: string) => {
+          const normalized = normalizeAgentIdStrict(key);
+          return normalized.ok && normalized.value === agentId;
+        };
+        const entries =
+          input.action === "remove"
+            ? Object.entries(current.file.agents ?? {}).filter(([key]) => matches(key))
+            : input.entries;
+        const agents = { ...current.file.agents };
+        for (const [key, policy] of entries) {
+          // The journal authorizes only this agent's aliases. Restoration cannot overwrite a new policy.
+          if (
+            !matches(key) ||
+            (input.action === "restore" &&
+              agents[key] !== undefined &&
+              !isDeepStrictEqual(agents[key], policy))
+          ) {
+            throw new ExecApprovalsMutationFencedError();
+          }
+          if (input.action === "remove") {
+            delete agents[key];
+          } else {
+            agents[key] = policy;
+          }
         }
-        if (input.action === "remove") {
-          delete agents[key];
-        } else {
-          agents[key] = policy;
+        const next = { ...current.file, agents };
+        const raw = serializeExecApprovals(next);
+        const changed = entries.length > 0 && raw !== current.raw;
+        if (changed) {
+          writeExecApprovalsConfigRow({ db: database.db, file: next, raw });
         }
-      }
-      const next = { ...current.file, agents };
-      const raw = serializeExecApprovals(next);
-      const changed = entries.length > 0 && raw !== current.raw;
-      if (changed) {
-        writeExecApprovalsConfigRow({ db: database.db, file: next, raw });
-      }
+        return { changed, raw, entries };
+      });
+      const { changed, raw, entries } = captured.result;
       assertOpenClawStateLeaseWorkerOwnedInTransaction(
         database.db,
         guard.lease,
@@ -92,6 +91,7 @@ function retireAgentPolicies(
         kind: "exec-approvals-retirement",
         nonce: input.nonce,
         action: input.action,
+        execFacts: execApprovalsPublication.bound(captured.receipt),
       });
       return entries;
     },

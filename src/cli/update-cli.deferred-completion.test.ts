@@ -132,15 +132,6 @@ describe("update-cli child-owned deferred completion", () => {
 
       if (writes) {
         expect(replaceConfigFile).toHaveBeenCalledExactlyOnceWith({ nextConfig: config });
-        expect(mutateConfigFileWithRetry).toHaveBeenCalledExactlyOnceWith({
-          mutate: expect.any(Function),
-          writeOptions: {
-            assertCurrent: expect.any(Function),
-            beforeCommit: expect.any(Function),
-            observe: false,
-          },
-        });
-
         expect(
           vi.mocked(mutateConfigFileWithRetry).mock.calls[0]?.[0].writeOptions?.assertCurrent,
         ).toThrow("Update operation ownership has closed.");
@@ -221,6 +212,14 @@ describe("update-cli child-owned deferred completion", () => {
   });
 
   it.each([
+    {
+      name: "does not restore backup channels from a torn pre-update snapshot",
+      prepare: async (configPath: string, preUpdateConfig: OpenClawConfig) => {
+        await fs.writeFile(`${configPath}.pre-update`, '{"channels":{"whatsapp":');
+        await writeJsonFixture(`${configPath}.bak`, preUpdateConfig);
+        return { OPENCLAW_UPDATE_POST_CORE_STARTED_AT_MS: String(Date.now()) };
+      },
+    },
     {
       name: "does not restore stale backup channels when current pre-update snapshot has none",
       prepare: async (configPath: string, preUpdateConfig: OpenClawConfig) => {

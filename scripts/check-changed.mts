@@ -42,6 +42,7 @@ import { runManagedCommand } from "./lib/managed-child-process.mts";
 import { readNativeTypeScriptConfig } from "./lib/native-typescript-config.mts";
 import { createChangedOxlintEnv, isOxlintCommand } from "./lib/oxlint-changed-scope.mts";
 import { listGeneratedExtensionAssetSources } from "./lib/static-extension-assets.mts";
+import { TSGO_CORE_TEST_SHARDS } from "./lib/tsgo-core-test-shards.mts";
 import { createSparseTsgoSkipEnv } from "./lib/tsgo-sparse-guard.mts";
 import type { createChangedCoreTestCheck } from "./run-tsgo-core-test-shards.mts";
 import {
@@ -74,6 +75,7 @@ type CiLintSelection = {
 type ChangedCheckPlanOptions = {
   typecheckResult?: ChangedLaneResult;
   lintOnly?: boolean;
+  delegateCompilers?: boolean;
   lintSelection?: CiLintSelection;
   lintThreads?: 1 | 8;
   env?: NodeJS.ProcessEnv;
@@ -140,6 +142,8 @@ const EXTENSION_TEST_CORE_IMPORT_PATH_RE =
   /^(?:extensions\/|test\/helpers\/|scripts\/(?:check-no-extension-test-core-imports|check-file-utils)\.ts$|scripts\/check-changed\.m[jt]s$)/u;
 const CONTROL_UI_I18N_VERIFY_PATH_RE =
   /^(?:package\.json$|ui\/(?:src\/|config\/control-ui-locales\.ts$)|scripts\/(?:control-ui-i18n(?:-(?:report|verify))?\.ts|lib\/(?:control-ui-i18n-[^/]+\.ts|control-ui-i18n-config\.json))$|test\/scripts\/control-ui-i18n[^/]*\.test\.ts$)/u;
+const CONTROL_UI_LIT_RATCHET_PATH_RE =
+  /^(?:package\.json$|ui\/src\/|scripts\/(?:check-control-ui-lit-ratchet|control-ui-solid-inventory)\.mts$|scripts\/lib\/shrink-ratchet\.mts$|test\/scripts\/check-control-ui-lit-ratchet\.test\.ts$)/u;
 const SHRINK_RATCHET_OWNER_PATH = "scripts/lib/shrink-ratchet.mts";
 const CORE_OXLINT_TS_CONFIG = "config/tsconfig/oxlint.core.json";
 const EXTENSIONS_OXLINT_TS_CONFIG = "extensions/tsconfig.json";
@@ -150,12 +154,12 @@ const CORE_LINT_ARGV_BYTES = 24 * 1024;
 const LINTABLE_CORE_PATH_RE = /^(?:src|ui|packages)\/.+\.[cm]?[jt]sx?$/u;
 const LINTABLE_EXTENSION_PATH_RE = /^extensions\/[^/]+\/.+\.[cm]?[jt]sx?$/u;
 const LINTABLE_SCRIPT_PATH_RE = /^scripts\/.+\.[cm]?[jt]sx?$/u;
-const LINTABLE_UI_STYLE_PATH_RE = /^ui\/(?:src\/.+\.(?:css|ts)|public\/themes\/[^/]+\.css)$/u;
+const LINTABLE_UI_STYLE_PATH_RE = /^ui\/(?:src\/.+\.(?:css|tsx?)|public\/themes\/[^/]+\.css)$/u;
 // These baselines are checked by their ratchets, not consumed by Oxlint.
 const LINT_OPTIMIZATION_NEUTRAL_PATH_RE =
   /^(?:docs\/|README\.md$|.*\.mdx?$|config\/(?:assertion-safety-baseline|env-var-count-budget|max-lines-baseline|test-timeout-race-baseline|test-mock-exports-baseline)\.txt$)/u;
 const CORE_LINT_OPTIMIZATION_NEUTRAL_PATH_RE =
-  /^(?:scripts|test\/scripts)\/|^\.github\/workflows\/ci\.yml$|^ui\/(?:src\/.+|public\/themes\/[^/]+)\.css$/u;
+  /^(?:scripts|test\/scripts|\.agents\/skills)\/|^\.github\/workflows\/[^/]+\.ya?ml$|^test\/vitest\/[^/]+\.[cm]?js$|^ui\/(?:src\/.+|public\/themes\/[^/]+)\.css$/u;
 const TOOLING_LINT_OPTIMIZATION_NEUTRAL_PATH_RE =
   /^(?:test\/scripts\/|\.github\/workflows\/ci\.yml$)/u;
 const ANDROID_VERSION_SYNC_PATHS = new Set([
@@ -487,9 +491,15 @@ export function createChangedCheckPlan(
 ) {
   const commands: ChangedCheckCommand[] = [];
   const broadAudits = new Set<ChangedCheckCommand>();
-  const typechecks = new Set<ChangedCheckCommand>();
+  const typechecks = new Map<ChangedCheckCommand, readonly string[]>();
   const lintChecks = new Set<ChangedCheckCommand>();
   const baseEnv = { ...resolveLocalCheckEnv(options.env ?? process.env) };
+  const litRatchetArgs = [
+    "check:control-ui-lit-ratchet",
+    ...(options.staged ? ["--staged"] : []),
+    "--base",
+    options.base ?? (options.staged ? "HEAD" : baseEnv.CHECKOUT_BASE_SHA || "origin/main"),
+  ];
   delete baseEnv.OPENCLAW_OXLINT_CHANGED_PATHS;
   const cwd = process.cwd();
   if (
@@ -527,8 +537,8 @@ export function createChangedCheckPlan(
     commands.push(command);
     return command;
   };
-  const addTypecheck = (name: string, args: string[]) =>
-    typechecks.add(add(name, args, createSparseTsgoSkipEnv(baseEnv)));
+  const addTypecheck = (name: string, args: string[], graphs: readonly string[]) =>
+    typechecks.set(add(name, args, createSparseTsgoSkipEnv(baseEnv)), graphs);
   const addLintCommand = (name: string, bin: string, args: string[], env?: NodeJS.ProcessEnv) =>
     lintChecks.add(addCommand(name, bin, args, env));
   const finishPlan = (summary: string) => {
@@ -590,6 +600,7 @@ export function createChangedCheckPlan(
             }
             if (command.args[0] === "lint") {
               return [
+                { ...command, name: "Control UI Lit ratchet", args: litRatchetArgs },
                 { ...command, name: "Control UI i18n catalog", args: ["lint:ui:i18n"] },
                 {
                   ...command,
@@ -600,7 +611,7 @@ export function createChangedCheckPlan(
                     "tsx",
                     "scripts/run-stylelint.mts",
                     "ui/src/**/*.css",
-                    "ui/src/**/*.ts",
+                    "ui/src/**/*.{ts,tsx}",
                     "ui/public/themes/*.css",
                   ],
                 },
@@ -610,6 +621,7 @@ export function createChangedCheckPlan(
           })
         : [];
       return {
+        delegatedTypeGraphs: [],
         commands: selection
           ? [
               ...(selection.central
@@ -633,12 +645,23 @@ export function createChangedCheckPlan(
     const prefix = commands.slice(0, end);
     // These audits produce diagnostics, not compiler inputs. Defer them without
     // moving compiler prerequisites or overlapping their resource-heavy processes.
+    // Narrow core tests share their boundary's in-memory inventory. Aggregate
+    // tsgo:all also owns the extension project-reference build, not one CI graph.
+    // Keep both inline rather than silently broadening or dropping their work.
+    const delegated = options.delegateCompilers
+      ? new Map(
+          [...typechecks].filter(
+            ([command, graphs]) => graphs.length > 0 && !command.coreTestCheck,
+          ),
+        )
+      : new Map<ChangedCheckCommand, readonly string[]>();
     return {
+      delegatedTypeGraphs: [...delegated.values()].flat(),
       commands: [
         ...prefix.filter((command) => !broadAudits.has(command)),
         ...prefix.filter((command) => broadAudits.has(command)),
         ...commands.slice(end),
-      ],
+      ].filter((command) => !delegated.has(command)),
       summary,
     };
   };
@@ -756,6 +779,12 @@ export function createChangedCheckPlan(
   if (result.paths.some((file) => /^(?:src|extensions|packages|scripts)\//u.test(file))) {
     add("SQLite worker ratchet", [
       "check:database-worker-ratchet",
+      ...(options.staged ? ["--staged"] : []),
+      "--base",
+      options.base ?? (options.staged ? "HEAD" : "origin/main"),
+    ]);
+    add("SQLite dialect ratchet", [
+      "check:database-dialect-ratchet",
       ...(options.staged ? ["--staged"] : []),
       "--base",
       options.base ?? (options.staged ? "HEAD" : "origin/main"),
@@ -998,38 +1027,49 @@ export function createChangedCheckPlan(
   } else if (shouldRunControlUiI18nVerify(result.paths)) {
     addLint("Control UI i18n catalog", ["lint:ui:i18n"]);
   }
+  if (!runAll && result.paths.some((file) => CONTROL_UI_LIT_RATCHET_PATH_RE.test(file))) {
+    addLint("Control UI Lit ratchet", litRatchetArgs);
+  }
 
   if (typeLanes.all) {
-    addTypecheck("typecheck all", ["tsgo:all"]);
+    addTypecheck("typecheck all", ["tsgo:all"], []);
   } else {
     if (typeLanes.core) {
-      addTypecheck("typecheck core", ["tsgo:core"]);
+      addTypecheck("typecheck core", ["tsgo:core"], ["core"]);
     }
     if (typeLanes.coreTests || liveDockerTypes) {
-      addTypecheck("typecheck core tests", ["tsgo:core:test"]);
+      addTypecheck(
+        "typecheck core tests",
+        ["tsgo:core:test"],
+        TSGO_CORE_TEST_SHARDS.map(({ name }) => "core-test-" + name),
+      );
       if (narrowCoreTests) {
         commands.at(-1)!.coreTestCheck = "checkTypes";
       }
     }
     if (typeLanes.ui) {
-      addTypecheck("typecheck UI", ["tsgo:ui"]);
+      addTypecheck("typecheck UI", ["tsgo:ui"], ["ui"]);
     }
     if (typeLanes.extensions) {
-      addTypecheck("typecheck extensions", ["tsgo:extensions"]);
+      addTypecheck("typecheck extensions", ["tsgo:extensions"], ["extensions"]);
     }
     if (typeLanes.extensionTests) {
-      addTypecheck("typecheck extension tests", ["tsgo:extensions:test"]);
+      addTypecheck("typecheck extension tests", ["tsgo:extensions:test"], ["extensions-test"]);
     }
     if (typeLanes.scripts) {
-      addTypecheck("typecheck scripts", ["tsgo:scripts"]);
+      addTypecheck("typecheck scripts", ["tsgo:scripts"], ["scripts"]);
     }
     if (typeLanes.testRoot) {
-      addTypecheck("typecheck test root", ["tsgo:test:root"]);
+      addTypecheck("typecheck test root", ["tsgo:test:root"], ["test-root"]);
     }
   }
 
   if (runAll) {
-    addLint("lint", ["lint"]);
+    addLint("lint", [
+      "lint",
+      ...(options.staged ? ["--staged"] : []),
+      ...(options.base ? ["--base", options.base] : []),
+    ]);
     add("runtime import cycles", ["check:import-cycles"]);
     return finishPlan("all");
   }
@@ -1080,9 +1120,9 @@ export function createChangedCheckPlan(
   }
   if (lanes.extensions || lanes.extensionTests) {
     // Generated plugin outputs have their own asset-integrity gate and are
-    // intentionally ignored by oxlint; manifests still need full-lane fallback.
+    // intentionally ignored by oxlint. Core Plugin SDK changes select extension
+    // typechecking, but only changed extension sources need extension lint.
     if (
-      !result.paths.some((changedPath) => generatedExtensionAssetPaths.has(changedPath)) ||
       result.paths.some(
         (changedPath) =>
           getChangedPathFacts(changedPath).surface === "extension" &&
@@ -1625,16 +1665,19 @@ export async function runChangedCheck(
       )
     : undefined;
   const timings: ChangedCheckTiming[] = [];
+  let failure = 0;
   for (const command of plan.commands) {
     const status = await runPlanCommand(command, timings, coreTestCheck);
-    if (status !== 0) {
-      printSummary(timings, options);
-      return status;
+    failure ||= status;
+    // Timeouts and cancellation deliberately stop admitting new work.
+    if (status === 124 || status >= 128) {
+      failure = status;
+      break;
     }
   }
 
   printSummary(timings, options);
-  return 0;
+  return failure;
 }
 
 function sameArgs(left: string[], right: string[]) {
@@ -1659,6 +1702,14 @@ function printPlan(
   }
   if ((options.typecheckResult ?? result).extensionImpactFromCore) {
     console.error(`${prefix} extension-impacting surface; extension typecheck included`);
+  }
+  if (options.delegateCompilers) {
+    console.error(
+      prefix +
+        " compiler graphs delegated to CI: " +
+        (plan.delegatedTypeGraphs.join(", ") || "none") +
+        "; narrow and aggregate checks remain inline",
+    );
   }
   for (const reason of result.reasons) {
     console.error(`${prefix} ${reason}`);
@@ -1801,6 +1852,7 @@ function parseArgs(argv: string[]) {
     dryRun: boolean;
     timed: boolean;
     noChanges: boolean;
+    delegateCompilers: boolean;
     help: boolean;
     paths: string[];
   } = {
@@ -1809,6 +1861,7 @@ function parseArgs(argv: string[]) {
     dryRun: false,
     timed: false,
     noChanges: false,
+    delegateCompilers: false,
     help: false,
     paths: new Array<string>(),
   };
@@ -1822,6 +1875,7 @@ function parseArgs(argv: string[]) {
       booleanFlag("--dry-run", "dryRun"),
       booleanFlag("--timed", "timed"),
       booleanFlag("--no-changes", "noChanges"),
+      booleanFlag("--delegate-compilers", "delegateCompilers"),
       booleanFlag("--help", "help"),
       booleanFlag("-h", "help"),
     ],
@@ -1853,6 +1907,7 @@ function printUsage() {
       "  --staged         Check staged paths instead of git diff paths",
       "  --dry-run        Print the planned checks without running them",
       "  --timed          Print timing summary",
+      "  --delegate-compilers  CI owns canonical compiler graphs; retain guards and narrow/aggregate checks",
       "  --no-changes     Treat the changed path set as empty",
       "  -h, --help       Show this help",
       "",
@@ -1864,8 +1919,7 @@ function isDirectRun() {
   return isDirectRunUrl(process.argv[1], import.meta.url);
 }
 
-async function main() {
-  const argv = process.argv.slice(2);
+export async function main(argv = process.argv.slice(2)) {
   let args: ReturnType<typeof parseArgs>;
   try {
     args = parseArgs(argv);
@@ -1940,19 +1994,11 @@ async function main() {
       ) {
         const delegated = await runChangedCheckViaCrabbox(argv, process.env);
         if (delegated.backendUnavailable) {
-          // Say this loudly: the proof below is local, so whoever reads the run
-          // knows which machine produced it and that Linux-only lanes are unproven.
           console.error(
-            "[check:changed] the remote backend never ran the checks (no run summary). Falling back to local execution; note this in the proof summary.",
+            "[check:changed] remote proof is unavailable. Use PR CI or explicitly select a qualified local scope; platform-specific requirements remain unproven. Local checks were not started.",
           );
         }
-        process.exitCode = delegated.backendUnavailable
-          ? await runChangedCheck(result, {
-              ...args,
-              typecheckResult,
-              explicitPaths: args.paths.length > 0,
-            })
-          : delegated.exitCode;
+        process.exitCode = delegated.exitCode;
       } else {
         process.exitCode = await runChangedCheck(result, {
           ...args,

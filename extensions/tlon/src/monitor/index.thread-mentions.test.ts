@@ -14,6 +14,32 @@ const {
   realUrbitFixture,
 } = useTlonMonitorFixture();
 
+type CitationCase = readonly ["chat" | "channels", string, string, boolean, boolean];
+const citedEssay = { essay: { content: [{ inline: ["CITED-CONTENT"] }] } };
+async function checkCitationCase(sourceNest: string, row: CitationCase) {
+  const [source, sender, cited, admitted, expands] = row;
+  sseClientMock.scry.mockReset().mockResolvedValue(citedEssay);
+  inboundRuntimeMock.dispatch.mockClear();
+  const essay = messageEssay(sender, [
+    { block: { cite: { chan: { nest: cited, where: "/msg/~bus/12345" } } } },
+    { inline: ["~zod inspect this citation"] },
+  ]);
+  await getSubscription(source).event(
+    source === "chat"
+      ? { whom: sender, id: cited, response: { add: { essay } } }
+      : { nest: sourceNest, response: { post: { id: cited, "r-post": { set: { essay } } } } },
+  );
+  expect(inboundRuntimeMock.dispatch).toHaveBeenCalledTimes(admitted ? 1 : 0);
+  expect(sseClientMock.scry.mock.calls.map(([path]) => [path])).toEqual(
+    expands ? [[`/channels/v4/${cited}/posts/post/12345.json`]] : [],
+  );
+  if (expands) {
+    expect(inboundRuntimeMock.buildContext.mock.calls.at(-1)?.[0].message.rawBody).toContain(
+      "CITED-CONTENT",
+    );
+  }
+}
+
 describe("monitorTlonProvider bot-owned thread mention policy", () => {
   it.each([
     { name: "another ship's root", policy: false, rootAuthor: "~bus", admitted: false },
@@ -185,7 +211,11 @@ describe("monitorTlonProvider bot-owned thread mention policy", () => {
     });
 
     const replyEvent = (text: string) => {
-      const memo = { author: "~nec", content: [{ inline: [text] }], sent: 1_700_000_000_000 };
+      const memo = {
+        author: "~nec",
+        content: typeof text === "string" ? [{ inline: [text] }] : text,
+        sent: 1_700_000_000_000,
+      };
       return {
         nest: channelNest,
         response: {
@@ -282,75 +312,49 @@ describe("monitorTlonProvider bot-owned thread mention policy", () => {
   });
 });
 
-it("fetches and prepends citations only after DM and channel sender admission", async () => {
-  vi.useFakeTimers();
+it("applies explicit and automatic citation scopes", async () => {
   const nest = "chat/~zod/citations";
-  const content = [
-    { block: { cite: { chan: { nest, where: "/msg/~bus/12345" } } } },
-    { inline: ["~zod inspect this citation"] },
-  ];
-  realUrbitFixture.config = {
-    channels: {
-      tlon: {
-        code: "code",
-        ship: "~zod",
-        url: realUrbitFixture.url,
-        dmAllowlist: ["~bus"],
-        defaultAuthorizedShips: ["~bus"],
-        groupChannels: [nest],
-      },
-    },
-  };
-  authenticateMock.mockResolvedValueOnce("urbauth-~zod=proof");
-  settingsManagerMock.load.mockResolvedValueOnce({});
-  ingressMock.receive.mockResolvedValue({ kind: "ignored" });
-  const started = Promise.withResolvers<void>();
-  ingressMock.start.mockImplementationOnce(() => started.resolve());
-  const controller = new AbortController();
-  const runtime = { error: vi.fn(), exit: vi.fn(), log: vi.fn() } satisfies RuntimeEnv;
-  const monitor = monitorTlonProvider({
-    scheduler: createTestPluginServiceScheduler(),
-    abortSignal: controller.signal,
-    runtime,
-  });
-  try {
-    await Promise.race([started.promise, monitor]);
-    for (const source of ["chat", "channels"]) {
-      const subscription = sseClientMock.subscribe.mock.calls
-        .map(([value]) => value)
-        .find((value) => value.app === source);
-      expect(subscription).toBeDefined();
-      for (const sender of ["~nec", "~bus"]) {
-        sseClientMock.scry.mockReset().mockResolvedValue({
-          essay: { content: [{ inline: ["CITED-CONTENT"] }] },
-        });
-        inboundRuntimeMock.buildContext.mockClear();
-        inboundRuntimeMock.dispatch.mockClear();
-        const essay = { author: sender, content, sent: 1_700_000_000_000 };
-        const id = `${source}-${sender}`;
-        await subscription!.event(
-          source === "chat"
-            ? { whom: sender, id, response: { add: { essay } } }
-            : { nest, response: { post: { id, "r-post": { set: { essay } } } } },
-        );
-        if (sender === "~nec") {
-          expect(sseClientMock.scry).not.toHaveBeenCalled();
-          expect(inboundRuntimeMock.dispatch).not.toHaveBeenCalled();
-        } else {
-          expect(sseClientMock.scry).toHaveBeenCalledExactlyOnceWith(
-            `/channels/v4/${nest}/posts/post/12345.json`,
-          );
-          expect(inboundRuntimeMock.buildContext.mock.calls[0]?.[0].message.rawBody).toBe(
-            `> ~bus wrote: CITED-CONTENT\n\n> [quoted: ~bus in ${nest}]\n\n~zod inspect this citation`,
-          );
-          expect(inboundRuntimeMock.dispatch).toHaveBeenCalledOnce();
-        }
+  const settingsNest = "chat/~zod/announcements";
+  for (const auto of [false, true]) {
+    const cases: readonly CitationCase[] = auto
+      ? [
+          ["channels", "~bus", "diary/~private/notes", true, true],
+          ["channels", "~bus", "heap/~private/gallery", true, true],
+        ]
+      : [
+          ["chat", "~nec", nest, false, false],
+          ["channels", "~nec", nest, false, false],
+          ["channels", "~bus", nest, true, true],
+          ["channels", "~bus", settingsNest, true, true],
+          ["chat", "~bus", "chat/~zod/new", true, true],
+          ["channels", "~bus", "chat/~private/leadership", true, false],
+          ["channels", "~bus", "diary/~private/notes", true, false],
+          ["chat", "~bus", nest, true, true],
+          ["chat", "~bus", "chat/~private/leadership", true, false],
+        ];
+    settingsManagerMock.load.mockResolvedValueOnce(auto ? {} : { groupChannels: [settingsNest] });
+    configureTlon({
+      autoDiscoverChannels: auto,
+      autoAcceptGroupInvites: true,
+      dmAllowlist: ["~bus"],
+      defaultAuthorizedShips: ["~bus"],
+      groupChannels: [nest],
+    });
+    await runMonitor(async () => {
+      if (!auto) {
+        await getSubscription("groups", "/groups/ui").event({ channels: { "chat/~zod/new": {} } });
       }
-    }
-    expect(runtime.error).not.toHaveBeenCalled();
-  } finally {
-    controller.abort();
-    await monitor;
+      for (const row of cases) {
+        await checkCitationCase(nest, row);
+      }
+      const update = auto ? { autoDiscoverChannels: false } : { groupChannels: [] };
+      sseClientMock.poke.mockImplementationOnce(async () => {
+        settingsManagerMock.startSubscription.mock.calls.at(-1)?.[0](update);
+      });
+      await getSubscription("groups", "/groups/ui").event({ channels: { "chat/~zod/race": {} } });
+      const revoked = auto ? "diary/~private/notes" : settingsNest;
+      await checkCitationCase(nest, ["chat", "~bus", revoked, true, false]);
+    });
   }
 });
 
@@ -417,4 +421,126 @@ it("retires terminal group invites without forgetting unrelated foreigns deltas"
     controller.abort();
     await monitor;
   }
+});
+
+function configureTlon(config: Record<string, unknown>) {
+  realUrbitFixture.config = {
+    channels: { tlon: { code: "code", ship: "~zod", url: realUrbitFixture.url, ...config } },
+  };
+}
+function getSubscription(app: string, path?: string) {
+  const subscription = sseClientMock.subscribe.mock.calls
+    .map(([value]) => value)
+    .find((value) => value.app === app && (!path || value.path === path));
+  if (!subscription) {
+    throw new Error("expected " + app + " subscription");
+  }
+  return subscription;
+}
+function messageEssay(author: string, text: string | unknown[]) {
+  return {
+    author,
+    content: typeof text === "string" ? [{ inline: [text] }] : text,
+    sent: 1_700_000_000_000,
+  };
+}
+async function runMonitor(run: () => Promise<void>) {
+  sseClientMock.subscribe.mockClear();
+  vi.useFakeTimers();
+  authenticateMock.mockResolvedValueOnce("urbauth-~zod=proof");
+  settingsManagerMock.load.mockResolvedValueOnce({});
+  ingressMock.receive.mockResolvedValue({ kind: "ignored" });
+  const started = Promise.withResolvers<void>();
+  ingressMock.start.mockImplementationOnce(() => started.resolve());
+  const controller = new AbortController();
+  const runtime = { error: vi.fn(), exit: vi.fn(), log: vi.fn() } satisfies RuntimeEnv;
+  const monitor = monitorTlonProvider({
+    scheduler: createTestPluginServiceScheduler(),
+    abortSignal: controller.signal,
+    runtime,
+  });
+  try {
+    await Promise.race([started.promise, monitor]);
+    await run();
+  } finally {
+    controller.abort();
+    await monitor;
+  }
+}
+
+const ownerNotices = () =>
+  JSON.stringify(
+    sseClientMock.poke.mock.calls.filter(([payload]) => payload.mark === "chat-dm-action"),
+  );
+
+const ownerReply = (id: string, text: string) =>
+  getSubscription("chat").event({
+    whom: "~nec",
+    id,
+    response: { add: { essay: messageEssay("~nec", text) } },
+  });
+
+it("does not guess which restricted channel mention a bare approval targets", async () => {
+  const nest = "chat/~host/general";
+  configureTlon({ ownerShip: "~nec", groupChannels: [nest] });
+  const channelRuleWrites = () =>
+    sseClientMock.poke.mock.calls
+      .map(([payload]) => payload.json?.["put-entry"])
+      .filter((entry) => entry?.["entry-key"] === "channelRules");
+  await runMonitor(async () => {
+    const subscription = getSubscription("channels");
+    await subscription.event({
+      nest,
+      response: {
+        post: { id: "mention-bus", "r-post": { set: { essay: messageEssay("~bus", "~zod hi") } } },
+      },
+    });
+    await subscription.event({
+      nest,
+      response: {
+        post: {
+          id: "mention-sampel",
+          "r-post": { set: { essay: messageEssay("~sampel", "~zod hello") } },
+        },
+      },
+    });
+    const approvalIds = [...new Set(ownerNotices().match(/channel-\d+-[a-f0-9]+/g) ?? [])];
+    expect(approvalIds).toHaveLength(2);
+
+    await ownerReply("bare-approve", "approve");
+    expect(ownerNotices()).toContain("Multiple approvals are pending");
+    expect(channelRuleWrites()).toEqual([]);
+    expect(inboundRuntimeMock.dispatch).not.toHaveBeenCalled();
+
+    await ownerReply("explicit-approve", `approve ${approvalIds[0]}`);
+    expect(channelRuleWrites()).toHaveLength(1);
+    expect(JSON.parse(String(channelRuleWrites()[0]?.value))).toEqual({
+      [nest]: { mode: "restricted", allowedShips: ["~bus"] },
+    });
+  });
+});
+
+it("does not guess which queued group invite a bare approval targets", async () => {
+  configureTlon({ ownerShip: "~nec" });
+  const groupJoins = () =>
+    sseClientMock.poke.mock.calls
+      .map(([payload]) => payload)
+      .filter((payload) => payload.mark === "group-join");
+  await runMonitor(async () => {
+    await getSubscription("groups", "/v1/foreigns").event({
+      "~bus/club": { invites: [{ valid: true, from: "~bus" }] },
+      "~sampel/club": { invites: [{ valid: true, from: "~sampel" }] },
+    });
+    const approvalIds = [...new Set(ownerNotices().match(/group-\d+-[a-f0-9]+/g) ?? [])];
+    expect(approvalIds).toHaveLength(2);
+
+    await ownerReply("bare-approve", "approve");
+    expect(ownerNotices()).toContain("Multiple approvals are pending");
+    expect(groupJoins()).toEqual([]);
+
+    await ownerReply("explicit-approve", `approve ${approvalIds[0]}`);
+    expect(groupJoins().map((payload) => payload.json)).toEqual([
+      { flag: "~bus/club", "join-all": true },
+    ]);
+  });
 });

@@ -46,7 +46,39 @@ it.each([
   });
   const legacy = await import(pathToFileURL(path.join(root, "dist", chunk.path)).href);
   for (const { exported, origin } of chunk.exports) {
-    expect(legacy[exported]()).toBe(origin.symbol);
+    expect(await legacy[exported]()).toBe(origin.symbol);
+  }
+});
+
+it.each([
+  { file: "managed-handoff-runtime.mjs", independent: true },
+  { file: "package-update-activation-recovery.mjs", independent: true },
+  { file: "infra/runtime-value-abcdefgh.mjs", independent: false },
+])("resolves updater ownership beside $file", async ({ file, independent }) => {
+  const root = createTempDir("update-compat-worker-graph-");
+  fs.writeFileSync(path.join(root, "package.json"), '{"type":"module"}');
+  writeUpdateCompatibilityBuildFixture(root);
+  const origin = chunk.exports[0]!.origin;
+  const duplicate = path.join(root, "dist", file);
+  fs.mkdirSync(path.dirname(duplicate), { recursive: true });
+  fs.writeFileSync(
+    duplicate,
+    `//#region ${origin.module}\nfunction ${origin.symbol}() { return "independent copy"; }\nexport { ${origin.symbol} as duplicate };\n`,
+  );
+  const write = () =>
+    writeUpdateCompatibilityChunks({
+      distDir: path.join(root, "dist"),
+      sourceDir: root,
+      inventory: previousReleaseInventory,
+    });
+  if (!independent) {
+    expect(write).toThrow("ambiguous current exports");
+    return;
+  }
+  write();
+  const legacy = await import(pathToFileURL(path.join(root, "dist", chunk.path)).href);
+  for (const { exported, origin: expected } of chunk.exports) {
+    expect(await legacy[exported]()).toBe(expected.symbol);
   }
 });
 

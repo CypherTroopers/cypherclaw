@@ -13,7 +13,6 @@ import { assessInitialUpdateSnapshotCapacity } from "../../infra/update-candidat
 import {
   channelToNpmTag,
   DEFAULT_GIT_CHANNEL,
-  EXTENDED_STABLE_TAG_UNSUPPORTED_REASON,
   resolveEffectiveUpdateChannel,
 } from "../../infra/update-channels.js";
 import { fetchNpmPackageTargetStatus } from "../../infra/update-check-package-target.js";
@@ -49,7 +48,7 @@ import { runCommandWithTimeout } from "../../process/exec.js";
 import { defaultRuntime } from "../../runtime.js";
 import type { OpenClawSchemaVersions } from "../../state/openclaw-schema-versions.js";
 import { VERSION } from "../../version.js";
-import { CLI_NAME } from "../cli-name.js";
+import { formatGatewayServiceRootRedirect } from "../daemon-cli/shared.js";
 import {
   DEFAULT_PACKAGE_NAME,
   normalizeTag,
@@ -73,7 +72,11 @@ import { assertUpdatePackageActivationAdmission } from "./update-command-package
 import { inspectNpmGlobalDestination } from "./update-command-package-destination.js";
 import { UnreportedUpdateAdmissionOutcome, type RefuseUpdate } from "./update-command-result.js";
 import { recordUpdateCommandTarget, type prepareUpdateCommand } from "./update-command-run.js";
-import { resolvePackageRuntimePreflight } from "./update-command-runtime-preflight.js";
+import { inspectPackageEngineAdmission } from "./update-command-runtime-admission.js";
+import {
+  recordNodeSecurityWarning,
+  resolvePackageRuntimePreflight,
+} from "./update-command-runtime-preflight.js";
 import type { ManagedServiceRootRedirect } from "./update-command-service-context-types.js";
 import { resolveManagedServicePackageUpdatePlan } from "./update-command-service-plan.js";
 import type { UpdateCommandRecoveryState } from "./update-command-service.js";
@@ -109,11 +112,6 @@ function printManagedServicePackageUpdatePlan(params: {
     defaultRuntime.log(
       theme.warn(
         `Shell OpenClaw root differs from the managed gateway service root: ${rootRedirect.previousRoot}`,
-      ),
-    );
-    defaultRuntime.log(
-      theme.muted(
-        `After the update, make sure \`${CLI_NAME}\` on PATH resolves to the managed service root or reinstall the gateway service from the shell install you want to use.`,
       ),
     );
     if (nodeRunner) {
@@ -179,6 +177,7 @@ export async function resolveUpdateCommandTarget(
           recordUpdateCommandTarget(opts.run, { step });
         }
       };
+      recordNodeSecurityWarning(recordPreflightStep, root, prepared.nodeSecurityWarning);
       const resolveMode = async (): Promise<UpdateRunResult["mode"]> => {
         // Policy/config refusals can precede target preparation. Inspect their owner too.
         return updateInstallKind === "git"
@@ -363,14 +362,10 @@ export async function resolveUpdateCommandTarget(
       }
 
       const unsupportedMainTag = updateInstallKind === "package" && explicitTag === "main";
-      if ((channel === "extended-stable" && explicitTag) || unsupportedMainTag) {
+      if (unsupportedMainTag) {
         await refuseUpdate(
-          unsupportedMainTag
-            ? "unsupported-package-target"
-            : EXTENDED_STABLE_TAG_UNSUPPORTED_REASON,
-          unsupportedMainTag
-            ? "`--tag main` cannot update a package install. Run `openclaw update --channel dev` to switch to the supported Git checkout and build flow."
-            : undefined,
+          "unsupported-package-target",
+          "`--tag main` cannot update a package install. Run `openclaw update --channel dev` to switch to the supported Git checkout and build flow.",
         );
         return undefined;
       }
@@ -390,6 +385,10 @@ export async function resolveUpdateCommandTarget(
       // The service runtime can differ even when its package root matches the shell.
       let managedServiceNodeRunner: string | undefined;
       let packageUpdateNodeRunner: string | undefined;
+      let admittedPackageRuntime:
+        | import("../../infra/package-update-activation-runtime.types.js").PackageActivationRuntime
+        | undefined;
+      let assertPackageRuntimeCurrent: (() => Promise<void>) | undefined;
       let serviceUnitTarget: string | undefined;
 
       if (updateInstallKind === "package") {
@@ -407,6 +406,9 @@ export async function resolveUpdateCommandTarget(
         managedServiceRoot = servicePlan.serviceRoot;
         managedServiceNodeRunner = servicePlan.nodeRunner;
         root = managedServiceRootRedirect?.root ?? discoveredRoot;
+        if (managedServiceRootRedirect) {
+          warn(formatGatewayServiceRootRedirect(managedServiceRootRedirect));
+        }
         if (!opts.json) {
           printManagedServicePackageUpdatePlan(servicePlan);
         }
@@ -547,7 +549,8 @@ export async function resolveUpdateCommandTarget(
             version: targetVersion,
             nodeEngine: release.manifest.package.nodeEngine,
           };
-        } else if (channel === "extended-stable") {
+        } else if (channel === "extended-stable" && !explicitTag) {
+
           const extendedStable = await resolveExtendedStablePackage({
             installKind: updateInstallKind,
             timeoutMs,
@@ -650,15 +653,26 @@ export async function resolveUpdateCommandTarget(
         packageRuntimeTarget?.nodeEngine
       ) {
         // Candidate admission can stage before the activation runtime check.
-        const runtime = await resolvePackageRuntimePreflight({
-          engineOnly: true,
+        const runtimeAdmission = await inspectPackageEngineAdmission({
           channel,
           requestedChannel,
           target: packageRuntimeTarget,
           root,
           nodeRunner: managedServiceNodeRunner ?? packageUpdateNodeRunner,
           timeoutMs: updateStepTimeoutMs,
+          shouldRestart: prepared.shouldRestart,
+          invocationCwd,
+        }).catch(async (error: unknown) => {
+          if (hasCommandProcessCleanupError(error) || !(error instanceof UpdatePreMutationError)) {
+            throw error;
+          }
+          await refuseUpdate(error.reason, error.message, error.failureFacts, error.recoverySteps);
+          return undefined;
         });
+        if (!runtimeAdmission) {
+          return undefined;
+        }
+        const { runtime, assertCurrent } = runtimeAdmission;
         if (!runtime.ok) {
           await refuseUpdate(
             "preflight-node-runtime-incompatible",
@@ -667,6 +681,16 @@ export async function resolveUpdateCommandTarget(
             runtime.recoverySteps,
           );
           return undefined;
+        }
+        if (runtime.value.replacedNodeRunner) {
+          packageUpdateNodeRunner = runtime.value.nodeRunner;
+          admittedPackageRuntime = runtime.value.activationRuntime;
+          assertPackageRuntimeCurrent = assertCurrent;
+        }
+        const runtimeWarning = runtime.value.nodeSecurityWarning;
+        if (runtimeWarning && runtimeWarning !== prepared.nodeSecurityWarning) {
+          warn(`SECURITY WARNING: ${runtimeWarning}`);
+          recordNodeSecurityWarning(recordPreflightStep, root, runtimeWarning);
         }
       }
 
@@ -728,6 +752,8 @@ export async function resolveUpdateCommandTarget(
         managedServiceRoot,
         managedServiceNodeRunner,
         packageUpdateNodeRunner,
+        ...(assertPackageRuntimeCurrent ? { assertPackageRuntimeCurrent } : {}),
+        ...(admittedPackageRuntime ? { admittedPackageRuntime } : {}),
         devTarget,
       };
     });

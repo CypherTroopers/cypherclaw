@@ -9,8 +9,8 @@ This file owns the fork's source provenance and intake procedure. Update the ups
 | Source                  | Pin                                                                          |
 | ----------------------- | ---------------------------------------------------------------------------- |
 | Official repository     | `https://github.com/openclaw/openclaw.git`                                   |
-| Official stable release | [`v2026.10.7`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.7) |
-| Official peeled commit  | `157d8c2bc3ea2fa183afdc11088e69690bf8e64e`                                   |
+| Official stable release | [`v2026.10.33`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.33) |
+| Official peeled commit  | `5196fbbf89838939b0c2e29c09b8829afbc0d415`                                   |
 | Fork repository         | `https://github.com/CypherTroopers/cypherclaw.git`                           |
 
 ### Initial stable migration
@@ -73,13 +73,22 @@ The first sandbox build stopped in postbuild without child diagnostics. The offi
 
 ### October 2026.10.7 intake
 
-The `v2026.10.7` intake merges official `157d8c2bc3ea2fa183afdc11088e69690bf8e64e` into fork head `590bc14f612489dfdeb7069006124357db30ab2c`. Official `v2026.10.6` commit `fe06181dc5ecc01cf8904abbfc26925925efefbc` is an ancestor, so this regular merge retains both histories. The official delta contains 73 commits across 599 files. The published release is not a draft or prerelease.
+The `v2026.10.7` intake merges official `5196fbbf89838939b0c2e29c09b8829afbc0d415` into fork head `590bc14f612489dfdeb7069006124357db30ab2c`. Official `v2026.10.6` commit `fe06181dc5ecc01cf8904abbfc26925925efefbc` is an ancestor, so this regular merge retains both histories. The official delta contains 73 commits across 599 files. The published release is not a draft or prerelease.
 
 The only content conflict is `scripts/lib/update-compat-inventory.json`. Shared release records are unchanged. The resolved inventory keeps the published CypherClaw `2026.10.1` (`b7f56bc5b90f`) and `2026.10.2` (`ec944b6de83c`) compatibility releases and adds the official `2026.10.6` compatibility release. Package metadata keeps the fork identity, Cypher and wallet package files, and installer scripts, and takes the official version `2026.10.7` and `@openclaw/fs-safe` `0.26.0`. The macOS plist keeps CypherClaw permission copy and takes bundle version `2026.10.7` / `2026100700`. The update target keeps CypherClaw stable GitHub release selection and gains the official registry-package Node preflight, which stops before staging a release the managed service's Node cannot run. That preflight applies to registry package specs. A CypherClaw artifact URL still does not satisfy it. The shared-state worker contract keeps Cypher transfer operations and the official exited-lease outcome type.
 
 Shared state schema **20**, agent schema **25**, and update admission protocol **1** are unchanged. Node release floors remain **24.22.1** and **26.12.1**. This source no longer accepts a release manifest that names Node **24.21.0**. Packages already published as 2026.10.5 or earlier still carry that exact check inside the installed updater; publishing a new manifest cannot rewrite it. Those installations still use the installer migration. The published 2026.10.6 updater already accepts the supported range. This source intake does not publish a release or activate a live Gateway.
 
 Validation used Node **24.22.1** and `pnpm install --frozen-lockfile`. `pnpm exec vitest run src/cli/update-cli/update-command-node-engine-preflight.test.ts src/infra/cypherclaw-distribution.test.ts test/scripts/cypherclaw-release-validation.test.ts --maxWorkers=1` passed 51 tests in **17.31s**. `pnpm exec vitest run src/cli/update-cli/update-command.cypherclaw.test.ts --maxWorkers=1` passed 7 tests in **5.56s**. After this source stopped accepting a Node **24.21.0** manifest, `pnpm exec vitest run test/scripts/cypherclaw-release-validation.test.ts src/cli/update-cli/update-command.cypherclaw.test.ts --maxWorkers=1` passed 52 tests in **5.73s**. A complete build, UI payload measurement, branding byte comparison, and live Gateway upgrade were not run.
+
+
+### October 2026.10.33 intake
+
+The `v2026.10.33` intake reapplies the reviewed fork delta through `6f3deaeba478f7c2c7f6b715370bef5f337639e6`, relative to official `v2026.10.7` commit `157d8c2bc3ea2fa183afdc11088e69690bf8e64e`, onto official `5196fbbf89838939b0c2e29c09b8829afbc0d415`. Official `v2026.10.7` is not an ancestor of this extended-stable tag, so the candidate rebuilds from the new stable commit and retains both histories as merge parents.
+
+Shared state migrates from schema **20** to **22** and agent databases from **25** to **27** through the official migration and backup owners. Preserve a verified pre-upgrade backup before activating this source against existing state. Node engines follow the official `>=24.16.0 <25 || >=26.1.0` floor while CypherClaw installers continue to provision private Node **24.22.1**. Cypher node controls, wallet generation, ColossusX tabs, branding assets, and the packaged fork's GitHub Releases update identity remain part of the fork.
+
+This source intake does not publish a release or activate a live Gateway.
 
 ## Prepare the next stable intake
 
@@ -88,7 +97,7 @@ Start with a clean checkout of the reviewed fork branch and verify `origin` is t
 Fetch only the selected tag into a private reference. Replace the example tag with the release selected for this intake:
 
 ```sh
-cypherclaw_tag=v2026.10.7
+cypherclaw_tag=v2026.10.33
 git fetch --no-tags --no-write-fetch-head https://github.com/openclaw/openclaw.git \
   "refs/tags/${cypherclaw_tag}:refs/cypherclaw/upstream/${cypherclaw_tag}"
 git rev-parse "refs/cypherclaw/upstream/${cypherclaw_tag}^{commit}"

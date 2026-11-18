@@ -491,15 +491,21 @@ describe("release validation no-push transport", () => {
   it.each([
     ["openclaw/openclaw", "hybrid", false, "blacksmith-4vcpu-ubuntu-2404"],
     ["openclaw/openclaw", "github", false, "ubuntu-24.04"],
+    ["openclaw/openclaw", "boat", false, "ubuntu-24.04"],
     ["openclaw/openclaw", "", false, "ubuntu-24.04"],
     ["fork/openclaw", "hybrid", false, "ubuntu-24.04"],
     ["openclaw/openclaw", "hybrid", true, "ubuntu-24.04"],
   ])(
-    "routes serial candidate jobs for %s/%s (hosted=%s)",
+    "routes short release controls and reusable candidate jobs for %s/%s (hosted=%s)",
     (repository, backend, hosted, runner) => {
       const targets = [
         [FULL_RELEASE, "resolve_target"],
+        [FULL_RELEASE, "plugin_compatibility_readiness"],
         [FULL_RELEASE, "evidence_reuse"],
+        [FULL_RELEASE, "release_checks_independent"],
+        [FULL_RELEASE, "release_checks_candidate"],
+        [FULL_RELEASE, "performance"],
+        [FULL_RELEASE, "release_execution_plan"],
         [".github/workflows/full-release-candidate.yml", "discover"],
         [".github/workflows/full-release-candidate.yml", "resolve_candidate"],
         [LIVE_E2E, "validate_selected_ref"],
@@ -511,17 +517,25 @@ describe("release validation no-push transport", () => {
           continue;
         }
         const expression = job(readWorkflow(workflowPath!), name!)["runs-on"]!;
-        const actual = expression.startsWith("${{")
-          ? runInNewContext(
-              expression.slice(3, -2),
-              runnerSandbox({
-                github: { repository },
-                inputs: { use_github_hosted_runners: hosted },
-                vars: { OPENCLAW_CI_RUNNER_BACKEND: backend },
-              }),
-            )
-          : expression;
-        expect(actual, `${workflowPath}:${name}`).toBe(runner);
+        const label = workflowPath === LIVE_E2E ? runner : "ubuntu-24.04";
+        for (const runnerGroup of ["", "release"]) {
+          const actual = expression.startsWith("${{")
+            ? runInNewContext(
+                expression.slice(3, -2),
+                runnerSandbox({
+                  github: { repository },
+                  inputs: { use_github_hosted_runners: hosted, runner_group: runnerGroup },
+                  vars: {
+                    OPENCLAW_CI_RUNNER_BACKEND: backend,
+                    OPENCLAW_RELEASE_RUNNER_GROUP: runnerGroup,
+                  },
+                }),
+              )
+            : expression;
+          expect(actual, `${workflowPath}:${name}:${runnerGroup}`).toEqual(
+            runnerGroup ? { group: runnerGroup, labels: label } : label,
+          );
+        }
       }
     },
   );
@@ -690,8 +704,10 @@ describe("release validation no-push transport", () => {
       "plugin-prerelease",
       "install-smoke",
       "cross-os",
+      "windows-node",
       "live-e2e",
       "package",
+      "qualified-package",
       "qa-parity",
       "qa-live",
       "npm-telegram",
@@ -720,8 +736,10 @@ describe("release validation no-push transport", () => {
     expect(candidateRequest.run).toContain(
       '[[ "$RERUN_GROUP" =~ ^(all|plugin-prerelease)$ ]] && plugin_required=true',
     );
-    expect(candidateRequest.run).toContain('[[ "$RERUN_GROUP" =~ ^(all|cross-os)$ &&');
-    expect(candidateRequest.run).toContain('elif [[ "$RERUN_GROUP" =~ ^(all|package)$ &&');
+    expect(candidateRequest.run).toContain('[[ "$RERUN_GROUP" =~ ^(all|cross-os|windows-node)$ &&');
+    expect(candidateRequest.run).toContain(
+      'elif [[ "$RERUN_GROUP" =~ ^(all|package|qualified-package)$ &&',
+    );
     expect(candidateRequest.run).toContain('elif [[ "$RERUN_GROUP" == "live-e2e" &&');
     const candidateAcquisition = job(full, "candidate_acquisition");
     expect(candidateAcquisition.if).toContain(
@@ -753,51 +771,18 @@ describe("release validation no-push transport", () => {
   });
 
   it.each([
-    {
-      group: "install-smoke",
-      groups: ["install-smoke"],
-      packageRequired: "false",
-      dockerRequired: "false",
-    },
-    {
-      group: "qa",
-      groups: ["qa-parity", "qa-live"],
-      packageRequired: "false",
-      dockerRequired: "false",
-    },
-    {
-      group: "qa-parity",
-      groups: ["qa-parity"],
-      packageRequired: "false",
-      dockerRequired: "false",
-    },
-    {
-      group: "qa-live",
-      groups: ["qa-live"],
-      packageRequired: "false",
-      dockerRequired: "false",
-    },
-    {
-      group: "cross-os",
-      groups: ["cross-os"],
-      packageRequired: "true",
-      dockerRequired: "false",
-    },
-    {
-      group: "package",
-      groups: ["package"],
-      packageRequired: "true",
-      dockerRequired: "false",
-    },
-    {
-      group: "live-e2e",
-      groups: ["live-e2e"],
-      packageRequired: "true",
-      dockerRequired: "true",
-    },
-  ])(
-    "maps $group to explicit release resources",
-    ({ group, groups, packageRequired, dockerRequired }) => {
+    ["install-smoke", ["install-smoke"], "false", "false"],
+    ["qa", ["qa-parity", "qa-live"], "false", "false"],
+    ["qa-parity", ["qa-parity"], "false", "false"],
+    ["qa-live", ["qa-live"], "false", "false"],
+    ["cross-os", ["cross-os"], "true", "false"],
+    ["package", ["package"], "true", "false"],
+    ["qualified-package", ["qualified-package"], "true", "false"],
+    ["windows-node", ["windows-node"], "true", "false"],
+    ["live-e2e", ["live-e2e"], "true", "true"],
+  ] as const)(
+    "maps %s to explicit release resources",
+    (group, groups, packageRequired, dockerRequired) => {
       const outputs = runReleaseGroupCapture(group);
       expect(JSON.parse(outputs.release_check_groups_json ?? "null")).toEqual(groups);
       expect(outputs.package_required).toBe(packageRequired);
@@ -820,6 +805,7 @@ describe("release validation no-push transport", () => {
       expect(JSON.parse(outputs.release_check_groups_json ?? "null")).toEqual([
         "install-smoke",
         "cross-os",
+        "windows-node",
         "package",
         "qa-parity",
         ...(effectiveSoak ? ["live-e2e", "qa-live"] : []),
@@ -901,6 +887,8 @@ describe("release validation no-push transport", () => {
   });
 
   it.each([
+    ["windows-node", "", ""],
+    ["qualified-package", "", ""],
     ["qa-live", "qa-live-matrix", ""],
     ["live-e2e", " Repo-E2E,\trepo-smoke ", ""],
     ["cross-os", "", " Windows/Packaged-Upgrade "],
@@ -1254,7 +1242,7 @@ describe("release validation no-push transport", () => {
     const verify = step(job(full, "summary"), "Verify exact release state artifacts");
     const dispatch = step(job(full, "summary"), "Request release evidence update");
 
-    expect(verify.run).toBe("node scripts/full-release-validation-state.mjs verify");
+    expect(verify.run).toBe('node "$RELEASE_STATE_SCRIPT" verify');
     expect(dispatch.run).not.toContain('GITHUB_RUN_ID_VALUE="$EVIDENCE_ROOT_RUN_ID"');
     expect(dispatch.run).toContain("reused green product evidence from chain-root run");
     expect(dispatch.run).toContain("--connect-timeout 10");
@@ -1425,6 +1413,7 @@ describe("release validation no-push transport", () => {
       repository: "openclaw/openclaw",
       ref: "${{ github.sha }}",
       "persist-credentials": false,
+      "sparse-checkout": "scripts",
     });
     const binder = job(workflow, "bind_full_release_candidate_evidence");
     const binderIdentity = step(binder, "Resolve exact trusted workflow identity");
@@ -1437,7 +1426,7 @@ describe("release validation no-push transport", () => {
       binder.steps!.indexOf(binderCheckout!.candidate) + 1,
     );
     expect(binder.steps!.indexOf(binderRestore)).toBeLessThan(
-      binder.steps!.indexOf(step(binder, "Setup trusted release harness")),
+      binder.steps!.indexOf(step(binder, "Create full release candidate evidence")),
     );
     const exactRevisionCheckouts = trustedCheckouts.filter(
       ({ jobName }) => jobName !== "bind_full_release_candidate_evidence",
@@ -1898,7 +1887,7 @@ describe("release validation no-push transport", () => {
     expect(fullText).toContain("Report publication: disabled (artifacts only)");
     expect(
       step(job(readWorkflow(FULL_RELEASE), "summary"), "Write release validation manifest").run,
-    ).toBe("node scripts/full-release-validation-state.mjs write-manifest");
+    ).toBe('node "$RELEASE_STATE_SCRIPT" write-manifest');
     expect(publisher.if).toContain("inputs.publish_reports == true");
     const guard = job(performance, "artifact_only_guard");
     expect(guard.if).toContain("inputs.publish_reports != true");
@@ -1973,7 +1962,7 @@ describe("release validation no-push transport", () => {
       'if [[ "${RELEASE_NPM_DIST_TAG}" == "extended-stable" ]]; then',
     );
     expect(publishJob.if).toBe("${{ !inputs.publish_docker_only }}");
-    expect(validateEvidence.env?.EXPECTED_WORKFLOW_BRANCH).toBe("${{ github.ref_name }}");
+    expect(validateEvidence.env?.TRUSTED_WORKFLOW_FULL_REF).toBe("${{ github.ref }}");
     expect(validateReleaseBranch.run).toContain(
       'expected_ref="refs/remotes/origin/${EXPECTED_VALIDATION_BRANCH}"',
     );

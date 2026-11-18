@@ -23,6 +23,7 @@ import { withUpdateCandidateIoBudget } from "./update-candidate-io.js";
 import { prepareUpdateCandidatePluginTrees } from "./update-candidate-plugin-tree.js";
 import type { ResolvedGlobalInstallTarget } from "./update-global.js";
 import { resolveNativePackageProjectRoot } from "./update-native-package-owner.js";
+import { retainUpdateRuntimeImports } from "./update-retained-runtime-imports.js";
 import { linkUpdateCandidatePluginTrees } from "./update-retained-runtime-tree.js";
 import { prepareRuntimeRelocations, relocateRuntimePath } from "./update-runtime-relocation.js";
 
@@ -236,6 +237,22 @@ async function runWithRetainedUpdateRuntime<T>(
           const resolve = (url: URL) =>
             pathToFileURL(relocateRuntimePath(fileURLToPath(url), relocations));
           bind(resolve);
+          // Workers and the parent must use the same generation after activation
+          // replaces dist; preserving URLs also preserves already-loaded singletons.
+          // Inventory uses physical paths; module identity uses the running updater
+          // spelling. Rebase only inventoried files, never an entire import prefix.
+          const importIdentities = prepareRuntimeRelocations([
+            { sourceRoot, destinationRoot: root },
+          ]);
+          retainUpdateRuntimeImports(
+            relocations.rules,
+            plan.entries
+              .filter((entry) => entry.kind === "file")
+              .map((entry) => ({
+                sourcePath: entry.path,
+                identityPath: relocateRuntimePath(entry.path, importIdentities),
+              })),
+          );
           prepared = true;
           return {
             inventoryMs,

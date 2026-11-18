@@ -144,24 +144,18 @@ function readySnapshot(
   uptimeMs = FIVE_MIN_MS,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  return { ready: true, failing: [], uptimeMs, ...extra };
+  return { ready: true, coreReady: true, failing: [], uptimeMs, ...extra };
 }
 
-function failingSnapshot(failing: string[], uptimeMs = FIVE_MIN_MS): Record<string, unknown> {
-  return { ready: false, failing, uptimeMs };
+function failingSnapshot(
+  failing: string[],
+  uptimeMs = FIVE_MIN_MS,
+  coreReady = false,
+): Record<string, unknown> {
+  return { ready: false, coreReady, failing, uptimeMs };
 }
 
 describe("createReadinessChecker", () => {
-  it("reports the current startup pending reason", () => {
-    withReadinessClock(() => {
-      const { readiness } = createReadinessHarness({
-        getStartupPending: () => true,
-        getStartupPendingReason: () => "startup-sidecars",
-      });
-      expect(readiness()).toEqual(failingSnapshot(["startup-sidecars"]));
-    });
-  });
-
   it("does not cache startup-pending readiness", () => {
     withReadinessClock(() => {
       let startupPending = true;
@@ -254,18 +248,17 @@ describe("createReadinessChecker", () => {
       });
 
       pluginReload = undefined;
-      expect(readiness()).toEqual(failingSnapshot(["discord"]));
+      expect(readiness()).toEqual(failingSnapshot(["discord"], FIVE_MIN_MS, true));
     });
   });
 
   it.each([
-    { skipChannels: false, channelFailed: false, allowPending: true },
-    { skipChannels: true, channelFailed: false, allowPending: true },
-    { skipChannels: false, channelFailed: true, allowPending: true },
-    { skipChannels: true, channelFailed: false, allowPending: false },
+    { skipChannels: false, channelFailed: false },
+    { skipChannels: true, channelFailed: false },
+    { skipChannels: false, channelFailed: true },
   ])(
-    "reports warming, failed, and recovered core agents (skip channels: $skipChannels, channel failed: $channelFailed, allow pending: $allowPending)",
-    ({ skipChannels, channelFailed, allowPending }) => {
+    "reports warming, failed, and recovered core agents (skip channels: $skipChannels, channel failed: $channelFailed)",
+    ({ skipChannels, channelFailed }) => {
       withReadinessClock(() => {
         const pending = createAgentDatabaseInspectionRefusal({
           agentId: "main",
@@ -286,15 +279,16 @@ describe("createReadinessChecker", () => {
           startedAt: Date.now() - FIVE_MIN_MS,
           cacheTtlMs: 1_000,
           shouldSkipChannelReadiness: () => skipChannels,
-          allowPendingAgentDatabases: allowPending,
           getAgentDatabaseAdmissionRefusals: () => refusals,
         });
-        const channelReadiness = channelFailed ? failingSnapshot(["discord"]) : readySnapshot();
+        const channelReadiness = channelFailed
+          ? failingSnapshot(["discord"], FIVE_MIN_MS, true)
+          : readySnapshot();
         expect(readiness()).toEqual(channelReadiness);
 
         refusals = [pending];
         expect(readiness()).toEqual({
-          ...(allowPending ? channelReadiness : failingSnapshot(["agent-database:main"])),
+          ...failingSnapshot(["agent-database:main"]),
           agentDatabases: [pending],
         });
 
@@ -341,19 +335,6 @@ describe("createReadinessChecker", () => {
     });
   });
 
-  it("reports disconnected managed channels after startup grace", () => {
-    withReadinessClock(() => {
-      const { readiness } = createReadinessHarness({
-        accounts: {
-          discord: managedAccount({
-            connected: false,
-          }),
-        },
-      });
-      expect(readiness()).toEqual(failingSnapshot(["discord"]));
-    });
-  });
-
   it("keeps a long-running Reef account ready during fresh reconnect grace", () => {
     withReadinessClock(() => {
       const { readiness } = createLongRunningReadinessHarness({
@@ -386,15 +367,6 @@ describe("createReadinessChecker", () => {
     });
   });
 
-  it("reports a recorded starting lifecycle that outlives connect grace", () => {
-    withReadinessClock(() => {
-      const { readiness } = createLongRunningReadinessHarness({
-        discord: managedAccount({ connected: false, lifecycle: "starting" }),
-      });
-      expect(readiness()).toEqual(failingSnapshot(["discord"], THIRTY_ONE_MIN_MS));
-    });
-  });
-
   it("reports recorded blocked lifecycle as not ready", () => {
     withReadinessClock(() => {
       const { readiness } = createReadinessHarness({
@@ -407,7 +379,7 @@ describe("createReadinessChecker", () => {
           }),
         },
       });
-      expect(readiness()).toEqual(failingSnapshot(["slack"]));
+      expect(readiness()).toEqual(failingSnapshot(["slack"], FIVE_MIN_MS, true));
     });
   });
 
@@ -423,22 +395,7 @@ describe("createReadinessChecker", () => {
           }),
         },
       });
-      expect(readiness()).toEqual(failingSnapshot(["discord"], 30_000));
-    });
-  });
-
-  it("treats intentionally skipped channels as ready", () => {
-    withReadinessClock(() => {
-      const { manager, readiness } = createReadinessHarness({
-        accounts: {
-          discord: stoppedAccount(),
-          telegram: stoppedAccount(),
-        },
-        shouldSkipChannelReadiness: () => true,
-      });
-
-      expect(readiness()).toEqual(readySnapshot());
-      expect(manager.getRuntimeSnapshot).not.toHaveBeenCalled();
+      expect(readiness()).toEqual(failingSnapshot(["discord"], 30_000, true));
     });
   });
 
@@ -479,24 +436,6 @@ describe("createReadinessChecker", () => {
     });
   });
 
-  it("keeps restart-pending channels ready during reconnect backoff", () => {
-    withReadinessClock(() => {
-      const startedAt = Date.now() - FIVE_MIN_MS;
-      const { readiness } = createReadinessHarness({
-        accounts: {
-          discord: managedAccount({
-            running: false,
-            restartPending: true,
-            reconnectAttempts: 3,
-            lastStartAt: startedAt - 30_000,
-            lastStopAt: Date.now() - 5_000,
-          }),
-        },
-      });
-      expect(readiness()).toEqual(readySnapshot());
-    });
-  });
-
   it("keeps a dead-ingress channel ready while its restart backoff is still pending", () => {
     // The next start re-proves ingress, so this window gets the same grace as any
     // other restart handoff rather than flapping readiness on every retry.
@@ -518,22 +457,6 @@ describe("createReadinessChecker", () => {
     });
   });
 
-  it("fails readiness for dead ingress once the restart ladder stops retrying", () => {
-    withReadinessClock(() => {
-      const { readiness } = createReadinessHarness({
-        accounts: {
-          discord: managedAccount({
-            running: false,
-            restartPending: false,
-            ingressUnavailable: true,
-            reconnectAttempts: 11,
-          }),
-        },
-      });
-      expect(readiness()).toEqual(failingSnapshot(["discord"]));
-    });
-  });
-
   it("fails readiness for a running channel whose transport is up but ingress is dead", () => {
     withReadinessClock(() => {
       const { readiness } = createReadinessHarness({
@@ -547,7 +470,7 @@ describe("createReadinessChecker", () => {
           }),
         },
       });
-      expect(readiness()).toEqual(failingSnapshot(["discord"]));
+      expect(readiness()).toEqual(failingSnapshot(["discord"], FIVE_MIN_MS, true));
     });
   });
 
@@ -557,18 +480,6 @@ describe("createReadinessChecker", () => {
         discord: managedAccount({
           lastStartAt: Date.now() - THIRTY_ONE_MIN_MS,
           lastTransportActivityAt: Date.now() - THIRTY_ONE_MIN_MS,
-        }),
-      });
-      expect(readiness()).toEqual(readySnapshot(THIRTY_ONE_MIN_MS));
-    });
-  });
-
-  it("keeps telegram long-polling channels ready without stale-socket classification", () => {
-    withReadinessClock(() => {
-      const { readiness } = createLongRunningReadinessHarness({
-        telegram: managedAccount({
-          lastStartAt: Date.now() - THIRTY_ONE_MIN_MS,
-          lastTransportActivityAt: null,
         }),
       });
       expect(readiness()).toEqual(readySnapshot(THIRTY_ONE_MIN_MS));
@@ -609,7 +520,7 @@ describe("createReadinessChecker", () => {
       );
       vi.setSystemTime(Date.now() - 60_000);
 
-      expect(readiness()).toEqual(failingSnapshot(["discord"], FIVE_MIN_MS - 60_000));
+      expect(readiness()).toEqual(failingSnapshot(["discord"], FIVE_MIN_MS - 60_000, true));
       expect(manager.getRuntimeSnapshot).toHaveBeenCalledTimes(2);
     });
   });

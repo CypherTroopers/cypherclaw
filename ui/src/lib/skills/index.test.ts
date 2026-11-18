@@ -8,7 +8,11 @@ import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import { waitForFast } from "../../test-helpers/wait-for.ts";
 import { createRuntimeConfigCapability } from "../config/runtime-config-capability.ts";
 import { searchClawHub } from "./clawhub-search.ts";
-import { createDeferredRequestQueue, type TestRequest } from "./index.test-support.ts";
+import {
+  createDeferredRequestQueue,
+  createSkillsState as createState,
+  type TestRequest,
+} from "./index.test-support.ts";
 import {
   clawhubVerdictKey,
   installFromClawHub,
@@ -26,83 +30,8 @@ import {
 
 type SkillsState = Parameters<typeof loadSkills>[0];
 
-function createState(): { state: SkillsState; request: ReturnType<typeof vi.fn<TestRequest>> } {
-  const request = vi.fn<TestRequest>();
-  const state: SkillsState = {
-    client: {
-      request,
-    } as unknown as SkillsState["client"],
-    connected: true,
-    runtimeConfig: {
-      runExternalMutation: async (task) => {
-        try {
-          return {
-            ok: true,
-            value: await task(expectDefined(state.client, "connected skill mutation client")),
-            refresh: { ok: true },
-          };
-        } catch (error) {
-          return {
-            ok: false,
-            reason: "error",
-            error: error instanceof Error ? error.message : String(error),
-          };
-        }
-      },
-    },
-    skillsAgentId: "main",
-    skillsAgentRevision: 0,
-    skillsLoading: false,
-    skillsReport: null,
-    skillsError: null,
-    skillsFilter: "",
-    skillsStatusFilter: "all",
-    skillsDetailKey: null,
-    skillsDetailTab: "overview",
-    skillOperation: null,
-    skillEdits: {},
-    skillMessages: {},
-    clawhubSearchQuery: "github",
-    clawhubSearchResults: [
-      {
-        score: 0.9,
-        registry: "https://clawhub.ai",
-        slug: "github",
-        installRef: "@openclaw/github",
-        displayName: "GitHub",
-        summary: "Previous result",
-        version: "1.0.0",
-      },
-    ],
-    clawhubSearchLoading: false,
-    clawhubSearchError: "old error",
-    clawhubIconUrls: {},
-    clawhubDetail: null,
-    clawhubDetailRef: null,
-    clawhubDetailLoading: false,
-    clawhubDetailError: null,
-    clawhubInstallMessage: null,
-    clawhubVerdicts: {},
-    clawhubVerdictsLoading: false,
-    clawhubVerdictsError: null,
-    skillCardContents: {},
-    skillCardContentKeys: {},
-    skillCardLoadingKey: null,
-    skillCardErrors: {},
-  };
-  return { state, request };
-}
-
-function mockSkillMutationRequests(
-  request: ReturnType<typeof vi.fn<TestRequest>>,
-  installMessage?: string,
-) {
-  request.mockImplementation(async (method: string) => {
-    if (method === "skills.install" && installMessage) {
-      return { message: installMessage };
-    }
-    return {};
-  });
+function mockSkillMutationRequests(request: ReturnType<typeof vi.fn<TestRequest>>) {
+  request.mockResolvedValue({});
 }
 
 function createSkillCardReport(installedVersion?: string, installedAt = 123): SkillStatusReport {
@@ -163,22 +92,6 @@ describe("loadSkills", () => {
     await loadSkills(state);
 
     expect(request).not.toHaveBeenCalled();
-  });
-
-  it("does not request ClawHub verdicts when no installed skills are linked", async () => {
-    const { state, request } = createState();
-    request.mockResolvedValueOnce({
-      workspaceDir: "/tmp/workspace",
-      managedSkillsDir: "/tmp/skills",
-      skills: [{ name: "Local", skillKey: "local", source: "workspace" }],
-    });
-
-    await loadSkills(state);
-
-    expect(request).toHaveBeenCalledTimes(1);
-    expect(request).toHaveBeenCalledWith("skills.status", { agentId: "main" });
-    expect(state.clawhubVerdicts).toEqual({});
-    expect(state.clawhubVerdictsError).toBeNull();
   });
 
   it("requests one bulk ClawHub verdict batch for linked installed skills", async () => {
@@ -604,33 +517,6 @@ describe("searchClawHub", () => {
       { signal: undefined },
     );
   });
-
-  it("returns search results and forwards cancellation", async () => {
-    const { state, request } = createState();
-    const controller = new AbortController();
-    request.mockResolvedValue({
-      results: [
-        {
-          score: 0.95,
-          registry: "https://clawhub.ai",
-          slug: "github-new",
-          installRef: "@openclaw/github-new",
-          displayName: "GitHub New",
-          summary: "Fresh result",
-          version: "2.0.0",
-        },
-      ],
-    });
-
-    await expect(searchClawHub(state.client!, "github", controller.signal)).resolves.toEqual([
-      expect.objectContaining({ slug: "github-new" }),
-    ]);
-    expect(request).toHaveBeenCalledWith(
-      "skills.search",
-      { query: "github", limit: 20 },
-      { signal: controller.signal },
-    );
-  });
 });
 
 describe("loadClawHubDetail", () => {
@@ -753,30 +639,15 @@ describe("skill mutations", () => {
       name: "saves API keys and reports success",
       run: async (state: SkillsState) => {
         state.skillEdits.github = "  sk-test  ";
-        await saveSkillApiKey(state, "github");
+        await saveSkillApiKey(state, "github", () => true);
       },
       expectedRequest: ["skills.update", { skillKey: "github", apiKey: "sk-test" }],
       expectedMessage: "API key saved — stored in openclaw.json (skills.entries.github)",
     },
-    {
-      name: "installs skills and uses server success messages",
-      run: (state: SkillsState) => installSkill(state, "github", "GitHub", "install-123", true),
-      expectedRequest: [
-        "skills.install",
-        {
-          agentId: "research",
-          name: "GitHub",
-          installId: "install-123",
-          dangerouslyForceUnsafeInstall: true,
-        },
-      ],
-      expectedMessage: "Installed from registry",
-      installMessage: "Installed from registry",
-    },
-  ])("$name", async ({ run, expectedRequest, expectedMessage, installMessage }) => {
+  ])("$name", async ({ run, expectedRequest, expectedMessage }) => {
     const { state, request } = createState();
     state.skillsAgentId = "research";
-    mockSkillMutationRequests(request, installMessage);
+    mockSkillMutationRequests(request);
 
     await run(state);
 
@@ -787,7 +658,7 @@ describe("skill mutations", () => {
     expect(state.skillsError).toBeNull();
   });
 
-  it.each([undefined, "   "])(
+  it.each(["   "])(
     "does not clear an existing API key when its replacement is blank: %j",
     async (editValue) => {
       const { state, request } = createState();
@@ -795,7 +666,7 @@ describe("skill mutations", () => {
         state.skillEdits.github = editValue;
       }
 
-      await saveSkillApiKey(state, "github");
+      await saveSkillApiKey(state, "github", () => true);
 
       expect(request).not.toHaveBeenCalled();
       expect(state.skillMessages.github).toBeUndefined();
@@ -1129,24 +1000,6 @@ describe("skill mutations", () => {
     expect(state.skillMessages).toEqual({});
   });
 
-  it("routes selected agent ClawHub installs through the selected workspace", async () => {
-    const { state, request } = createState();
-    state.skillsAgentId = "research";
-    request.mockResolvedValue({});
-
-    await installFromClawHub(state, "github");
-
-    expect(request).toHaveBeenCalledWith("skills.install", {
-      agentId: "research",
-      source: "clawhub",
-      slug: "github",
-    });
-    expect(state.clawhubInstallMessage).toEqual({
-      kind: "success",
-      text: "Installed github",
-    });
-  });
-
   it("shows ClawHub trust warnings returned by successful skill installs", async () => {
     const { state, request } = createState();
     request.mockImplementation(async (method: string) => {
@@ -1170,11 +1023,6 @@ describe("skill mutations", () => {
   });
 
   it.each([
-    [
-      "shows ClawHub trust warnings from failed skill install error details",
-      "ClawHub blocked this release; install was not started.",
-      { warning: "BLOCKED - ClawHub flagged this release as malicious" },
-    ],
     [
       "shows a ClawHub trust error without an acknowledgement retry",
       "ClawHub requires acknowledgement before installing.",

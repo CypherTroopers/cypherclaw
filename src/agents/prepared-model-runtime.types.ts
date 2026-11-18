@@ -36,6 +36,7 @@ export type PreparedModelRuntimeCatalogMode = "live" | "static";
 export type PreparedModelCatalogRefreshOptions = {
   refresh?: boolean;
   providerIds?: readonly string[];
+  /** Lifecycle publication renews changed providers; native harnesses wait for demand. */
   changedOnly?: boolean;
   /** Await acquisition instead of returning published rows after the foreground deadline. */
   wait?: boolean;
@@ -96,16 +97,16 @@ export type PreparedModelRuntimeSnapshot = Omit<PublishedModelCatalogOwnerCandid
     /** Inventory demand may renew expired providers without waiting or replacing saved rows. */
     refreshExpiredModelCatalog?: () => void;
     /** Rechecks native CLI login availability without refreshing provider inventory. */
-    recheckNativeLogin?: () => void;
+    recheckNativeLogin?: (options?: { force?: boolean }) => void | Promise<void>;
     /** Reads validated executable rows from this owner's accepted provider publication. */
     readPublishedModels?: () => ReadonlyMap<string, readonly Model[]> | undefined;
     /** Builds this generation's full control-plane catalog without replacing turn facts. */
     loadFullModelCatalog?: (
       options?: PreparedModelCatalogRefreshOptions,
     ) => Promise<ModelCatalogSnapshot>;
-    /** Acquires the selected runtime's native facts before host model resolution. */
+    /** Acquires native inventory on demand, or just the runtime selected for execution. */
     loadNativeModelCatalog?: (
-      selection: PreparedNativeModelSelection,
+      selection?: PreparedNativeModelSelection,
     ) => Promise<ModelCatalogSnapshot>;
     /** Full static models for configured refs, resolved once at the lifecycle boundary. */
     configuredRuntimeModels: readonly PreparedConfiguredRuntimeModel[];
@@ -133,6 +134,7 @@ export type PreparedReplyDispatchRuntime = Readonly<{
   agentDir: string;
   workspaceDir: string;
   config: OpenClawConfig;
+  readPolicyConfig?: () => OpenClawConfig;
   modelCatalog: ModelCatalogSnapshot;
   readFullModelCatalog?: () => ModelCatalogSnapshot | undefined;
   inboundPluginRegistry: PluginRegistry;
@@ -159,12 +161,16 @@ export type PreparedModelRuntimeInput = {
   env?: NodeJS.ProcessEnv;
   allowGatewaySubagentBinding?: boolean;
   runtimePluginSelections?: readonly AgentHarnessPluginSelection[];
+  /** Internal admission binding; never replaces the discovery/public config identities. */
+  readPolicyConfig?: () => OpenClawConfig;
   config: OpenClawConfig;
 };
 
 export type PreparedModelRuntimeLease = Readonly<{
   snapshot: PreparedModelRuntimeSnapshot;
   pluginGeneration: PreparedModelRuntimePluginGeneration;
+  /** Exact capability custody for execution; passive inventory leases omit this. */
+  run?: <T>(run: () => T) => T;
   [Symbol.asyncDispose](): Promise<void>;
 }>;
 
@@ -185,6 +191,8 @@ export type PreparedModelRuntimePublicationOptions = {
   force?: boolean;
   provenance?: PreparedModelRuntimeOwner["provenance"];
   catalogMode?: PreparedModelRuntimeCatalogMode;
+  /** Discovery deadline for this publication only; omitted publications retain the short default. */
+  providerDiscoveryTimeoutMs?: number;
 };
 
 export type PreparedModelRuntimeRefreshOptions = {
@@ -275,12 +283,13 @@ export type PreparedModelRuntimeOwner = {
   /** Source-bound attempt status, including failure before any inventory was published. */
   catalogAttempt?: PreparedModelCatalogAttempt;
   refreshError?: Error;
-  /** Demand may recheck a failed catalog-worker replacement; scheduled demand gets one attempt. */
+  /** Demand may recheck a failed publication; scheduled demand gets one attempt. */
   catalogRecovery?: {
     error: Error;
     scheduledAttempted: boolean;
     retryAfter: number;
     replacementGateId?: PreparedModelRuntimeReplacementGateId;
+    pending?: Promise<void>;
   };
   /** The configured publication owner recovers when an idle Gateway lender retires. */
   onPluginGenerationRetired?: () => void;
@@ -295,6 +304,7 @@ export type PreparedModelRuntimeOwner = {
 };
 
 export type PreparedModelRuntimeReplacement = {
+  agentIds?: ReadonlySet<string>;
   degraded?: boolean;
   gateId: PreparedModelRuntimeReplacementGateId;
   promise: Promise<void>;

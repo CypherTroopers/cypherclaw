@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { PluginInvocationScope } from "../plugins/plugin-invocation-scope.js";
 import type { ProviderCatalogOutcome } from "../plugins/provider-catalog-outcome.js";
 import { withPluginRuntimeGenerationScope } from "../plugins/runtime/generation-scope.js";
 import { listManifestSyntheticAuthProviderRefs } from "../plugins/synthetic-auth.runtime.js";
@@ -27,6 +28,27 @@ import type { PreparedModelRuntimeCatalogAccessParams } from "./prepared-model-r
 import { PreparedModelRuntimePublicationSupersededError } from "./prepared-model-runtime.errors.js";
 import { retainPreparedPluginGeneration } from "./prepared-model-runtime.plugin-lifetime.js";
 import { preparedSyntheticAuthProviderScope } from "./prepared-model-runtime.synthetic-auth.js";
+import type { PreparedModelRuntimePluginGeneration } from "./prepared-model-runtime.types.js";
+import { createRuntimePluginWork, releaseRuntimePluginWork } from "./runtime-plugin-work.js";
+
+/** Discovery keeps its physical generation, but only executing capabilities count as work. */
+export async function withPreparedModelCatalogPluginScope<T>(
+  generation: PreparedModelRuntimePluginGeneration,
+  run: () => T | Promise<T>,
+): Promise<T> {
+  const release = retainPreparedPluginGeneration(generation);
+  const work = createRuntimePluginWork();
+  const invocations = generation.pluginRegistry
+    ? new PluginInvocationScope(generation.pluginRegistry, [], { work })
+    : undefined;
+  try {
+    return await (invocations ? invocations.run(run) : run());
+  } finally {
+    invocations?.release();
+    // A final physical cleanup can still invoke a capability's native resources.
+    await releaseRuntimePluginWork(release, work.release);
+  }
+}
 
 // Startup captures each CLI login once; ordinary reads recheck it after this window.
 const NATIVE_LOGIN_RECHECK_MS = 60_000;
@@ -412,6 +434,7 @@ export async function prepareInitialModelCatalogAuth(
     ...catalogFacts.modelCatalog.entries.map((entry) => entry.provider),
     ...Object.values(agentFacts.authStore.profiles).map((profile) => profile.provider),
   ];
+  // Initial labels run under the build's finite construction custody, before publication.
   const providerAuthLabels =
     providers.length === 0
       ? new Map()
@@ -460,13 +483,12 @@ async function refreshScopedModelCatalogAuth(
   { providerIds, profileIds }: PreparedModelRuntimeAuthScope,
 ): Promise<PreparedModelCatalogAuth> {
   owner.assertCurrent();
-  await using _ = {
-    [Symbol.asyncDispose]: retainPreparedPluginGeneration(owner.pluginGeneration),
-  };
-  const refreshed = await owner.refreshAuth({
-    providerIds,
-    ...(profileIds?.length ? { profileIds } : {}),
-  });
+  const refreshed = await withPreparedModelCatalogPluginScope(owner.pluginGeneration, () =>
+    owner.refreshAuth({
+      providerIds,
+      ...(profileIds?.length ? { profileIds } : {}),
+    }),
+  );
   owner.assertCurrent();
   const scope = preparedSyntheticAuthProviderScope(providerIds.map(owner.normalizeProvider));
   const includesProvider = (provider: string) => scope.has(owner.normalizeProvider(provider));
@@ -492,71 +514,72 @@ export function createNativeLoginRecheck(
   },
   eligibleProviders: readonly string[],
   publish: (auth: PreparedModelCatalogAuth) => void,
-): () => void {
+): (options?: { force?: boolean }) => void | Promise<void> {
   const { owners, index } = owner.pluginGeneration.pluginMetadataSnapshot;
   const refs = new Set(listManifestSyntheticAuthProviderRefs(index).map(owner.normalizeProvider));
   const providerIds = eligibleProviders.filter(
     (provider) => owners.cliBackends.has(provider) && refs.has(provider),
   );
   let checkedAt = Date.now();
-  let pending = false;
-  const recheck = async () => {
-    owner.assertCurrent();
-    await using _ = {
-      [Symbol.asyncDispose]: retainPreparedPluginGeneration(owner.pluginGeneration),
-    };
-    const { input, env } = params.agentFacts;
-    const signal = AbortSignal.any([params.retirementSignal, AbortSignal.timeout(180_000)]);
-    await withPluginRuntimeGenerationScope(
-      {
-        metadataSnapshot: owner.pluginGeneration.pluginMetadataSnapshot,
-        pluginRegistry: owner.pluginGeneration.pluginRegistry,
-      },
-      async () => {
-        const credentials = await prepareAmbientAgentCredentialsForDiscovery({
-          config: input.config,
-          env,
-          workspaceDir: input.workspaceDir,
-          authoritativeSyntheticAuthProviderRefs: providerIds,
-          syntheticAuthProviderRefs: providerIds,
-          preparationOwner: {},
-          signal,
-        });
-        signal.throwIfAborted();
-        owner.assertCurrent();
-        const current = owner.readAuth();
-        // Native availability changes independently of stored profiles; reuse their current owner.
-        Object.assign(
-          credentials,
-          resolveAgentCredentialMapFromStore(current.authStore, { config: input.config }),
-        );
-        const auth = replacePreparedModelCatalogAuth(
-          current,
-          {
-            authStore: current.authStore,
+  let pending: Promise<void> | undefined;
+  const recheck = () =>
+    withPreparedModelCatalogPluginScope(owner.pluginGeneration, async () => {
+      owner.assertCurrent();
+      const { input, env } = params.agentFacts;
+      const signal = AbortSignal.any([params.retirementSignal, AbortSignal.timeout(180_000)]);
+      await withPluginRuntimeGenerationScope(
+        {
+          metadataSnapshot: owner.pluginGeneration.pluginMetadataSnapshot,
+          pluginRegistry: owner.pluginGeneration.pluginRegistry,
+        },
+        async () => {
+          const credentials = await prepareAmbientAgentCredentialsForDiscovery({
+            config: input.config,
+            env,
+            workspaceDir: input.workspaceDir,
+            authoritativeSyntheticAuthProviderRefs: providerIds,
+            syntheticAuthProviderRefs: providerIds,
+            preparationOwner: {},
+            signal,
+          });
+          signal.throwIfAborted();
+          owner.assertCurrent();
+          const current = owner.readAuth();
+          // Native availability changes independently of stored profiles; reuse their current owner.
+          Object.assign(
             credentials,
-            authModes: resolveUsableAgentCredentialModes(credentials),
-          },
-          (provider) => providerIds.includes(owner.normalizeProvider(provider)),
-        );
-        owner.assertCurrent();
-        if (!isDeepStrictEqual(current.authModes, auth.authModes)) {
-          publish(auth);
-        }
-      },
-    );
-  };
-  return () => {
+            resolveAgentCredentialMapFromStore(current.authStore, { config: input.config }),
+          );
+          const auth = replacePreparedModelCatalogAuth(
+            current,
+            {
+              authStore: current.authStore,
+              credentials,
+              authModes: resolveUsableAgentCredentialModes(credentials),
+            },
+            (provider) => providerIds.includes(owner.normalizeProvider(provider)),
+          );
+          owner.assertCurrent();
+          if (!isDeepStrictEqual(current.authModes, auth.authModes)) {
+            publish(auth);
+          }
+        },
+      );
+    });
+  return (options) => {
     const now = Date.now();
-    if (pending || !providerIds.length || now - checkedAt < NATIVE_LOGIN_RECHECK_MS) {
-      return;
+    if (pending) {
+      return pending;
+    }
+    if (!providerIds.length || (!options?.force && now - checkedAt < NATIVE_LOGIN_RECHECK_MS)) {
+      return undefined;
     }
     checkedAt = now;
-    pending = true;
-    void recheck()
+    pending = recheck()
       .catch(() => undefined)
       .finally(() => {
-        pending = false;
+        pending = undefined;
       });
+    return pending;
   };
 }

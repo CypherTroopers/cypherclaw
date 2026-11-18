@@ -138,7 +138,7 @@ public enum RealtimeTalkRelayTermination: Equatable, Sendable {
 }
 
 private enum RealtimeAudioSendOutcome {
-    case sent, inactive, saturated, failed(String)
+    case sent, inactive, failed(String)
 }
 
 private struct RealtimeAudioLogWindow {
@@ -166,7 +166,6 @@ private struct RealtimeAudioLogWindow {
 private actor RealtimeAudioSender {
     private let request: @Sendable (String, [String: AnyCodable]?, Double) async throws -> Data
     private var relaySessionId: String?
-    private var pendingSends = 0
 
     init(
         relaySessionId: String,
@@ -182,9 +181,6 @@ private actor RealtimeAudioSender {
 
     func send(_ data: Data, timestampMs: Double) async -> RealtimeAudioSendOutcome {
         guard !Task.isCancelled, let relaySessionId else { return .inactive }
-        guard self.pendingSends < RealtimeTalkRelaySession.maxPendingAudioSends else { return .saturated }
-        self.pendingSends += 1
-        defer { self.pendingSends -= 1 }
         // The Gateway carries this straight into the provider's media timeline, and OpenAI rejects
         // a `conversation.item.truncate` whose `audio_end_ms` is not an integer -- a fractional
         // timestamp here kills the session on the first barge-in.
@@ -195,7 +191,10 @@ private actor RealtimeAudioSender {
         ]
         do {
             try Task.checkCancellation()
-            let response = try await self.request("talk.session.appendAudio", payload, 8000)
+            let response = try await self.request(
+                "talk.session.appendAudio",
+                payload,
+                RealtimeTalkRelaySession.audioAppendLivenessTimeoutMs)
             try Task.checkCancellation()
             _ = try JSONDecoder().decode(TalkSessionOkResult.self, from: response)
             return .sent
@@ -272,13 +271,15 @@ public final class RealtimeTalkRelaySession {
     private nonisolated static let bargeInCooldownMs: Double = 900
     private nonisolated static let minOutputBeforeBargeInMs: Double = 250
     private nonisolated static let startupReadyTimeoutSeconds = 12
+    /// Microphone audio in flight to the Gateway, measured in audio time like browser Talk. A slow
+    /// relay costs the frames past this budget and a repeat-the-last-part notice, not the call.
+    nonisolated static let maxPendingInputAudioMs: Double = 3000
+    /// An append unanswered this long means the relay stopped making progress. The Gateway answers
+    /// appends in order, so a per-request deadline acts as browser Talk's renewable liveness window.
+    nonisolated static let audioAppendLivenessTimeoutMs: Double = 30000
     /// Providers may deliver a whole reply faster than realtime (xAI sends it in one burst), so the
     /// bound must hold a full reply: 60 s of 20 ms frames (~2.9 MB at 24 kHz). Overflow still
     /// terminates the session so recovery replaces a stalled playback path.
-    /// In-flight `talk.session.appendAudio` requests before input counts as stalled. Each mic
-    /// callback (~43 ms) is one request; Gateway round trips over Wi-Fi/Tailscale spike to ~1 s, so
-    /// 48 tolerates ~2 s of latency instead of the ~170 ms that 4 allowed.
-    nonisolated static let maxPendingAudioSends = 48
     nonisolated static let maxBufferedOutputChunks = 3000
 
     private let transport: RealtimeTalkRelayTransport
@@ -310,6 +311,8 @@ public final class RealtimeTalkRelaySession {
     private var toolCallTasks: [UUID: Task<Void, Never>] = [:]
     private var audioSendTasks: [UUID: Task<Void, Never>] = [:]
     private var audioSender: RealtimeAudioSender?
+    private var pendingInputAudioBytes = 0
+    private var isInputAudioBehind = false
     private var isInputPaused = false
     private var audioCaptureGeneration: UInt64 = 0
     private var isClosed = false
@@ -390,7 +393,9 @@ public final class RealtimeTalkRelaySession {
         let eventStream = await transport.subscribeServerEvents(200)
         switch await lifecycleStatus(lifecycleGeneration) {
         case .current: break
-        case .cancelledLocally: return
+        case .cancelledLocally:
+            try? await self.stopAndWait()
+            return
         case .routeLost: throw Self.gatewayRouteLostError()
         }
         self.startEventPump(stream: eventStream, lifecycleGeneration: lifecycleGeneration)
@@ -405,6 +410,7 @@ public final class RealtimeTalkRelaySession {
                 if statusAfterCreate == .routeLost {
                     throw Self.gatewayRouteLostError()
                 }
+                try? await self.stopAndWait()
                 return
             }
             if let startupIssue {
@@ -422,10 +428,12 @@ public final class RealtimeTalkRelaySession {
             self.relaySessionId = relaySessionId
             // Acknowledgments need identity during startup; routing stays gated until replay finishes.
             self.output.withLock { $0.relaySessionId = relaySessionId }
-            let supportsBargeIn = await resolveSupportsBargeIn(result)
+            let supportsBargeIn = await resolveSupportsBargeIn(result, lifecycleGeneration: lifecycleGeneration)
             switch await lifecycleStatus(lifecycleGeneration) {
             case .current: break
-            case .cancelledLocally: return
+            case .cancelledLocally:
+                try? await self.stopAndWait()
+                return
             case .routeLost: throw Self.gatewayRouteLostError()
             }
             self.supportsBargeIn = supportsBargeIn
@@ -439,14 +447,19 @@ public final class RealtimeTalkRelaySession {
             self.output.withLock { $0.startupRoutingReady = true }
             switch await lifecycleStatus(lifecycleGeneration) {
             case .current: break
-            case .cancelledLocally: return
+            case .cancelledLocally:
+                try? await self.stopAndWait()
+                return
             case .routeLost: throw Self.gatewayRouteLostError()
             }
             switch await waitForStartupResult(
                 timeoutSeconds: Self.startupReadyTimeoutSeconds,
                 lifecycleGeneration: lifecycleGeneration)
             {
-            case .ready, .cancelled:
+            case .ready:
+                return
+            case .cancelled:
+                try? await self.stopAndWait()
                 return
             case let .failed(issue):
                 throw Self.startupFailureError(issue)
@@ -454,15 +467,9 @@ public final class RealtimeTalkRelaySession {
         } catch {
             // A lost route must still surface: swallowing here would discard both the original
             // failure and the route loss, leaving the runtime with nothing to fall back from.
-            if await lifecycleStatus(lifecycleGeneration) == .cancelledLocally {
-                return
-            }
-            let createdRelaySessionId = self.relaySessionId
-            self.close(sendClose: false)
-            if let createdRelaySessionId {
-                try? await self.beginServerClose(relaySessionId: createdRelaySessionId).value
-            }
-            throw error
+            let cancelledLocally = await lifecycleStatus(lifecycleGeneration) == .cancelledLocally
+            try? await self.stopAndWait()
+            if !cancelledLocally { throw error }
         }
     }
 
@@ -610,7 +617,10 @@ public final class RealtimeTalkRelaySession {
         }
     }
 
-    private func resolveSupportsBargeIn(_ session: TalkSessionCreateResult) async -> Bool? {
+    private func resolveSupportsBargeIn(
+        _ session: TalkSessionCreateResult,
+        lifecycleGeneration: UInt64) async -> Bool?
+    {
         var payload: [String: AnyCodable] = [:]
         if let provider = (session.provider ?? self.options.provider)?.trimmedNonEmpty {
             payload["provider"] = AnyCodable(provider)
@@ -620,7 +630,7 @@ public final class RealtimeTalkRelaySession {
         }
         // A talk-only client may create sessions without permission to read the catalog.
         // Unknown capability leaves interruption ownership with the provider.
-        guard let response = try? await self.transport.request("talk.catalog", payload, 8000),
+        guard let response = try? await self.requestTalkCatalog(payload, lifecycleGeneration: lifecycleGeneration),
               let catalog = try? JSONDecoder().decode(TalkCatalogResult.self, from: response)
         else { return nil }
         let provider = (payload["provider"]?.stringValue
@@ -631,6 +641,30 @@ public final class RealtimeTalkRelaySession {
                 entry["aliases"]?.arrayValue?.contains { $0.stringValue?.lowercased() == provider } == true
         }?.dictionaryValue
         return entry?["supportsBargeIn"]?.boolValue ?? true
+    }
+
+    private func requestTalkCatalog(
+        _ payload: [String: AnyCodable],
+        lifecycleGeneration: UInt64) async throws -> Data
+    {
+        let deadline = ProcessInfo.processInfo.systemUptime + 10
+        var timeoutMs: Double = 8000
+        while true {
+            try Task.checkCancellation()
+            guard await self.lifecycleStatus(lifecycleGeneration) == .current else { throw CancellationError() }
+            do {
+                return try await self.transport.request("talk.catalog", payload, timeoutMs)
+            } catch let error as GatewayResponseError {
+                guard error.method == "talk.catalog", error.code == "UNAVAILABLE",
+                      error.detailsReason == "talk-catalog-warming", error.details["retryable"]?.boolValue == true
+                else { throw error }
+                let delayMs = max(250, error.details["retryAfterMs"]?.intValue ?? 250)
+                guard ProcessInfo.processInfo.systemUptime + Double(delayMs) / 1000 < deadline else { throw error }
+                try await Task.sleep(for: .milliseconds(delayMs))
+                timeoutMs = (deadline - ProcessInfo.processInfo.systemUptime) * 1000
+                guard timeoutMs > 0 else { throw error }
+            }
+        }
     }
 
     private func drainOutputEffects() {
@@ -1279,22 +1313,39 @@ extension RealtimeTalkRelaySession {
             self.handleInputLevelDuringOutput(rms, timestampMs: timestampMs)
         }
 
+        // Drop frames past the budget without ending the call, but tell the user once to repeat
+        // them. Only an explicit append failure or an unanswered append ends a slow relay.
+        let maxPendingBytes = Int(self.inputSampleRateHz * 2 * Self.maxPendingInputAudioMs / 1000)
+        guard self.pendingInputAudioBytes + encoded.count <= maxPendingBytes else {
+            if !self.isInputAudioBehind {
+                self.isInputAudioBehind = true
+                self.onStatus("Realtime audio input fell behind; repeat the last part")
+            }
+            return nil
+        }
+        self.pendingInputAudioBytes += encoded.count
+
         let taskID = UUID()
         let task = Task { @MainActor [weak self, audioSender] in
             guard let self else { return }
-            defer { self.audioSendTasks.removeValue(forKey: taskID) }
+            defer {
+                self.audioSendTasks.removeValue(forKey: taskID)
+                // A stopped pump already reset the budget for its replacement.
+                if self.audioCaptureGeneration == audioCaptureGeneration {
+                    self.pendingInputAudioBytes -= encoded.count
+                }
+            }
             guard self.isCurrentLifecycleLocally(lifecycleGeneration),
                   self.audioCaptureGeneration == audioCaptureGeneration,
                   !self.isInputPaused, self.output.withLock({ $0.suppressedOutputIdentity }) == nil
             else { return }
             switch await audioSender.send(encoded, timestampMs: timestampMs) {
-            case .sent, .inactive:
+            case .sent:
+                guard self.isInputAudioBehind, self.audioCaptureGeneration == audioCaptureGeneration else { return }
+                self.isInputAudioBehind = false
+                self.onStatus("Microphone input recovered; repeat the last part")
+            case .inactive:
                 return
-            case .saturated:
-                self.handleAudioInputFailure(
-                    String(localized: "Realtime audio input fell behind. Reconnecting…"),
-                    lifecycleGeneration: lifecycleGeneration,
-                    audioCaptureGeneration: audioCaptureGeneration)
             case let .failed(message):
                 self.handleAudioInputFailure(
                     String(format: String(localized: "Realtime audio failed: %@"), message),
@@ -1312,6 +1363,8 @@ extension RealtimeTalkRelaySession {
             task.cancel()
         }
         self.audioSendTasks.removeAll()
+        self.pendingInputAudioBytes = 0
+        self.isInputAudioBehind = false
         self.audioCapture.stop()
     }
 }

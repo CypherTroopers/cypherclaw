@@ -1,5 +1,9 @@
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
-import { getPluginInstance, type PluginInstanceHandle } from "./plugin-instance-scope.js";
+import {
+  getPluginInstance,
+  pluginInvocationContext,
+  type PluginInstanceHandle,
+} from "./plugin-instance-scope.js";
 import {
   collectRegistryInvocationInstances,
   PluginInvocationScope,
@@ -91,6 +95,10 @@ export class PluginRegistryInspectionResources {
     if (!source || !registry || source.#release || this.#release) {
       throw new Error("Plugin inspection handoff requires live source and successor registries");
     }
+    // A scoped catalog acquisition can reuse this same physical inspection.
+    if (source === this) {
+      return;
+    }
     for (const record of registry.plugins) {
       if (
         previous.plugins.includes(record) &&
@@ -143,6 +151,9 @@ export class PluginRegistryInspectionResources {
     this.#adoptedInvocations = new PluginInvocationScope(registry, borrowed, {
       retained: true,
       kind: "custody",
+      // The inspection outlives its construction caller; it owns physical donor
+      // authority, never that caller's execution collector.
+      parent: { lookup: () => undefined },
     });
   }
 
@@ -150,17 +161,29 @@ export class PluginRegistryInspectionResources {
     return this.#adoptedInvocations ? this.#adoptedInvocations.wrap(value) : value;
   }
 
-  /** Logical use owns its execution consumers separately from this inspection's physical claims. */
+  /** Callers name executable capabilities; an inspection itself is only physical custody. */
   createInvocationScope(
     registry: PluginRegistry,
-    instances: Iterable<PluginInstanceHandle> = collectRegistryInvocationInstances(registry),
+    instances: Iterable<PluginInstanceHandle>,
   ): PluginInvocationScope {
     if (this.#release) {
       throw new Error("Plugin inspection resources have been released");
     }
+    const current = pluginInvocationContext.getStore();
+    const adopted = this.#adoptedInvocations;
     return new PluginInvocationScope(registry, instances, {
       retained: true,
-      parent: this.#adoptedInvocations,
+      // Donor bindings lend invocation authority; only the live caller lends work
+      // custody. Reporting every physical donor as turn work would widen reload fencing.
+      parent: adopted
+        ? {
+            lookup: (instance) => current?.lookup(instance) ?? adopted.lookup(instance),
+            retainInvocation: (instance) => current?.retainInvocation?.(instance),
+            get retainedInstances() {
+              return current?.retainedInstances;
+            },
+          }
+        : current,
     });
   }
 

@@ -13,7 +13,9 @@ import {
 } from "../agents/worktrees/registry.test-support.js";
 import { managedWorktrees, ManagedWorktreeService } from "../agents/worktrees/service.js";
 import { loadSessionEntry, loadTranscriptEvents } from "../config/sessions/session-accessor.js";
+import { emitAgentEvent } from "../infra/agent-events.js";
 import { isSessionLifecycleMutationActive } from "../sessions/session-lifecycle-admission.js";
+import { sessionChanges } from "../sessions/session-row-changes.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
 import { disposeSessionReadContexts } from "./server-methods/sessions-read-cache.test-support.js";
@@ -130,10 +132,20 @@ test("sessions.create rolls back failed provisioning before a same-key creator p
   const root = tempDirs.make("openclaw-session-worktree-rollback-");
   const workspace = await copyGitWorkspace(gitWorkspaceTemplate, root);
   testState.agentConfig = { workspace };
-  testState.sessionConfig = { sharing: { drafts: false } };
+  testState.sessionConfig = { sharing: { drafts: true } };
   const { storePath } = await createSessionStoreDir();
   const key = "agent:main:dashboard:worktree-rollback";
   const adminClient = { connect: { scopes: ["operator.admin"] } } as never;
+  const cfg = loadGatewayTestConfig();
+  const options = { client: adminClient, context: { getRuntimeConfig: () => cfg } };
+  const create = captureMethodCall("createWithOutcome")(ManagedWorktreeService.prototype);
+  const preparation = vi
+    .spyOn(ManagedWorktreeService.prototype, "createWithOutcome")
+    .mockImplementationOnce(async function (this: ManagedWorktreeService, params) {
+      const result = await create(this, params);
+      cfg.session = { ...cfg.session, sharing: { drafts: false } };
+      return result;
+    });
   const originalRollback = captureMethodCall("rollbackPreparation")(
     ManagedWorktreeService.prototype,
   );
@@ -159,7 +171,7 @@ test("sessions.create rolls back failed provisioning before a same-key creator p
         visibility: "draft",
         worktree: true,
       },
-      { client: adminClient },
+      options,
     );
     await Promise.race([
       rollbackStarted,
@@ -178,12 +190,10 @@ test("sessions.create rolls back failed provisioning before a same-key creator p
         };
       };
       worktree: { id: string; path: string; branch: string };
-    }>("sessions.create", { key, agentId: "main", worktree: true }, { client: adminClient }).then(
-      (result) => {
-        successorSettled = true;
-        return result;
-      },
-    );
+    }>("sessions.create", { key, agentId: "main", worktree: true }, options).then((result) => {
+      successorSettled = true;
+      return result;
+    });
     await Promise.resolve();
     expect(successorSettled).toBe(false);
 
@@ -193,7 +203,7 @@ test("sessions.create rolls back failed provisioning before a same-key creator p
       ok: false,
       error: {
         code: "INVALID_REQUEST",
-        message: "session visibility is disabled: draft",
+        message: expect.stringContaining("session visibility is disabled: draft"),
         details: { code: "SESSION_VISIBILITY_DISABLED", visibility: "draft" },
       },
     });
@@ -216,7 +226,7 @@ test("sessions.create rolls back failed provisioning before a same-key creator p
     const adoptedFailure = await directSessionReq(
       "sessions.create",
       { key, agentId: "main", visibility: "draft", worktree: true },
-      { client: adminClient },
+      options,
     );
     expect(adoptedFailure).toMatchObject({
       ok: false,
@@ -229,6 +239,7 @@ test("sessions.create rolls back failed provisioning before a same-key creator p
   } finally {
     releaseRollback();
     rollbackSpy.mockRestore();
+    preparation.mockRestore();
     if (
       successorWorktreeId &&
       getRegistryWorktree(process.env, successorWorktreeId)?.removedAt === undefined
@@ -266,6 +277,11 @@ test.each([
       bavail: (100 * 1024 ** 3) / 4096,
       bfree: (100 * 1024 ** 3) / 4096,
     });
+    const { storePath } = await createSessionStoreDir();
+    testState.agentConfig = { workspace };
+    testState.sessionConfig = { sharing: { drafts: true } };
+    const cfg = loadGatewayTestConfig();
+    (await getGatewayConfigModule()).setRuntimeConfigSnapshot(cfg);
     const key = "agent:main:dashboard:worktree-allocation-outcome";
     const owner = { ownerKind: "session" as const, ownerId: key, name: "allocation-outcome" };
     const worktree =
@@ -276,11 +292,6 @@ test.each([
     if (change === "restore") {
       await managedWorktrees.remove({ id: worktree.id, reason: "manual-delete" });
     }
-    const { storePath } = await createSessionStoreDir();
-    testState.agentConfig = { workspace };
-    testState.sessionConfig = { sharing: { drafts: false } };
-    const cfg = loadGatewayTestConfig();
-    (await getGatewayConfigModule()).setRuntimeConfigSnapshot(cfg);
     const entered = createDeferredCore();
     const proceed = createDeferredCore();
     const beforeAllocation = async () => {
@@ -329,10 +340,14 @@ test.each([
       } else {
         await managedWorktrees.remove({ id: worktree.id, reason: "manual-delete" });
       }
+      cfg.session = { ...cfg.session, sharing: { drafts: false } };
       proceed.resolve();
       await expect(creation).resolves.toMatchObject({
         ok: false,
-        error: { code: "INVALID_REQUEST", message: "session visibility is disabled: draft" },
+        error: {
+          code: "INVALID_REQUEST",
+          message: expect.stringContaining("session visibility is disabled: draft"),
+        },
       });
       expect(loadSessionEntry({ sessionKey: key, storePath })).toBeUndefined();
       const record = getRegistryWorktree(process.env, worktree.id);
@@ -531,9 +546,41 @@ test("sessions.create runs an existing managed worktree cwd for initial and foll
         },
         defaultRuntime,
       );
+      const terminalPersisted = createDeferredCore();
+      const stopTerminalObserver = sessionChanges.subscribe((change) => {
+        if ("sessionKey" in change && change.sessionKey === sessionKey) {
+          const entry = loadSessionEntry({ agentId: "roboclaw", sessionKey, storePath });
+          if (entry?.status === "done" && entry.lastRunId === prepared.runId) {
+            terminalPersisted.resolve();
+          }
+        }
+      });
       try {
+        opts?.onSessionPrepared?.({
+          sessionKey: prepared.sessionKey,
+          sessionId: prepared.sessionId,
+          storePath: prepared.storePath,
+          lifecycleRevision: prepared.sessionEntry?.lifecycleRevision,
+        });
+        opts?.onAgentRunStart?.(prepared.runId);
+        // Completed mock turns must settle the same recovery custody as the real runtime.
+        const lifecycle = {
+          runId: prepared.runId,
+          sessionKey: prepared.sessionKey,
+          sessionId: prepared.sessionId,
+          agentId: prepared.sessionAgentId,
+        };
+        const startedAt = Date.now();
+        emitAgentEvent({ ...lifecycle, stream: "lifecycle", data: { phase: "start", startedAt } });
         preparedRuntime({ cwd: prepared.cwd, workspaceDir: prepared.workspaceDir });
+        emitAgentEvent({
+          ...lifecycle,
+          stream: "lifecycle",
+          data: { phase: "end", startedAt, endedAt: Date.now() },
+        });
+        await terminalPersisted.promise;
       } finally {
+        stopTerminalObserver();
         await prepared.runLease?.release();
       }
       return { text: "ok" };

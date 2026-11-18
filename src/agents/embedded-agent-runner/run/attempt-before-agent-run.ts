@@ -1,3 +1,4 @@
+import type { ImageContent } from "../../../llm/types.js";
 import type { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { sanitizeCompactionReplayMessages } from "../../compaction-replay.js";
 import {
@@ -6,7 +7,7 @@ import {
 } from "../../harness/before-agent-run.js";
 import type { AgentMessage } from "../../runtime/index.js";
 import type { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
-import { withSessionManagerWrite } from "../../sessions/session-manager-write-admission.js";
+import { withSessionManagerAppend } from "../../sessions/session-manager-append-admission.js";
 import { log } from "../logger.js";
 import { sessionMessagesContainIdempotencyKey } from "./pre-persisted-user-turn.js";
 import type { EmbeddedRunAttemptParams } from "./types.js";
@@ -30,6 +31,7 @@ export async function runEmbeddedAttemptBeforeAgentRun(input: {
   hookMessages: AgentMessage[];
   hookRunner: BeforeAgentRunHookRunner | null;
   modelPrompt: string;
+  images?: ImageContent[];
   sessionManager: ReturnType<typeof guardSessionManager>;
   systemPrompt: string;
   withOwnedTranscriptWrite: <T>(operation: () => Promise<T> | T) => Promise<T>;
@@ -38,6 +40,7 @@ export async function runEmbeddedAttemptBeforeAgentRun(input: {
     input.hookRunner,
     {
       prompt: input.modelPrompt,
+      images: input.images,
       systemPrompt: input.systemPrompt,
       messages: input.hookMessages,
       channelId: input.hookContext.channelId,
@@ -59,7 +62,7 @@ export async function runEmbeddedAttemptBeforeAgentRun(input: {
   ) {
     try {
       await input.withOwnedTranscriptWrite(() =>
-        withSessionManagerWrite(input.sessionManager, async () => {
+        withSessionManagerAppend(input.sessionManager, async () => {
           await input.sessionManager.appendMessageAsync(redactedUserMessage);
           input.sessionManager.flushPendingPersistence();
         }),

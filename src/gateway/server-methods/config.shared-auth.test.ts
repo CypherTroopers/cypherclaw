@@ -74,7 +74,8 @@ vi.mock("../../config/validation.js", async () => {
   };
 });
 
-vi.mock("../../config/runtime-schema.js", () => ({
+vi.mock("../../config/runtime-schema.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../config/runtime-schema.js")>()),
   loadGatewayRuntimeConfigSchema: () => ({ uiHints: undefined }),
 }));
 
@@ -218,9 +219,9 @@ describe("config shared auth disconnects", () => {
       await flushConfigHandlerMicrotasks();
 
       expect(respond).toHaveBeenCalledWith(
-        claimed || method === "config.set",
-        claimed || method === "config.set" ? expect.objectContaining({ ok: true }) : undefined,
-        claimed || method === "config.set"
+        claimed,
+        claimed ? expect.objectContaining({ ok: true }) : undefined,
+        claimed
           ? undefined
           : expect.objectContaining({ message: expect.stringContaining("unclaimed") }),
       );

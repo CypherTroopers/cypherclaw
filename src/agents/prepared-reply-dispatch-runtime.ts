@@ -3,6 +3,7 @@ import { createAbortError, racePromiseWithAbortSignal } from "../infra/abort-sig
 import { createDeferredCore } from "../shared/deferred.js";
 import { resolvePublishedModelCatalogOwner } from "./prepared-model-catalog-owner.js";
 import { assertPreparedModelRuntimeAdmissionCanWait } from "./prepared-model-runtime-admission.js";
+import { getPreparedModelRuntimePolicyConfigReader } from "./prepared-model-runtime-auth.js";
 import { readCapturedPreparedModelRuntimeCatalog } from "./prepared-model-runtime.capture.js";
 import { PreparedModelRuntimeOwnerNotPublishedError } from "./prepared-model-runtime.errors.js";
 import type {
@@ -31,6 +32,7 @@ function createReplyDispatchRuntime(
     agentDir: owner.agentDir,
     workspaceDir: owner.workspaceDir,
     config: owner.config,
+    readPolicyConfig: getPreparedModelRuntimePolicyConfigReader(snapshot),
     modelCatalog: owner.modelCatalog,
     readFullModelCatalog: snapshot.readFullModelCatalog,
     inboundPluginRegistry,
@@ -75,7 +77,7 @@ type PreparedReplyDispatchPublicationHost = Readonly<{
   ) => PreparedModelRuntimeLease;
   isGatewayLifecycleActive: () => boolean;
   getConfiguredOwner: (agentId: string) => PreparedModelRuntimeOwner | undefined;
-  getPendingReplacement: () => Promise<void> | undefined;
+  getPendingReplacement: (agentId: string) => Promise<void> | undefined;
   isStartupPending: () => boolean;
   ensureReady: (params: PreparedReplyDispatchLoadParams) => Promise<void>;
 }>;
@@ -105,11 +107,7 @@ export class PreparedReplyDispatchPublicationOwner {
   }
 
   rebuild(owners: Iterable<PreparedModelRuntimeOwner>): void {
-    this.#publish(
-      this.host.isGatewayLifecycleActive()
-        ? buildReplyDispatchPublication(owners)
-        : EMPTY_REPLY_DISPATCH_PUBLICATION,
-    );
+    this.stage(owners)();
   }
 
   stage(owners: Iterable<PreparedModelRuntimeOwner>): () => void {
@@ -156,7 +154,7 @@ export class PreparedReplyDispatchPublicationOwner {
       if (!this.host.isGatewayLifecycleActive()) {
         return undefined;
       }
-      const replacement = this.host.getPendingReplacement();
+      const replacement = this.host.getPendingReplacement(agentId);
       const pendingOwner = replacement ? undefined : this.host.getConfiguredOwner(agentId);
       if (replacement) {
         assertPreparedModelRuntimeAdmissionCanWait();
@@ -164,17 +162,13 @@ export class PreparedReplyDispatchPublicationOwner {
         assertPreparedModelRuntimeAdmissionCanWait(pendingOwner);
       }
       if (!demandPrepared) {
-        // Demand can join recovery, so preserve admission before that first wait.
         await this.host.ensureReady(params);
         demandPrepared = true;
         continue;
       }
-      if (replacement) {
-        await racePromiseWithAbortSignal(replacement, abortSignal);
-        continue;
-      }
-      if (pendingOwner?.pending) {
-        await racePromiseWithAbortSignal(pendingOwner.pending, abortSignal);
+      const pending = replacement ?? pendingOwner?.pending;
+      if (pending) {
+        await racePromiseWithAbortSignal<void | PreparedModelRuntimeSnapshot>(pending, abortSignal);
         continue;
       }
       const runtime = this.#publication.find((candidate) => candidate.agentId === agentId);

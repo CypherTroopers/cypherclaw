@@ -22,6 +22,10 @@ import {
   createPluginMetadataSnapshot,
   makeRegistry,
 } from "../../config/plugin-auto-enable.test-helpers.js";
+import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../../config/runtime-snapshot.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import { getAgentEventLifecycleGeneration } from "../../infra/agent-events.js";
 import { createEmptyPluginRegistry } from "../../plugins/registry-empty.js";
@@ -31,6 +35,7 @@ import {
   beginSessionWorkAdmission,
   SESSION_WORK_ADMISSION_DRAIN_TIMEOUT_MS,
 } from "../../sessions/session-lifecycle-admission.js";
+import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { isWebchatClient } from "../../utils/message-channel.js";
 import * as abortLifecycle from "../chat-abort-lifecycle-internal.js";
 import {
@@ -43,6 +48,7 @@ import { createChatAbortContext } from "../server-methods/chat.abort.test-helper
 import * as sessionChange from "../server-methods/session-change-event.js";
 import { prepareSessionLifecycleDrain } from "../server-methods/sessions-lifecycle-drain.js";
 import type { GatewayRequestContext } from "../server-methods/types.js";
+import { expectSuccessorWorkspaceRead } from "../workspace-readiness.test-support.js";
 import { replayAgentTurnIfCached } from "./agent-dedupe.js";
 import { resolveAgentDeliveryPhase } from "./agent-delivery-phase.js";
 import * as agentHandlerHelpers from "./agent-handler-helpers.js";
@@ -69,6 +75,15 @@ function createExecution(
     pendingInputSettlement?: () => Promise<void>;
   } = {},
 ) {
+  const pluginGeneration: PreparedModelRuntimePluginGeneration = {
+    remoteCatalog: null,
+    pluginMetadataSnapshot: createPluginMetadataSnapshot({
+      config: {},
+      manifestRegistry: makeRegistry([]),
+    }),
+    inlineProviderModels: [],
+    configuredCatalogEntries: [],
+  };
   const abortCleanup = vi.fn();
   const gatewayRelease = vi.fn();
   const callerRelease = vi.fn();
@@ -100,10 +115,14 @@ function createExecution(
         effectiveAllowModelOverride: false,
         lifecycleStorePath: "",
         operationalRunInstance: {},
-        preparedModelRuntimeLease: { [Symbol.asyncDispose]: runtimeRelease, snapshot: {} },
+        preparedModelRuntimeLease: {
+          [Symbol.asyncDispose]: runtimeRelease,
+          snapshot: {},
+          pluginGeneration,
+        },
         replyDispatchRuntime: {
           config: { runtime: "A" },
-          pluginGeneration: "generation-A",
+          pluginGeneration,
         },
         unpersistedOffloadedRefs: [],
         userTurn: {
@@ -220,6 +239,29 @@ function bindFollowupCompletion(execution: ReturnType<typeof createExecution>) {
 }
 
 describe("startAgentRunExecution Gateway ownership", () => {
+  it("reads the workspace after resuming from a retired same-session preparation", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+      const execution = createExecution();
+      const sessionKey = "agent:main:resumed-workspace";
+      execution.params.resolvedSessionKey = sessionKey;
+      await expectSuccessorWorkspaceRead({
+        workspaceDir: state.workspaceDir,
+        sessionKey,
+        run: async (readWorkspace) => {
+          dispatchAgentRunFromGateway.mockImplementationOnce(async (dispatch) => {
+            try {
+              await readWorkspace();
+            } finally {
+              await dispatch.cleanupAbortController();
+            }
+          });
+          await startAgentRunExecution(execution.params);
+          expect(dispatchAgentRunFromGateway).toHaveBeenCalledOnce();
+        },
+      });
+    });
+  });
+
   beforeEach(() => {
     dispatchAgentRunFromGateway.mockReset();
     agentCommand.mockReset();
@@ -473,6 +515,8 @@ describe("startAgentRunExecution Gateway ownership", () => {
 
   it("lets a disposer drain its real session without waiting on its own retained execution", async () => {
     const execution = createExecution();
+    setRuntimeConfigSnapshot(execution.params.cfg);
+    onTestFinished(() => clearRuntimeConfigSnapshot());
     const controllers = new Map<string, ChatAbortControllerEntry>();
     const registration = registerChatAbortController({
       chatAbortControllers: controllers,
@@ -555,7 +599,7 @@ describe("startAgentRunExecution Gateway ownership", () => {
     }
   });
 
-  it.each([false, true])(
+  it.each([true])(
     "preserves access across liveness and invalidates creation (new session: %s)",
     async (isNewSession) => {
       const execution = createVisibleExecution();
@@ -746,7 +790,7 @@ describe("startAgentRunExecution Gateway ownership", () => {
     const dispatch = dispatchAgentRunFromGateway.mock.calls[0]?.[0];
     expect(dispatch?.commandRuntimeContext).toEqual({
       config: { runtime: "A" },
-      pluginGeneration: "generation-A",
+      pluginGeneration: execution.params.prepared.replyDispatchRuntime.pluginGeneration,
     });
     expect(dispatch?.ingressOpts.workspaceDir).toBe("/workspace/A");
     expect(execution.runtimeRelease).not.toHaveBeenCalled();

@@ -4,10 +4,7 @@ import type {
   ResponseCompactionItemParam,
   ResponseOutputItem,
 } from "openai/resources/responses/responses.js";
-import type {
-  BaseOpenAIStreamOptions,
-  OpenAIResponsesCompactionRejection,
-} from "../provider-options.js";
+import type { BaseOpenAIStreamOptions, CompactionReplayRejection } from "../provider-options.js";
 import {
   isOpenAIResponsesCompactionOutput,
   readOpenAIResponsesCompactionWindow,
@@ -78,6 +75,7 @@ export function captureOpenAIResponsesCompaction(
   model: Model,
   captureMetadata?: OpenAIResponsesReasoningReplayMetadata,
   compactedOutput?: OpenAIResponsesCompactionOutput,
+  outputTokens?: number,
 ): void {
   const metadata = captureMetadata ?? buildOpenAIResponsesReasoningReplayMetadata(model);
   if (!item.encrypted_content) {
@@ -110,9 +108,14 @@ export function captureOpenAIResponsesCompaction(
     model: metadata.model,
     baseUrlHash: metadata.baseUrlHash,
     ...(metadata.sessionHash ? { sessionHash: metadata.sessionHash } : {}),
-    ...(metadata.authProfileHash ? { authProfileHash: metadata.authProfileHash } : {}),
     ...(compactedOutput
-      ? { compactedWindow: { state: "ready" as const, output: JSON.stringify(compactedOutput) } }
+      ? {
+          compactedWindow: {
+            state: "ready" as const,
+            output: JSON.stringify(compactedOutput),
+            ...(outputTokens !== undefined ? { outputTokens } : {}),
+          },
+        }
       : {}),
   } satisfies OpenAIResponsesCompactionReplayState;
   if (compactedOutput && !readOpenAIResponsesCompactionWindow(replay, model)) {
@@ -124,8 +127,8 @@ export function captureOpenAIResponsesCompaction(
 export function suppressOpenAIResponsesCompaction(
   output: Pick<AssistantMessage, "providerReplay">,
   model: Model,
-  options?: Pick<BaseOpenAIStreamOptions, "authProfileId" | "onCompactionRejected" | "sessionId">,
-  rejectedCheckpoint?: OpenAIResponsesCompactionRejection,
+  options?: Pick<BaseOpenAIStreamOptions, "onCompactionRejected" | "sessionId">,
+  rejectedCheckpoint?: CompactionReplayRejection,
 ): void {
   const context = buildProviderReplayContext(model, options);
   if (!context.baseUrlHash) {
@@ -194,7 +197,7 @@ export function isSafeResponsesReplayItemId(id: unknown): id is string {
 export function resolveNewestOpenAIResponsesCompactionReplay(
   messages: Context["messages"],
   model: Model,
-  options?: Pick<BaseOpenAIStreamOptions, "authProfileId" | "sessionId">,
+  options?: Pick<BaseOpenAIStreamOptions, "sessionId">,
 ):
   | {
       owner: AssistantMessage;
@@ -207,6 +210,7 @@ export function resolveNewestOpenAIResponsesCompactionReplay(
       item: ResponseCompactionItemParam;
       mode: "complete-window";
       output: OpenAIResponsesCompactionOutput;
+      outputTokens?: number;
       replayIndex: number;
     }
   | { owner: AssistantMessage; mode: "refresh-required" }
@@ -254,6 +258,10 @@ export function resolveNewestOpenAIResponsesCompactionReplay(
         owner: message,
         mode: "complete-window",
         output,
+        ...(replay.compactedWindow?.state === "ready" &&
+        replay.compactedWindow.outputTokens !== undefined
+          ? { outputTokens: replay.compactedWindow.outputTokens }
+          : {}),
         item,
         replayIndex:
           replay.type === OPENAI_RESPONSES_RETAINED_COMPACTION_REPLAY_TYPE
@@ -296,7 +304,7 @@ export class CompactionReplayRefreshRequiredError extends Error {
 export function buildOpenAIResponsesCompactionReplayPlan(
   messages: Context["messages"],
   model: Model,
-  options?: Pick<BaseOpenAIStreamOptions, "authProfileId" | "sessionId"> & {
+  options?: Pick<BaseOpenAIStreamOptions, "sessionId"> & {
     mode?: OpenAIResponsesReplayMode;
   },
 ): OpenAIResponsesCompactionReplayPlan {
@@ -330,7 +338,7 @@ export function buildOpenAIResponsesCompactionReplayPlan(
 
 export function buildOpenAIResponsesReasoningReplayMetadata(
   model: Model,
-  options?: Pick<BaseOpenAIStreamOptions, "authProfileId" | "sessionId">,
+  options?: Pick<BaseOpenAIStreamOptions, "sessionId">,
 ): OpenAIResponsesReasoningReplayMetadata {
   return {
     v: 1,

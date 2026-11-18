@@ -9,14 +9,17 @@ import type {
 } from "./attempt-prompt-phase.js";
 import type { prepareEmbeddedAttemptPromptPreflight } from "./attempt-prompt-preflight.js";
 import type { submitEmbeddedAttemptPrompt } from "./attempt-prompt-submit.js";
-import type { createPromptBuildToolPolicy } from "./attempt-prompt-support.js";
+import type {
+  createPromptBuildToolPolicy,
+  observeEmbeddedAttemptPrompt,
+} from "./attempt-prompt-support.js";
 
 const mocks = vi.hoisted(() => ({
   applyPromptToolsAllow: vi.fn(),
   beforeAgentRun: vi.fn(),
   handlePromptError: vi.fn(),
   handleMidTurnPrecheck: vi.fn(),
-  observePrompt: vi.fn(),
+  observePrompt: vi.fn<typeof observeEmbeddedAttemptPrompt>(),
   prepareGooglePromptCache: vi.fn(),
   preparePromptAssembly: vi.fn<typeof prepareEmbeddedAttemptPromptAssembly>(),
   preparePromptContext: vi.fn(),
@@ -199,9 +202,9 @@ export function createFixture({ pendingPrompt = "hello", pendingImageCount = 1 }
       skippedCount: 0,
     };
   });
-  mocks.observePrompt.mockImplementation(() => {
+  mocks.observePrompt.mockImplementation((input) => {
     order.push("observe");
-    return { skipPromptSubmission: false };
+    return { skipPromptSubmission: input.skipPromptSubmission };
   });
   mocks.preparePromptPreflight.mockImplementation(async (preflightInput: PromptPreflightCall) => {
     order.push("preflight");
@@ -228,6 +231,7 @@ export function createFixture({ pendingPrompt = "hello", pendingImageCount = 1 }
       withOwnedTranscriptWrite: async <T>(operation: () => Promise<T> | T) => await operation(),
     },
     setup: {
+      prepStages: { mark: vi.fn() },
       effectiveFsWorkspaceOnly: false,
       effectiveWorkspace: "/tmp/workspace",
       sandbox: null,
@@ -240,14 +244,20 @@ export function createFixture({ pendingPrompt = "hello", pendingImageCount = 1 }
           activeSession,
           hookRunner: null,
           setActiveSessionSystemPrompt: vi.fn(),
-          settingsManager: { getCompactionReserveTokens: () => 77 },
+          settingsManager: {
+            getCompactionEnabled: () => true,
+            getCompactionReserveTokens: () => 77,
+          },
         },
         boundary: {
           includeBoundaryTimestamp: false,
           setCurrentUserTimestampOverride: vi.fn(),
         },
         cacheTrace: null,
-        contextGuards: { takePendingMidTurnPrecheckRequest: () => undefined },
+        contextGuards: {
+          checkMidTurnPrecheck: vi.fn(),
+          takePendingMidTurnPrecheckRequest: () => undefined,
+        },
         preparedUserTurnMessage: {
           role: "user",
           content: "hello",
@@ -295,7 +305,6 @@ export function createFixture({ pendingPrompt = "hello", pendingImageCount = 1 }
     preparedStreamRuntime: {
       cache: {},
       history: {
-        contextEngineAssemblySucceeded: false,
         contextEnginePromptAuthority: "assembled",
       },
       promptActiveSession: vi.fn(),

@@ -1,14 +1,30 @@
+import fs from "node:fs";
+import path from "node:path";
 // Verifies package transports consume the route generation prepared on the model.
-import { getAiTransportHost } from "@openclaw/ai";
-import { describe, expect, it } from "vitest";
+import {
+  configureAiTransportHost,
+  getAiTransportHost,
+  getDefaultAiTransportHost,
+} from "@openclaw/ai";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { createPluginModuleLoader } from "../plugins/loader-module-runtime.js";
 import type { PluginMetadataSnapshotOwnerMaps } from "../plugins/plugin-metadata-snapshot.types.js";
+import { attachModelProviderLocalServiceReconciler } from "./provider-local-service-reconcile.js";
 import "./ai-transport-runtime-host.js";
+import {
+  attachModelProviderLocalService,
+  ensureModelProviderLocalService,
+  stopManagedProviderLocalServices,
+} from "./provider-local-service.js";
 import {
   attachModelProviderRequestRouteFacts,
   getModelProviderRequestRouteFacts,
   resolveProviderRequestPolicyConfig,
 } from "./provider-request-config.js";
 import { makeProviderModelFixture } from "./test-helpers/provider-model-fixture.js";
+
+const temp = useAutoCleanupTempDirTracker(afterEach);
 
 function buildOwners(): PluginMetadataSnapshotOwnerMaps {
   const empty = new Map<string, readonly string[]>();
@@ -32,6 +48,80 @@ function buildOwners(): PluginMetadataSnapshotOwnerMaps {
 }
 
 describe("AI transport prepared provider routes", () => {
+  it("retains guarded defaults and configured observers across native SDK loading", async () => {
+    const originalHost = getDefaultAiTransportHost();
+    const model = attachModelProviderRequestRouteFacts(
+      makeProviderModelFixture<"openai-completions">({
+        id: "prepared-model",
+        provider: "openai",
+        api: "openai-completions",
+        baseUrl: "https://prepared.example/v1",
+      }),
+      buildOwners(),
+    );
+    // The process default may come from an earlier module graph. Prove its guard
+    // behavior rather than comparing it with this graph's function identity.
+    const networkFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("Unexpected network request from private-address probe"));
+    try {
+      const guardedFetch = originalHost.buildModelFetch?.(model);
+      if (!guardedFetch) {
+        throw new Error("OpenClaw guarded model fetch was not installed");
+      }
+      await expect(guardedFetch("http://127.0.0.1/private")).rejects.toThrow(
+        "Blocked hostname or private/internal/special-use IP address",
+      );
+      expect(networkFetch).not.toHaveBeenCalled();
+    } finally {
+      networkFetch.mockRestore();
+    }
+    const requests: unknown[] = [];
+    const fetchObserver = vi.fn<typeof fetch>(async (input, init) => {
+      requests.push(await new Request(input, init).json());
+      return new Response(
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "observed" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    });
+    const buildModelFetch = () => fetchObserver;
+    configureAiTransportHost({ ...originalHost, buildModelFetch });
+    try {
+      const plugin = path.join(temp.make("native-fetch-observer-"), "index.cjs");
+      fs.writeFileSync(plugin, `module.exports = require("openclaw/plugin-sdk/llm");`);
+      const load = createPluginModuleLoader({ tryNative: true, pluginSdkResolution: "src" });
+      const sdk = load(plugin) as typeof import("../plugin-sdk/llm.js");
+      // Check before invoking the fetch port: a regression must never send a real request.
+      expect(getDefaultAiTransportHost().buildModelFetch).toBe(buildModelFetch);
+      const response = await sdk.complete(
+        model,
+        { messages: [{ role: "user", content: "observer fixture", timestamp: 0 }] },
+        { apiKey: "synthetic-observer-key" },
+      );
+      expect(response).toMatchObject({
+        stopReason: "stop",
+        content: [{ type: "text", text: "observed" }],
+      });
+      expect(requests).toMatchObject([{ model: "prepared-model", stream: true }]);
+      expect(fetchObserver).toHaveBeenCalledTimes(1);
+      expect(
+        getDefaultAiTransportHost().resolveProviderRequestCapabilities({
+          model,
+          provider: model.provider,
+          api: model.api,
+          baseUrl: model.baseUrl,
+          capability: "llm",
+          transport: "stream",
+        }),
+      ).toMatchObject({
+        endpointClass: "openai-public",
+        knownProviderFamily: "prepared-openai-family",
+      });
+    } finally {
+      configureAiTransportHost(originalHost);
+    }
+  });
+
   it("keeps headers, capabilities, and SSRF posture on the prepared metadata generation", () => {
     const model = attachModelProviderRequestRouteFacts(
       makeProviderModelFixture<"openai-responses">({
@@ -94,5 +184,59 @@ describe("AI transport prepared provider routes", () => {
     expect(routeFacts?.providerMetadataOwners).toBe(owners);
     expect(routeFacts?.capabilities.endpointClass).toBe("anthropic-public");
     expect(routeFacts?.providerOwner).toBe("anthropic-public");
+  });
+
+  it("reconciles the current source before fetching with a structured-cloned projection", async () => {
+    const baseUrl = "http://127.0.0.1:12345/v1";
+    const events: string[] = [];
+    const source = attachModelProviderLocalServiceReconciler(
+      attachModelProviderLocalService(
+        makeProviderModelFixture<"openai-completions">({
+          id: "local-model",
+          provider: "local-projection",
+          api: "openai-completions",
+          baseUrl,
+        }),
+        {
+          command: process.execPath,
+          healthUrl: `${baseUrl}/health`,
+          idleStopMs: 0,
+        },
+      ),
+      async () => {
+        throw new Error("Stale source reconciler must not run");
+      },
+    );
+    const cloned = structuredClone(source);
+    const currentSource = attachModelProviderLocalServiceReconciler(source, async (context) => {
+      expect(context.baseUrl).toBe(baseUrl);
+      await Promise.resolve();
+      events.push("current reconcile");
+    });
+    const projected = getAiTransportHost().inheritManagedTransport(currentSource, cloned);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === `${baseUrl}/health`) {
+        return new Response("healthy");
+      }
+      expect(url).toBe(`${baseUrl}/chat/completions`);
+      events.push("model fetch");
+      return Response.json({ content: "ready" });
+    });
+
+    try {
+      const lease = await ensureModelProviderLocalService(projected);
+      try {
+        expect(lease).toBeDefined();
+        const response = await fetch(`${projected.baseUrl}/chat/completions`);
+        expect(await response.json()).toEqual({ content: "ready" });
+        expect(events).toEqual(["current reconcile", "model fetch"]);
+      } finally {
+        lease?.release();
+      }
+    } finally {
+      await stopManagedProviderLocalServices();
+      fetchSpy.mockRestore();
+    }
   });
 });

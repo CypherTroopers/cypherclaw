@@ -413,6 +413,7 @@ describe("createCopilotToolBridge", () => {
       await withTempDir("openclaw-copilot-policy-", async (workspaceDir) => {
         const result = await createCopilotToolBridge({
           attemptParams: {
+            config: {},
             conversationToolPolicy: {
               deny: ["exec", "process", "write", "edit", "ask_user"],
             },
@@ -754,6 +755,42 @@ describe("createCopilotToolBridge tool conversion", () => {
     await expect(Promise.all(runs.slice(1))).resolves.toEqual(
       [1, 2, 3, 4].map((index) => ({ resultType: "success", textResultForLlm: String(index) })),
     );
+  });
+
+  it("seals one-shot tool admission and joins calls already accepted", async () => {
+    const entered = createDeferred<void>();
+    const finish = createDeferred<void>();
+    const bridge = await createCopilotToolBridge({
+      createOpenClawCodingTools: () => [
+        makeTool({
+          name: "pending",
+          execute: vi.fn(async () => {
+            entered.resolve();
+            await finish.promise;
+            return textToolResult("done");
+          }),
+        }),
+      ],
+      attemptParams: { config: { tools: { codeMode: false, toolSearch: false } } },
+    });
+    const pending = runSdkTool(sdkToolNamed(bridge, "pending"), {});
+    await entered.promise;
+    let settled = false;
+    const cleanup = bridge.settle?.().then(() => {
+      settled = true;
+    });
+    try {
+      await expect(runSdkTool(sdkToolNamed(bridge, "pending"), {})).rejects.toThrow(
+        "attempt is closing",
+      );
+      expect(settled).toBe(false);
+    } finally {
+      finish.resolve();
+      await pending;
+      await cleanup;
+      bridge.cleanup?.();
+    }
+    expect(settled).toBe(true);
   });
 
   it("runs SDK-dispatched tools in the attempt's async context, not the pooled connection's", async () => {

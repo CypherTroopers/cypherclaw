@@ -9,8 +9,8 @@ import {
   GATEWAY_CLIENT_IDS,
 } from "../packages/gateway-protocol/src/client-info.js";
 import type { BoardSnapshot } from "../packages/gateway-protocol/src/index.js";
-import { inspectManagedProcessGroup } from "../scripts/lib/managed-child-process.mts";
 import { isLiveTestEnabled, logLiveProgress } from "../src/agents/live-test-helpers.js";
+import { waitForControlUiDocument } from "../src/commands/control-ui-handoff.js";
 import type { OpenClawConfig } from "../src/config/config.js";
 import type { GatewayClient } from "../src/gateway/client.js";
 import type { SessionsListResult } from "../src/gateway/session-utils.types.js";
@@ -125,12 +125,15 @@ it.skipIf(!isLiveTestEnabled() || process.platform === "win32")(
         };
         await instance.state.writeConfig(config);
         await instance.startGateway();
+        // Backend readiness can precede the cold UI build; finish setup before restarting.
+        await expect(
+          waitForControlUiDocument({ url: `http://127.0.0.1:${instance.port}/` }),
+        ).resolves.toEqual({ ready: true });
         const deviceIdentity = loadOrCreateDeviceIdentity({
           path: instance.state.path("proof-device.sqlite"),
         });
-        // A TEST observer must not replace the original Control UI token's issuer binding.
         const observerDeviceIdentity = loadOrCreateDeviceIdentity({
-          path: instance.state.path("proof-observer-device.sqlite"),
+          path: instance.state.path("observer-device.sqlite"),
         });
         const connect = (controlUi: boolean) =>
           acquireGatewayTestClient(
@@ -138,6 +141,7 @@ it.skipIf(!isLiveTestEnabled() || process.platform === "win32")(
               url: instance.url,
               origin: controlUi ? `http://127.0.0.1:${instance.port}` : undefined,
               token: instance.gatewayToken,
+              // A different auth class must not reissue the interrupted UI's device token.
               deviceIdentity: controlUi ? deviceIdentity : observerDeviceIdentity,
               clientName: controlUi ? GATEWAY_CLIENT_IDS.CONTROL_UI : GATEWAY_CLIENT_IDS.TEST,
               clientBuildId: controlUi ? buildId : undefined,
@@ -202,15 +206,8 @@ it.skipIf(!isLiveTestEnabled() || process.platform === "win32")(
         logLiveProgress(
           `widget restart: checkpoint reached; replacing owned Gateway pid=${originalProcess.pid}`,
         );
-        // Interrupt the Gateway without draining; the marker releases its detached exec below.
-        process.kill(-originalProcess.pid, "SIGKILL");
-        await vi.waitFor(
-          () =>
-            expect(
-              inspectManagedProcessGroup(originalProcess, { errorPolicy: "indeterminate" }),
-            ).toBe("dead"),
-          { timeout: 10_000 },
-        );
+        // Interrupt without draining; the marker releases the surviving detached exec.
+        await instance.crashGateway();
         await writeFile(path.join(instance.state.workspaceDir, "checkpoint-resume"), "resume\n");
         await instance.startGateway();
         expect(instance.child?.pid).not.toBe(originalProcess.pid);
@@ -253,7 +250,7 @@ it.skipIf(!isLiveTestEnabled() || process.platform === "win32")(
         );
 
         const handoff = await instance.cli(["dashboard", "--json"]);
-        expect(handoff.code, handoff.stderr).toBe(0);
+        expect(handoff.code, JSON.stringify(handoff)).toBe(0);
         const issued = JSON.parse(handoff.stdout) as { browserUrl: string };
         const url = new URL(
           controlUiSessionUrl(`http://127.0.0.1:${instance.port}/`, SESSION_KEY, "dashboard"),

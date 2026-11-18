@@ -6,6 +6,7 @@ import { BUNDLED_PLUGIN_TEST_GLOB } from "openclaw/plugin-sdk/test-fixtures";
 import { globSync } from "tinyglobby";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveConfig } from "vitest/node";
+import { withEnvAsync } from "../src/test-utils/env.js";
 import { useAutoCleanupTempDirTracker } from "./helpers/temp-dir.js";
 import { normalizeConfigPath } from "./helpers/vitest-config-paths.js";
 import { createAgentsCoreIsolatedVitestConfig } from "./vitest/vitest.agents-core-isolated.config.ts";
@@ -325,6 +326,9 @@ describe("scoped vitest configs", () => {
     expect(testConfig.runner).toBeUndefined();
     expect(testConfig.dir).toBe(process.cwd());
     expect(testConfig.include).toEqual(["src/infra/**/*.test.ts", ...databaseWorkerCoreTestFiles]);
+    const imageAuthFile = "src/agents/tools/image-generate-tool.auth.test.ts";
+    expect(testConfig.include).toContain(imageAuthFile);
+    expect(agentVitestProjectOwners.tools.exclude).toContain(imageAuthFile);
     const recoveryFile = "src/wizard/setup.inference-recovery.integration.test.ts";
     expect(testConfig.include?.filter((file) => file === recoveryFile)).toEqual([recoveryFile]);
     expect(requireTestConfig(defaultWizardConfig).exclude).toContain(
@@ -469,7 +473,19 @@ describe("scoped vitest configs", () => {
     expect(testConfig.dir).toBe(path.join(process.cwd(), "src", "plugins"));
     expect(testConfig.include).toEqual(["**/*.test.ts"]);
     expect(testConfig.exclude).toContain("contracts/**");
-    const resolved = await resolveConfig({ config: false }, defaultPluginsConfig);
+    // The outer test runner's include file selects this config test, not plugin suites.
+    const resolved = await withEnvAsync({ OPENCLAW_VITEST_INCLUDE_FILE: undefined }, () =>
+      resolveConfig({ config: "test/vitest/vitest.plugins.config.ts" }),
+    );
+    expect(
+      resolved.test.resolvedProjects.map(({ viteConfig }) =>
+        normalizeConfigPath(viteConfig.configFile),
+      ),
+    ).toEqual([
+      "test/vitest/vitest.plugins-source.config.ts",
+      "test/vitest/vitest.plugins-native-loader.config.ts",
+    ]);
+    expect(resolved.test.resolvedProjects.every((project) => !project.inline)).toBe(true);
     const projects = resolved.test.resolvedProjects.map(({ projectConfig }) => projectConfig);
     expect(
       projects.map((project) => ({

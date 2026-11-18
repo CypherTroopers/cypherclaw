@@ -1,18 +1,16 @@
-import type { DatabaseSync } from "node:sqlite";
 import type {
   WorkerOperationHandlers,
   WorkerWriteOperationContext,
 } from "../state/worker-operation-registry.js";
 import { applyExecAuthorizationCommit } from "./exec-approvals-authorization.kernel.js";
-import { resolveExecApprovalsDisplayPath } from "./exec-approvals-config.js";
 import type {
   ExecAuthorizationCommitInput,
   ExecAuthorizationCommitOutcome,
 } from "./exec-approvals-contracts.js";
 import type { ExecApprovalsSnapshot } from "./exec-approvals-core.js";
-import { assertNoPendingLegacyExecApprovals } from "./exec-approvals-migration-gate.js";
 import { execPolicyMutationOperations } from "./exec-approvals-mutation.worker.js";
 import { assertExecApprovalsHostPolicyUnchanged } from "./exec-approvals-policy.js";
+import { execApprovalsPublication } from "./exec-approvals-publication.js";
 import { execApprovalRetirementOperations } from "./exec-approvals-retirement.worker.js";
 import {
   snapshotFromExecApprovalsDatabase,
@@ -22,10 +20,14 @@ import {
   snapshotFromExecApprovalsRow,
   writeExecApprovalsConfigRow,
 } from "./exec-approvals-sqlite.js";
-import { requestSqliteWorkerOperationAdmission } from "./sqlite-worker-operation-admission.js";
+import type { EngineConnection } from "./sql-connection.js";
+import {
+  deferSqliteWorkerCommitReceipt,
+  requestSqliteWorkerOperationAdmission,
+} from "./sqlite-worker-operation-admission.js";
 
 function applyAuthorizationBatch(
-  db: DatabaseSync,
+  db: EngineConnection,
   initial: ExecApprovalsSnapshot,
   items: readonly ExecAuthorizationCommitInput[],
 ) {
@@ -62,8 +64,6 @@ export function commitExecAuthorizationsInWorker(
   context: WorkerWriteOperationContext,
 ): ExecAuthorizationCommitOutcome[] {
   const options = context.stateOptions();
-  assertNoPendingLegacyExecApprovals({ env: options.env });
-  const displayPath = resolveExecApprovalsDisplayPath(options.env);
   const mayWrite = input.items.some(
     (item) =>
       item.matches.length > 0 ||
@@ -73,24 +73,40 @@ export function commitExecAuthorizationsInWorker(
     const { db } = context.open();
     return applyAuthorizationBatch(
       db,
-      snapshotFromExecApprovalsDatabase(db, displayPath),
+      snapshotFromExecApprovalsDatabase(db, options.env),
       input.items,
     ).outcomes;
   }
   return context.write(
     ({ db }) => {
       requestSqliteWorkerOperationAdmission({ stage: "transaction", facts: undefined });
-      const current = snapshotFromExecApprovalsDatabase(db, displayPath);
-      const committed = applyAuthorizationBatch(db, current, input.items);
-      if (committed.snapshot.raw !== current.raw) {
-        writeExecApprovalsConfigRow({
-          db,
-          file: committed.snapshot.file,
-          raw: committed.snapshot.raw ?? undefined,
-        });
-      }
+      const captured = execApprovalsPublication.capture(db, () => {
+        const current = snapshotFromExecApprovalsDatabase(db, options.env);
+        const committed = applyAuthorizationBatch(db, current, input.items);
+        if (committed.snapshot.raw !== current.raw) {
+          writeExecApprovalsConfigRow({
+            db,
+            file: committed.snapshot.file,
+            raw: committed.snapshot.raw ?? undefined,
+            change: input.items.some(
+              (item, index) =>
+                committed.outcomes[index]?.ok &&
+                item.allowAlwaysDecision &&
+                item.allowAlwaysDecision.kind !== "one-shot",
+            )
+              ? "policy"
+              : "usage",
+          });
+        }
+        return committed;
+      });
       requestSqliteWorkerOperationAdmission({ stage: "commit", facts: undefined });
-      return committed.outcomes;
+      deferSqliteWorkerCommitReceipt(
+        db,
+        { execFacts: execApprovalsPublication.bound(captured.receipt) },
+        captured.receipt.facts.size ? "commit" : "settlement",
+      );
+      return captured.result.outcomes;
     },
     { operationLabel: "exec-approvals.commit-authorizations" },
   );

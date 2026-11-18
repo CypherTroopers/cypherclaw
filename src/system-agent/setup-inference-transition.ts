@@ -10,6 +10,7 @@ import {
 } from "../config/runtime-write-application.js";
 import type { ConfigFileSnapshot, OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import { redactToolDetail } from "../logging/redact.js";
 import { captureGatewayRootWorkAdmissionContinuationScope } from "../process/gateway-work-admission.js";
 import { SetupInferenceOwnerDriftError } from "./setup-inference-core.js";
 import type { SetupCredentialActivationReceipt } from "./setup-inference-credential-access.js";
@@ -106,6 +107,8 @@ export function captureSetupInferenceFileUndo(
 /** Setup coordinates effects; the selected config and auth owners retain their own undo. */
 export async function commitSetupInferenceActivation(params: {
   preserveWorkingConnection?: boolean;
+  /** First-run clients cannot complete a restart handshake, but may load a new plugin. */
+  requireApplied?: true;
   configTarget: SetupInferenceConfigTarget;
   config: OpenClawConfig;
   activate: (assertCurrent: () => void) => Promise<SetupCredentialActivationReceipt | undefined>;
@@ -134,8 +137,8 @@ export async function commitSetupInferenceActivation(params: {
       })
     : undefined;
   const restore = async () => {
-    const rollbackCredential = () => {
-      credential?.rollback();
+    const rollbackCredential = async () => {
+      await credential?.rollback();
       credential = undefined;
     };
     const restoredApplication = application
@@ -144,7 +147,7 @@ export async function commitSetupInferenceActivation(params: {
             assertApplicationCurrent = assertCurrent;
             assertCurrent();
             // Recovery must capture auth only after restoring this activation's credential.
-            rollbackCredential();
+            await rollbackCredential();
           },
         })
       : undefined;
@@ -152,11 +155,16 @@ export async function commitSetupInferenceActivation(params: {
       configCommitted && undoConfig
         ? await undoConfig(attachRuntimeConfigWriteApplication({}, restoredApplication))
         : { config: (await params.configTarget.read()).config, written: false };
-    rollbackCredential();
+    await rollbackCredential();
     if (restoredApplication && restored.written) {
-      if (!restoredApplication.claimed || (await restoredApplication.result) !== "applied") {
+      const status = restoredApplication.claimed ? await restoredApplication.result : "unclaimed";
+      if (status !== "applied") {
+        const reason =
+          typeof status === "object"
+            ? ` ${redactToolDetail(status.reason)} ${redactToolDetail(status.appliesWhen)}`
+            : "";
         throw new Error(
-          "The previous connection was restored on disk, but the Gateway could not apply it. Restart the Gateway before chatting.",
+          `The previous connection was restored on disk, but the Gateway could not apply it.${reason} Restart the Gateway before chatting.`,
         );
       }
     }
@@ -213,13 +221,14 @@ export async function commitSetupInferenceActivation(params: {
         const status = application.claimed ? await application.result : "unclaimed";
         if (
           !params.preserveWorkingConnection &&
+          !params.requireApplied &&
           (status === "restart-pending" || status === "applied-restart-required")
         ) {
           return true;
         }
         if (status !== "applied") {
           throw new Error(
-            `The Gateway did not complete activation (${status}). Resolve the reported problem, then retry the saved sign-in.`,
+            `The Gateway did not complete activation (${typeof status === "object" ? `deferred: ${redactToolDetail(status.reason)} ${redactToolDetail(status.appliesWhen)}` : status}). Resolve the reported problem, then retry the saved sign-in.`,
           );
         }
       } else {

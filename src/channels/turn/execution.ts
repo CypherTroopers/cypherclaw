@@ -10,7 +10,7 @@ import {
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { getPluginServiceSchedulerBinding } from "../../plugins/service-scheduler-binding.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
-import { getAgentDatabaseStartupAdmission } from "../../state/agent-database-startup.js";
+import { waitForAgentDatabaseWriteAdmission } from "../../state/agent-database-preparation-context.js";
 import { isRecentOutboundMessageIdentity } from "../message/outbound-echo.js";
 import { recordChannelBotPairLoopAndCheckSuppression } from "./bot-loop-protection.js";
 import {
@@ -236,7 +236,7 @@ async function runPreparedChannelTurnCoreInTrace<
       const agentId =
         params.ctxPayload.AgentId ?? parseAgentSessionKey(params.routeSessionKey)?.agentId;
       if (agentId) {
-        await getAgentDatabaseStartupAdmission()?.waitForAgentPreparation(agentId, {
+        await waitForAgentDatabaseWriteAdmission(agentId, {
           signal: getPluginServiceSchedulerBinding()?.().signal,
         });
       }
@@ -251,6 +251,7 @@ async function runPreparedChannelTurnCoreInTrace<
         });
       }
       emitStage("record", "start");
+      params.assertAuthority?.();
       await params.recordInboundSession({
         storePath: params.storePath,
         sessionKey: recordSessionKey,
@@ -260,6 +261,7 @@ async function runPreparedChannelTurnCoreInTrace<
         updateLastRoute: params.record?.updateLastRoute,
         onRecordError: params.record?.onRecordError ?? (() => undefined),
         trackSessionMetaTask: params.record?.trackSessionMetaTask,
+        assertAuthority: params.assertAuthority,
       });
       emitStage("record", "done");
       await params.afterRecord?.();
@@ -277,6 +279,7 @@ async function runPreparedChannelTurnCoreInTrace<
     emitStage("dispatch", "start");
     let dispatchResult: TDispatchResult;
     try {
+      params.assertAuthority?.();
       let processedOutcome: DispatchProcessedNote | undefined;
       if (admission.kind === "observeOnly") {
         if (options.suppressObserveOnlyDispatch) {

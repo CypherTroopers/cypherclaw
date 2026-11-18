@@ -450,7 +450,6 @@ it.each(["inspection", "prepared"] as const)(
       env: { ...process.env, OPENCLAW_STATE_DIR: stateDir },
     });
     let disabled: ReturnType<typeof prepareTranscriptCaptureDisable> | undefined;
-    let releaseReplacement: (() => void) | undefined;
     try {
       await withPluginRuntimeRegistryScope(registry, () =>
         agent.run(() =>
@@ -464,13 +463,19 @@ it.each(["inspection", "prepared"] as const)(
       agent.release();
       await releaseRegistry();
       expect(disposed).not.toHaveBeenCalled();
-      sibling.reserveReplacement()();
       expect(sibling.retainedWorkCount).toBe(0);
-      releaseReplacement = instance.reserveReplacement();
       expect(instance.retainedWorkCount).toBeGreaterThan(0);
       await request!.onUtterance({ text: "Speech after the agent turn finished" });
       disabled = prepareTranscriptCaptureDisable(stateDir);
-      await expect(disabled.drain()).rejects.toThrow("Transcript capture policy drainage failed");
+      await expect(disabled.drain()).rejects.toMatchObject({
+        message: "Transcript capture policy drainage failed",
+        errors: [
+          expect.objectContaining({
+            message: "transcripts provider cleanup failed: caption transport stop failed",
+          }),
+        ],
+      });
+      expect(stop).toHaveBeenCalledOnce();
       expect(disposed).not.toHaveBeenCalled();
       expect(instance.retainedWorkCount).toBeGreaterThan(0);
       failStop = false;
@@ -483,7 +488,6 @@ it.each(["inspection", "prepared"] as const)(
       });
       expect((await store.readSession("retained-capture"))?.stoppedAt).toEqual(expect.any(String));
     } finally {
-      releaseReplacement?.();
       failStop = false;
       agent.release();
       disabled ??= prepareTranscriptCaptureDisable(stateDir);

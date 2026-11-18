@@ -13,6 +13,7 @@ export type ConfigAutoSaveStatus =
   | "idle"
   | "saving"
   | "saved"
+  | "deferred"
   | "rejected"
   | "error"
   | "conflict"
@@ -23,12 +24,19 @@ type RuntimeConfigGatewaySnapshot = {
   phase: ApplicationGatewayPhase;
   sessionKey: string;
   hello?: GatewayHelloOk | null;
+  pluginCapabilities?: { generation?: number } | null;
 };
 
 const initialConfigValue = <T>(value: T): T => value;
 
-export function createInitialConfigState(snapshot?: Partial<RuntimeConfigGatewaySnapshot>) {
+export function createInitialConfigState(
+  snapshot?: Partial<RuntimeConfigGatewaySnapshot>,
+  getBootstrapConfig?: () => Record<string, unknown> | null,
+) {
   return {
+    get bootstrapConfig() {
+      return getBootstrapConfig?.() ?? null;
+    },
     client: snapshot?.client ?? null,
     connected: snapshot?.phase === "connected",
     applySessionKey: snapshot?.sessionKey ?? "main",
@@ -44,6 +52,9 @@ export function createInitialConfigState(snapshot?: Partial<RuntimeConfigGateway
     configAutoSaveStatus: initialConfigValue<ConfigAutoSaveStatus>("idle"),
     configRecoveryError: initialConfigValue<string | null>(null),
     configNeedsApply: false,
+    configDeferredApplication: initialConfigValue<{ reason: string; appliesWhen: string } | null>(
+      null,
+    ),
     configSnapshot: initialConfigValue<ConfigSnapshot | null>(null),
     configDraftBaseHash: initialConfigValue<string | null>(null),
     configSchema: initialConfigValue<unknown>(null),
@@ -59,8 +70,11 @@ export function createInitialConfigState(snapshot?: Partial<RuntimeConfigGateway
 }
 
 type ProducedRuntimeConfigState = ReturnType<typeof createInitialConfigState>;
-export type RuntimeConfigState = Omit<ProducedRuntimeConfigState, "configDraftBaseHash"> &
-  Partial<Pick<ProducedRuntimeConfigState, "configDraftBaseHash">> & {
+export type RuntimeConfigState = Omit<
+  ProducedRuntimeConfigState,
+  "configDraftBaseHash" | "bootstrapConfig"
+> &
+  Partial<Pick<ProducedRuntimeConfigState, "configDraftBaseHash" | "bootstrapConfig">> & {
     chatError?: string | null;
   };
 
@@ -189,12 +203,44 @@ export function resolveEditableSnapshotConfig(
   );
 }
 
+/** Stored provenance never comes from a draft, bootstrap data, or a retired connection. */
+export function currentStoredConfigSnapshot(state: RuntimeConfigState): ConfigSnapshot | null {
+  if (
+    !state.connected ||
+    state.configLoading ||
+    state.lastError ||
+    staleConfigSnapshots.has(state)
+  ) {
+    return null;
+  }
+  return state.configSnapshot;
+}
+
 export function currentConfigObject(
   state: Pick<RuntimeConfigState, "configForm" | "configSnapshot">,
 ): Record<string, unknown> | null {
   return !staleConfigSnapshots.has(state)
     ? (state.configForm ?? resolveEditableSnapshotConfig(state.configSnapshot))
     : null;
+}
+
+/** Read-only display facts cannot become an editor's base or write revision. */
+export function currentDisplayConfig(state: RuntimeConfigState): Record<string, unknown> | null {
+  return (
+    (!staleConfigSnapshots.has(state) ? asConfigRecord(state.configSnapshot?.config) : null) ??
+    state.bootstrapConfig ??
+    null
+  );
+}
+
+export function currentDisplayRuntimeConfig(
+  state: RuntimeConfigState,
+): Record<string, unknown> | null {
+  return (
+    (!staleConfigSnapshots.has(state) ? state.configSnapshot?.runtimeConfig : null) ??
+    state.bootstrapConfig ??
+    null
+  );
 }
 export type AgentConfigEntryTarget = {
   path: ["agents", "entries", string];

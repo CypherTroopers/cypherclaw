@@ -216,8 +216,10 @@ export async function navigateViaPlaywright(opts: {
   relayReference?: RelayOperationReference;
   url: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
   ssrfPolicy?: SsrFPolicy;
   browserProxyMode?: BrowserNavigationPolicyOptions["browserProxyMode"];
+  standingSsrfPolicy?: SsrFPolicy;
 }): Promise<{ url: string; targetId?: string; download?: BrowserDownloadResult }> {
   const isRetryableNavigateError = (err: unknown): boolean => {
     const msg =
@@ -238,10 +240,12 @@ export async function navigateViaPlaywright(opts: {
   }
   const navigationPolicy = withBrowserNavigationPolicy(opts.ssrfPolicy, {
     browserProxyMode: opts.browserProxyMode,
+    standingSsrfPolicy: opts.standingSsrfPolicy,
   });
   await assertBrowserNavigationAllowed({
     url,
     ...navigationPolicy,
+    ...(opts.signal ? { signal: opts.signal } : {}),
   });
   const timeout = resolveBrowserNavigationTimeoutMs(opts.timeoutMs);
   let currentTargetId = opts.targetId;
@@ -255,7 +259,9 @@ export async function navigateViaPlaywright(opts: {
       timeoutMs: timeout,
       ssrfPolicy: opts.ssrfPolicy,
       browserProxyMode: opts.browserProxyMode,
+      standingSsrfPolicy: opts.standingSsrfPolicy,
       targetId: currentTargetId,
+      ...(opts.signal ? { signal: opts.signal } : {}),
       ...(opts.resolveOperationTarget
         ? {
             assertPageCurrent: async () => {
@@ -361,7 +367,9 @@ export async function navigateViaPlaywright(opts: {
         response: navigationResult.response,
         ssrfPolicy: opts.ssrfPolicy,
         browserProxyMode: opts.browserProxyMode,
+        standingSsrfPolicy: opts.standingSsrfPolicy,
         targetId: currentTargetId,
+        ...(opts.signal ? { signal: opts.signal } : {}),
       });
     }
   } catch (err) {

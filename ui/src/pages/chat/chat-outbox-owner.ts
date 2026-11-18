@@ -21,10 +21,12 @@ import {
 } from "../../lib/chat/outbox-store.ts";
 import { resolveUiConversationIdentity } from "../../lib/sessions/session-key.ts";
 import { getChatAttachmentDataUrl } from "./attachment-payload-store.ts";
+import { ChatOutboxAdmissions } from "./chat-outbox-admissions.ts";
 import { ChatOutboxHistory } from "./chat-outbox-history.ts";
 import {
   projectChatOutboxItem,
   isActiveLocal,
+  hasActiveChatOutboxProjection,
   projectChatOutboxAttention,
   reconcileChatOutboxProjection,
   type ChatOutboxHostProjection as HostProjection,
@@ -53,6 +55,7 @@ type LiveProjection = {
 const LIVE_VERSION_KEYS = ["sendRunId", "sendAttempts", "sendState", "sendError"] as const;
 // One gateway owner merges durable, live, and pane-local rows for every subscribed pane.
 class ChatOutboxGatewayOwner {
+  readonly admissions = new ChatOutboxAdmissions(() => this.prune());
   attentionRevision = 0;
   private readonly hosts = new Map<Host, HostProjection>();
   private readonly panes = new Set<Host>();
@@ -89,6 +92,7 @@ class ChatOutboxGatewayOwner {
     return created;
   }
   private retireHost(host: Host): void {
+    this.admissions.cancelRequests(host);
     this.history.forget(host);
     const state = this.hosts.get(host);
     if (state) {
@@ -167,6 +171,7 @@ class ChatOutboxGatewayOwner {
     }
   }
   private observeDurable(id: string): void {
+    this.admissions.release(id);
     // Admission supersedes every retained copy, even an offscreen pane now using
     // another account. Subsequent canonical removal must not resurrect its bytes.
     for (const [pane, projection] of this.hosts) {
@@ -336,6 +341,7 @@ class ChatOutboxGatewayOwner {
     this.unsubscribe ??= subscribeStoredChatOutboxChanges(() => this.publish(undefined, true));
   }
   private detach(host: Host): void {
+    this.admissions.cancelRequests(host);
     this.history.forget(host);
     this.panes.delete(host);
     if (!this.panes.size) {
@@ -562,11 +568,13 @@ class ChatOutboxGatewayOwner {
       return null;
     }
     if (located) {
+      this.admissions.release(id);
       this.projectLive(host, located.scope, id);
       this.change(host, id);
     }
     this.publish(undefined, true);
     if (located && options?.discard) {
+      this.admissions.cancelRequests(host, located.scope, located.item.sendRunId);
       // Row disappearance also means ACK retirement. Only successful explicit
       // discard invalidates admission presentation in every subscribed pane.
       for (const pane of this.panes) {
@@ -670,23 +678,21 @@ class ChatOutboxGatewayOwner {
     this.prune(host);
     return [...items.values()].filter((item) => outboxPayloadMatchesOwner(host, item));
   }
-  private prune(host: Host): void {
-    const state = this.hosts.get(host);
-    if (state && !this.panes.has(host)) {
-      const active = [...state.byScope.values()].some(({ queue }) =>
-        queue.some((item) => isActiveLocal(state, item)),
-      );
-      if (!active && !this.live.size) {
+  private prune(host?: Host): void {
+    const state = host ? this.hosts.get(host) : undefined;
+    if (host && state && !this.panes.has(host)) {
+      if (!hasActiveChatOutboxProjection(state) && !this.live.size) {
         this.hosts.delete(host);
       }
     }
-    if (!this.unsubscribe && !this.live.size && !this.hosts.size) {
+    if (!this.unsubscribe && !this.live.size && !this.hosts.size && !this.admissions.hasRequests) {
       // Defer eviction until a synchronous send transition can add its live overlay.
       queueMicrotask(() => {
         if (
           !this.unsubscribe &&
           !this.live.size &&
           !this.hosts.size &&
+          !this.admissions.hasRequests &&
           owners.get(this.ownerGatewayKey) === this
         ) {
           owners.delete(this.ownerGatewayKey);
@@ -713,9 +719,7 @@ export function chatOutboxOwner(host: Composer): ChatOutboxGatewayOwner {
 
 /** Read-only view of the existing tab/Gateway outbox; it does not claim a personal owner. */
 export function listChatOutboxAttention(host: Composer) {
-  if (!readOfflineStorageScope(host)) {
-    return [];
-  }
-  const owner = owners.get(outboxOwnerKey(host));
-  return projectChatOutboxAttention(listStoredChatOutboxes(host), owner);
+  return readOfflineStorageScope(host)
+    ? projectChatOutboxAttention(listStoredChatOutboxes(host), owners.get(outboxOwnerKey(host)))
+    : [];
 }

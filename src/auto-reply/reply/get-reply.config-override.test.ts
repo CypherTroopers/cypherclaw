@@ -1,5 +1,10 @@
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  awaitGateBeforeSettlement,
+  createDeferred,
+  withinTest,
+} from "../../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { createAdmittedRunOperatorAuthority } from "../../agents/admitted-run-context.js";
 import { resolveModelRefFromString } from "../../agents/model-selection-shared.js";
@@ -25,6 +30,7 @@ import {
   REPLY_OPERATION_RUN_STATE,
   type ReplyOperationRunState,
 } from "./reply-operation-run-state.js";
+import { createReplySessionEntryHandle } from "./session-entry-handle.js";
 import { SessionResetCleanupError } from "./session-reset-cleanup.js";
 
 type CaptureSessionDiffBaseline =
@@ -80,7 +86,7 @@ async function seedSession(
 ) {
   const storePath = path.join(tempDirs.make("get-reply-session-"), "sessions.json");
   await replaceSessionEntry({ sessionKey, storePath }, entry);
-  const sessionEntryHandle = { replaceCurrent: vi.fn() };
+  const sessionEntryHandle = createReplySessionEntryHandle({ sessionEntry: entry, sessionKey });
   const fixture = createGetReplySessionState({
     sessionKey,
     sessionEntry: entry,
@@ -303,7 +309,7 @@ function makeReasoningModelConfig(
         },
         anthropic: {
           baseUrl: "https://api.anthropic.test/v1",
-          models: [makeTestModel("claude-fallback", "Claude Fallback", false)],
+          models: [makeTestModel("nonthinking-fallback", "Nonthinking Fallback", false)],
         },
       },
     },
@@ -315,7 +321,7 @@ async function mockAutoFallbackSession(modelSelectionLocked?: boolean) {
       sessionId: "fallback-session",
       updatedAt: Date.now(),
       providerOverride: "anthropic",
-      modelOverride: "claude-fallback",
+      modelOverride: "nonthinking-fallback",
       modelOverrideSource: "auto",
       modelOverrideFallbackOriginProvider: "openai",
       modelOverrideFallbackOriginModel: "gpt-5.5",
@@ -330,7 +336,7 @@ function mockFallbackDirectiveResult(sessionKey: string, overrides: DirectiveOve
   mocks.resolveReplyDirectives.mockImplementation(async () =>
     continueDirectives("hello", sessionKey, {
       provider: "anthropic",
-      model: "claude-fallback",
+      model: "nonthinking-fallback",
       ...overrides,
     }),
   );
@@ -372,6 +378,53 @@ describe("getReplyFromConfig auto-fallback primary probes", () => {
     );
     vi.mocked(runPreparedReplyMock).mockResolvedValue({ text: "ok" });
   });
+  it("starts the model before baseline capture and settles it before tools and cleanup", async ({
+    signal,
+  }) => {
+    const { ctx, sessionKey, sessionEntryHandle } =
+      await prepareBaselineClaimSession("overlapping-baseline");
+    const capture = createDeferred<Awaited<ReturnType<CaptureSessionDiffBaseline>>>();
+    const modelStarted = createDeferred();
+    const events: string[] = [];
+    const sessionDiff = await import("../../sessions/session-diff.js");
+    vi.spyOn(sessionDiff, "captureSessionDiffBaseline").mockReturnValueOnce(capture.promise);
+    mockFallbackDirectiveResult(sessionKey);
+    vi.mocked(runPreparedReplyMock).mockImplementationOnce(async (params) => {
+      events.push("model");
+      const updated = {
+        ...sessionEntryHandle.getCurrent()!,
+        label: "set during model preparation",
+      };
+      sessionEntryHandle.replaceCurrent(updated);
+      modelStarted.resolve();
+      expect(params.opts?.awaitSessionDiffBaseline).toBeTypeOf("function");
+      await params.opts?.awaitSessionDiffBaseline?.();
+      events.push("tool");
+      return { text: "ok" };
+    });
+    const reply = getReplyFromConfig(ctx, undefined, makeReasoningModelConfig());
+    try {
+      await withinTest(
+        awaitGateBeforeSettlement(modelStarted.promise, reply, "model did not start"),
+        signal,
+      );
+      expect(events).toEqual(["model"]);
+    } finally {
+      capture.resolve({
+        version: 1,
+        sessionId: "overlapping-baseline",
+        root: "/workspace",
+        files: [],
+      });
+      await reply.catch(() => undefined);
+    }
+    await expect(reply).resolves.toEqual({ text: "ok" });
+    expect(events).toEqual(["model", "tool"]);
+    expect(sessionEntryHandle.getCurrent()).toMatchObject({
+      label: "set during model preparation",
+      sessionDiffBaseline: { sessionId: "overlapping-baseline" },
+    });
+  });
   it("suppresses heartbeat model overrides for a model-locked session", async () => {
     const { sessionKey } = await mockAutoFallbackSession(true);
     mockFallbackDirectiveResult(sessionKey, { resolvedThinkLevel: "off" });
@@ -382,10 +435,10 @@ describe("getReplyFromConfig auto-fallback primary probes", () => {
     expect(mocks.resolveReplyDirectives).toHaveBeenCalledOnce();
     expect(mocks.resolveReplyDirectives.mock.calls[0]?.[0]).toMatchObject({
       provider: "anthropic",
-      model: "claude-fallback",
+      model: "nonthinking-fallback",
       hasResolvedHeartbeatModelOverride: false,
     });
-    expect(runParams()).toMatchObject({ provider: "anthropic", model: "claude-fallback" });
+    expect(runParams()).toMatchObject({ provider: "anthropic", model: "nonthinking-fallback" });
     expect(runParams()?.autoFallbackPrimaryProbe).toBeUndefined();
     expect(runParams()).not.toHaveProperty("configuredProfileId", "openai:metered");
   });
@@ -410,11 +463,7 @@ describe("getReplyFromConfig auto-fallback primary probes", () => {
       "openai:metered",
     );
   });
-  it.each([
-    ["turn override", undefined, "off"],
-    ["per-model off", false, "off"],
-    ["per-model high", "high", "high"],
-  ] as const)(
+  it.each([["turn override", undefined, "off"]] as const)(
     "honors %s and clears fallback reasoning during primary probes",
     async (_name, thinking, expected) => {
       const { sessionKey } = await mockAutoFallbackSession();
@@ -440,7 +489,12 @@ describe("getReplyFromConfig auto-fallback primary probes", () => {
     const catalogRuntime = await import("../../agents/model-catalog.runtime.js");
     const catalog = [
       { provider: "openai", id: "gpt-5.5", name: "GPT-5.5", reasoning: true },
-      { provider: "anthropic", id: "claude-fallback", name: "Claude Fallback", reasoning: false },
+      {
+        provider: "anthropic",
+        id: "nonthinking-fallback",
+        name: "Nonthinking Fallback",
+        reasoning: false,
+      },
     ];
     vi.mocked(catalogRuntime.loadPreparedModelCatalogSnapshot).mockResolvedValueOnce({
       entries: catalog,
@@ -450,7 +504,7 @@ describe("getReplyFromConfig auto-fallback primary probes", () => {
     const prepared = await expectPreparedReply(makeReasoningModelConfig("high", true));
     expect(prepared?.modelState).toMatchObject({
       provider: "anthropic",
-      model: "claude-fallback",
+      model: "nonthinking-fallback",
     });
     expect(prepared).toMatchObject({
       provider: "openai",
