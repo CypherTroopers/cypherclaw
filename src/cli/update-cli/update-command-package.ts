@@ -13,6 +13,7 @@ import type {
   PackageUpdateTransaction,
 } from "../../infra/package-update-swap-contract.js";
 import { PackageUpdateActivationError } from "../../infra/package-update-swap-contract.js";
+import type { PackageUpdateArtifact } from "../../infra/update-package-artifact.js";
 import { deferPackageStateVerification } from "../../infra/package-update-verification-step.js";
 import { runtimeProcessEntrypoints } from "../../infra/runtime-process-entrypoints.js";
 import {
@@ -376,6 +377,7 @@ export type PackageInstallUpdateParams = Omit<PackageDoctorOptions, "results"> &
   installKind: "git" | "package" | "unknown";
   tag: string;
   installSpec?: string;
+  expectedArtifact?: PackageUpdateArtifact;
   timeoutMs: number;
   startedAt: number;
   honorPackageRoot?: boolean;
