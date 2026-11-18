@@ -1,17 +1,17 @@
-import type { DatabaseSync } from "node:sqlite";
 import type { Insertable, Selectable } from "kysely";
 import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
 } from "../infra/kysely-sync.js";
+import type { EngineConnection } from "../infra/sql-connection.js";
 import { getAdmittedSqliteSchemaFacts } from "../infra/sqlite-schema-facts.js";
 import type { DB, CypherTransfers } from "../state/openclaw-state-db.generated.js";
 import type { CypherTransferListOptions } from "./transfer-store.contract.js";
 import type { CypherTransferRecord, CypherTransferStatus } from "./types.js";
 
 const table = "cypher_transfers";
-const query = (db: DatabaseSync) => getNodeSqliteKysely<Pick<DB, typeof table>>(db);
+const query = (db: EngineConnection) => getNodeSqliteKysely<Pick<DB, typeof table>>(db);
 const statuses: readonly CypherTransferStatus[] = [
   "unknown",
   "submitted",
@@ -20,7 +20,7 @@ const statuses: readonly CypherTransferStatus[] = [
   "failed",
 ];
 
-function available(db: DatabaseSync): boolean {
+function available(db: EngineConnection): boolean {
   const facts = getAdmittedSqliteSchemaFacts(db);
   if (!facts) {
     throw new Error("Cypher transfer reads require an admitted state database");
@@ -118,7 +118,7 @@ function sameBinding(left: CypherTransferRecord, right: CypherTransferRecord): b
 }
 
 export function readCypherTransferInDatabase(
-  db: DatabaseSync,
+  db: EngineConnection,
   requestId: string,
 ): CypherTransferRecord | null {
   if (!available(db)) {
@@ -132,7 +132,7 @@ export function readCypherTransferInDatabase(
 }
 
 export function listCypherTransfersInDatabase(
-  db: DatabaseSync,
+  db: EngineConnection,
   options: CypherTransferListOptions,
 ): CypherTransferRecord[] {
   if (!available(db)) {
@@ -156,7 +156,7 @@ export function listCypherTransfersInDatabase(
 
 /** Called inside the canonical writer's synchronous transaction after first-use admission. */
 export function writeCypherTransferInDatabase(
-  db: DatabaseSync,
+  db: EngineConnection,
   record: CypherTransferRecord,
   mode: "insert" | "update",
 ): CypherTransferRecord {
