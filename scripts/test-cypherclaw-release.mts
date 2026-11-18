@@ -334,7 +334,8 @@ async function configure(prefix: string, token: string, port: number) {
         controlUi: { enabled: true },
       },
       agents: {
-        defaults: { heartbeat: { every: "0m" } },
+        // agents.defaults.heartbeat was retired; omit it so config validate accepts 2026.11.5+.
+        defaults: {},
         entries: { main: { workspace: path.join(state, "workspace") } },
       },
       cron: { enabled: false },
@@ -377,13 +378,13 @@ function configPreserved(token: string, port: number) {
   assert(isRecord(config.gateway) && isRecord(config.cron) && isRecord(config.agents));
   const { gateway, cron, agents } = config;
   assert(isRecord(gateway.auth));
-  assert(isRecord(agents.defaults) && isRecord(agents.defaults.heartbeat));
+  assert(isRecord(agents.defaults));
   assert.equal(gateway.auth.mode, "token");
   assert.equal(gateway.auth.token, token);
   assert.equal(gateway.port, port);
   assert.equal(gateway.bind, "loopback");
   assert.equal(cron.enabled, false);
-  assert.equal(agents.defaults.heartbeat.every, "0m");
+  assert.equal(agents.defaults.heartbeat, undefined);
 }
 async function databaseIntegrity(prefix: string, release: Release, sessionId: string) {
   const helper = pathToFileURL(
