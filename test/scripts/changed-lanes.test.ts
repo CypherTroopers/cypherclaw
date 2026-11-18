@@ -40,6 +40,7 @@ import { resolveTestNodeExecPath } from "../../src/test-utils/node-process.js";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 import { createNestedGitEnv } from "../helpers/temp-repo.js";
 import { preparedScriptWrapperEnv } from "./prepared-script-wrapper.test-support.js";
+import { copyOxlintConfigFixture } from "./test-helpers.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 const repoRoot = process.cwd();
@@ -151,8 +152,8 @@ function createGitRepo(prefix: string) {
 
 function createRootTestLintFixture() {
   const dir = createGitRepo("openclaw-changed-root-lint-");
+  copyOxlintConfigFixture(dir);
   for (const file of [
-    ".oxlintrc.json",
     "tsconfig.json",
     "test/tsconfig.json",
     "test/tsconfig/tsconfig.test.json",
@@ -269,6 +270,7 @@ function runChangedCheckWithRecordedCommands(
   failingCommand: string | null,
   paths = ["src/gateway/server-runtime-state.ts"],
   cwd = repoRoot,
+  options: { delegateCompilers?: boolean; failureCode?: number } = {},
 ) {
   const dir = tempDirs.make("openclaw-changed-check-order-");
   const binDir = path.join(dir, "bin");
@@ -291,7 +293,7 @@ exports.start = (bin, args) => {
 exports.result = (bin, args) => {
   if (bin === "pnpm" && args[0] === ${JSON.stringify(failingCommand)}) {
     console.error("Synthetic check failure: " + args[0]);
-    return 23;
+    return ${options.failureCode ?? 23};
   }
   return 0;
 };
@@ -317,7 +319,7 @@ if (require.main === module) {
   }
   const result = runRepoScript(
     "scripts/check-changed.mjs",
-    ["--", ...paths],
+    [...(options.delegateCompilers ? ["--delegate-compilers"] : []), "--", ...paths],
     syntheticCoreTestOwnerEnv(
       dir,
       {
@@ -453,52 +455,63 @@ describe("scripts/changed-lanes", () => {
     },
   );
 
-  it.each([{ failingCommand: "tsgo:core:test" }, { failingCommand: null }])(
-    "retains serial gate execution and stops on $failingCommand before broad audits",
-    ({ failingCommand }) => {
-      const { events, paths, result } = runChangedCheckWithRecordedCommands(failingCommand);
-      expect(result.error, result.stderr).toBeUndefined();
-      expect(result.signal, result.stderr).toBeNull();
-      expect(result.status, result.stderr).toBe(failingCommand === null ? 0 : 23);
-      const commands = events.filter((event) => event.event === "start");
-      const planned = createChangedCheckPlan(
-        detectChangedLanesForPaths({ paths, base: "HEAD", staged: true }),
-      ).commands.map((command) => ({
-        bin: command.bin ?? "pnpm",
-        args: command.args,
-      }));
-      const end =
-        failingCommand === null
-          ? planned.length
-          : planned.findIndex((command) => command.args[0] === failingCommand) + 1;
-      expect(commands.map(({ bin, args }) => ({ bin, args }))).toEqual(planned.slice(0, end));
-      expect(events).toEqual(
-        commands.flatMap(({ bin, args }) => [
-          { event: "start", bin, args },
-          { event: "finish", bin, args },
-        ]),
+  it.each([
+    { delegateCompilers: false, failureCode: 0 },
+    { delegateCompilers: false, failureCode: 23 },
+    ...[23, 124, 143].map((failureCode) => ({ delegateCompilers: true, failureCode })),
+  ])("preserves serial ownership and status for %j", ({ delegateCompilers, failureCode }) => {
+    const failingCommand = failureCode === 0 ? null : "check:no-conflict-markers";
+    const { events, paths, result } = runChangedCheckWithRecordedCommands(
+      failingCommand,
+      undefined,
+      undefined,
+      { delegateCompilers, failureCode },
+    );
+    expect(result.error, result.stderr).toBeUndefined();
+    expect(result.signal, result.stderr).toBeNull();
+    expect(result.status, result.stderr).toBe(failureCode);
+    const plan = createChangedCheckPlan(
+      detectChangedLanesForPaths({ paths, base: "HEAD", staged: true }),
+      { delegateCompilers },
+    );
+    if (delegateCompilers) {
+      expect(plan.delegatedTypeGraphs).toEqual(["core"]);
+    }
+    const planned = plan.commands.map(({ bin, args }) => ({ bin: bin ?? "pnpm", args }));
+    const admitted =
+      failureCode === 124 || failureCode === 143
+        ? planned.slice(0, planned.findIndex(({ args }) => args[0] === failingCommand) + 1)
+        : planned;
+    const starts = events.filter(({ event }) => event === "start");
+    expect(starts.map(({ bin, args }) => ({ bin, args }))).toEqual(admitted);
+    expect(events).toEqual(
+      admitted.flatMap(({ bin, args }) => [
+        { event: "start", bin, args },
+        { event: "finish", bin, args },
+      ]),
+    );
+    if (failingCommand) {
+      expect(result.stderr).toContain("Synthetic check failure: " + failingCommand);
+    }
+    if (delegateCompilers) {
+      const compilers = starts.filter(({ args }) => args[0]?.startsWith("tsgo:"));
+      expect(compilers.map(({ bin, args }) => ({ bin, args }))).toEqual(
+        failureCode === 23 ? [{ bin: "pnpm", args: ["tsgo:core:test"] }] : [],
       );
-      const broadAudits = commands.filter(({ args }) =>
-        args.some((arg) =>
-          [
-            "check:coercion-helpers",
-            "check:deprecated-api-usage",
-            "scripts/check-deadcode-exports.mts",
-          ].includes(arg),
-        ),
-      );
-      if (failingCommand !== null) {
-        expect(result.stderr).toContain(`Synthetic check failure: ${failingCommand}`);
-        expect(broadAudits).toEqual([]);
-      } else {
-        expect(broadAudits).toHaveLength(3);
-        const lastTypecheck = commands.findLastIndex(({ args }) => args[0]?.startsWith("tsgo:"));
-        for (const audit of broadAudits) {
-          expect(commands.indexOf(audit)).toBeGreaterThan(lastTypecheck);
-        }
+    } else {
+      const auditOwners = new Set([
+        "check:coercion-helpers",
+        "check:deprecated-api-usage",
+        "scripts/check-deadcode-exports.mts",
+      ]);
+      const broadAudits = starts.filter(({ args }) => args.some((arg) => auditOwners.has(arg)));
+      expect(broadAudits).toHaveLength(3);
+      const lastTypecheck = starts.findLastIndex(({ args }) => args[0]?.startsWith("tsgo:"));
+      for (const audit of broadAudits) {
+        expect(starts.indexOf(audit)).toBeGreaterThan(lastTypecheck);
       }
-    },
-  );
+    }
+  });
 
   it.each([
     {
@@ -962,6 +975,34 @@ describe("scripts/changed-lanes", () => {
       }
     },
   );
+
+  it("keeps non-core release tooling from widening targeted core lint", () => {
+    const commands = expectDefined(
+      createTargetedCoreLintCommands(
+        [
+          "src/agents/agent-tools.ts",
+          ".agents/skills/openclaw-changelog-update/scripts/verify-release-notes.mjs",
+          ".github/workflows/full-release-validation.yml",
+          "test/vitest/vitest.database-worker-core-paths.mjs",
+        ],
+        { PATH: "/usr/bin" },
+        { fileExists: () => true },
+      ),
+      "core lint commands",
+    );
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.args.slice(3)).toEqual(["src/agents/agent-tools.ts"]);
+  });
+
+  it("keeps Plugin SDK core changes on extension typechecking without full extension lint", () => {
+    const plan = createChangedCheckPlan(detectChangedLanes(["src/plugin-sdk/core.ts"]), {
+      env: { PATH: "/usr/bin" },
+    });
+
+    expect(plan.commands.map((command) => command.args[0])).toContain("tsgo:extensions");
+    expect(plan.commands.map((command) => command.args[0])).not.toContain("lint:extensions");
+  });
 
   it("bounds encoded core lint commands without dropping long Unicode paths on POSIX", () => {
     const targets = Array.from(

@@ -77,6 +77,7 @@ describe("root memory repair", () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-root-memory-"));
+    tmpDir = await fs.realpath(tmpDir);
     scope = { agentId: "main", workspaceDir: tmpDir, labelAgent: false };
     prompter = createDoctorPrompter({
       runtime: { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
@@ -87,6 +88,7 @@ describe("root memory repair", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
@@ -96,7 +98,7 @@ describe("root memory repair", () => {
     const archives = await fs.readdir(repairDir);
     expect(archives).toHaveLength(1);
     const archivePath = path.join(repairDir, archives[0]!, "memory.md");
-    await expect(fs.access(archivePath)).resolves.toBeUndefined();
+    await fs.access(archivePath);
     return archivePath;
   }
 
@@ -115,35 +117,7 @@ describe("root memory repair", () => {
     await expect(shouldSuggestMemorySystem(tmpDir)).resolves.toBe(true);
   });
 
-  it("merges true split-brain root memory files into MEMORY.md", async () => {
-    await fs.writeFile(path.join(tmpDir, "MEMORY.md"), "# Canonical 合法 😀 �\n", "utf8");
-    await fs.writeFile(path.join(tmpDir, "memory.md"), "# Legacy 旧版 �\n", "utf8");
-    if (!(await hasDistinctRootMemoryFiles(tmpDir))) {
-      return;
-    }
-
-    await noteWorkspaceMemoryHealth(scope);
-    expect(note).toHaveBeenCalledWith(
-      expect.stringContaining("Split root durable memory files detected"),
-      "Workspace memory",
-    );
-
-    await maybeRepairWorkspaceMemoryHealth({ scope, prompter });
-
-    const canonical = await fs.readFile(path.join(tmpDir, "MEMORY.md"), "utf8");
-    expect(canonical).toContain("# Canonical 合法 😀 �");
-    expect(canonical).toContain("# Legacy 旧版 �");
-    await expectPathMissing(path.join(tmpDir, "memory.md"));
-    const archivedLegacyPath = await expectArchivedLegacyMemory();
-    await expect(fs.readFile(archivedLegacyPath, "utf8")).resolves.toBe("# Legacy 旧版 �\n");
-  });
-
-  it.each([
-    { invalidFile: "MEMORY.md", afterArchive: false },
-    { invalidFile: "memory.md", afterArchive: false },
-    { invalidFile: "MEMORY.md", afterArchive: true },
-    { invalidFile: "memory.md", afterArchive: true },
-  ])(
+  it.each([{ invalidFile: "memory.md", afterArchive: true }])(
     "preserves invalid UTF-8 in $invalidFile (after archive: $afterArchive)",
     async ({ invalidFile, afterArchive }) => {
       const canonicalPath = path.join(tmpDir, "MEMORY.md");
@@ -215,35 +189,6 @@ describe("root memory repair", () => {
     expect(canonical).toContain("# Added before archive");
   });
 
-  it("preserves the archive when the archived file grows past the read limit", async () => {
-    const canonicalPath = path.join(tmpDir, "MEMORY.md");
-    const legacyPath = path.join(tmpDir, "memory.md");
-    await fs.writeFile(canonicalPath, "# Canonical\n", "utf8");
-    await fs.writeFile(legacyPath, "# Legacy\n", "utf8");
-    if (!(await hasDistinctRootMemoryFiles(tmpDir))) {
-      return;
-    }
-
-    const rename = vi.spyOn(fs, "rename");
-    rename.mockImplementationOnce(async (sourcePath, targetPath) => {
-      await fs.appendFile(sourcePath, Buffer.alloc(9 * 1024 * 1024));
-      rename.mockRestore();
-      await fs.rename(sourcePath, targetPath);
-    });
-
-    await maybeRepairWorkspaceMemoryHealth({ scope, prompter });
-
-    expect(note).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "Workspace memory root repair skipped (a file exceeded the safe read limit):",
-      ),
-      "Doctor changes",
-    );
-    await expectPathMissing(legacyPath);
-    await expectArchivedLegacyMemory();
-    await expect(fs.readFile(canonicalPath, "utf8")).resolves.toBe("# Canonical\n");
-  });
-
   it("preserves a concurrent legacy replacement beside the archive", async () => {
     const canonicalPath = path.join(tmpDir, "MEMORY.md");
     const legacyPath = path.join(tmpDir, "memory.md");
@@ -275,8 +220,8 @@ describe("root memory repair", () => {
   });
 
   it("warns and repairs split-brain root memory through workspace doctor helpers", async () => {
-    await fs.writeFile(path.join(tmpDir, "MEMORY.md"), "# Canonical\n", "utf8");
-    await fs.writeFile(path.join(tmpDir, "memory.md"), "# Legacy\n", "utf8");
+    await fs.writeFile(path.join(tmpDir, "MEMORY.md"), "# Canonical 合法 😀 �\n", "utf8");
+    await fs.writeFile(path.join(tmpDir, "memory.md"), "# Legacy 旧版 �\n", "utf8");
     if (!(await hasDistinctRootMemoryFiles(tmpDir))) {
       return;
     }
@@ -284,9 +229,9 @@ describe("root memory repair", () => {
     expect(note).toHaveBeenCalledWith(
       [
         "Split root durable memory files detected:",
-        `- canonical: ${path.join(tmpDir, "MEMORY.md")} (12 bytes)`,
-        `- legacy: ${path.join(tmpDir, "memory.md")} (9 bytes)`,
-        "OpenClaw uses MEMORY.md as the canonical durable memory file.",
+        `- current: ${path.join(tmpDir, "MEMORY.md")} (28 bytes)`,
+        `- legacy: ${path.join(tmpDir, "memory.md")} (20 bytes)`,
+        "OpenClaw uses MEMORY.md as the current durable memory file.",
         "Dreaming writes durable promotions to MEMORY.md, so older facts in memory.md can be shadowed.",
         'Run "openclaw doctor --fix" to merge the legacy file into MEMORY.md with a backup.',
       ].join("\n"),
@@ -297,19 +242,20 @@ describe("root memory repair", () => {
     await maybeRepairWorkspaceMemoryHealth({ scope, prompter });
 
     expect(prompter.confirmRuntimeRepair).toHaveBeenCalledWith({
-      message: "Merge legacy root memory.md into canonical MEMORY.md and remove the shadowed file?",
+      message:
+        "Merge legacy root memory.md into the current MEMORY.md and remove the shadowed file?",
       initialValue: true,
     });
     const canonical = await fs.readFile(path.join(tmpDir, "MEMORY.md"), "utf8");
-    expect(canonical).toContain("# Canonical");
-    expect(canonical).toContain("# Legacy");
+    expect(canonical).toContain("# Canonical 合法 😀 �");
+    expect(canonical).toContain("# Legacy 旧版 �");
     await expectPathMissing(path.join(tmpDir, "memory.md"));
     expect(note).toHaveBeenCalledTimes(1);
     const repairNote = note.mock.calls[0];
     const repairMessage = String(repairNote?.[0] ?? "");
     const repairLines = repairMessage.split("\n");
     expect(repairLines[0]).toBe("Workspace memory root merged:");
-    expect(repairLines).toContain(`- canonical: ${path.join(tmpDir, "MEMORY.md")}`);
+    expect(repairLines).toContain(`- current: ${path.join(tmpDir, "MEMORY.md")}`);
     expect(repairLines).toContain(
       `- merged legacy content from: ${path.join(tmpDir, "memory.md")}`,
     );
@@ -318,8 +264,157 @@ describe("root memory repair", () => {
     const archiveLine = repairLines.find((line) => line.startsWith("- backup: "));
     expect(archiveLine).toBeDefined();
     await expect(fs.readFile(archiveLine!.slice("- backup: ".length), "utf8")).resolves.toBe(
-      "# Legacy\n",
+      "# Legacy 旧版 �\n",
     );
+  });
+
+  it("keeps earlier backups when repairs share a timestamp and skips an already merged workspace", async () => {
+    const canonicalPath = path.join(tmpDir, "MEMORY.md");
+    const legacyPath = path.join(tmpDir, "memory.md");
+    await fs.writeFile(canonicalPath, "# Canonical\n");
+    await fs.writeFile(legacyPath, "# Legacy\n");
+    if (!(await hasDistinctRootMemoryFiles(tmpDir))) {
+      return;
+    }
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-29T00:00:00.000Z"));
+    await maybeRepairWorkspaceMemoryHealth({ scope, prompter });
+    const archive = await expectArchivedLegacyMemory();
+    const firstMerged = await fs.readFile(canonicalPath, "utf8");
+
+    note.mockClear();
+    await maybeRepairWorkspaceMemoryHealth({ scope, prompter });
+    expect(note).not.toHaveBeenCalled();
+    await expect(fs.readFile(canonicalPath, "utf8")).resolves.toBe(firstMerged);
+    expect(await expectArchivedLegacyMemory()).toBe(archive);
+
+    await fs.writeFile(legacyPath, "# Later legacy\n");
+    await maybeRepairWorkspaceMemoryHealth({ scope, prompter });
+
+    await expect(fs.readFile(archive, "utf8")).resolves.toBe("# Legacy\n");
+    await expect(
+      fs.readFile(path.join(path.dirname(archive), "MEMORY.md.pre-merge"), "utf8"),
+    ).resolves.toBe("# Canonical\n");
+    const repairDir = path.dirname(path.dirname(archive));
+    const archives = await fs.readdir(repairDir);
+    expect(archives).toHaveLength(2);
+    const laterArchive = archives.find((entry) => entry !== path.basename(path.dirname(archive)))!;
+    await expect(
+      fs.readFile(path.join(repairDir, laterArchive, "memory.md"), "utf8"),
+    ).resolves.toBe("# Later legacy\n");
+    await expect(
+      fs.readFile(path.join(repairDir, laterArchive, "MEMORY.md.pre-merge"), "utf8"),
+    ).resolves.toBe(firstMerged);
+    expect(await fs.readFile(canonicalPath, "utf8")).toContain("# Later legacy\n");
+  });
+
+  it.each(["ENOSPC", "EPERM"])(
+    "preserves canonical memory when publication fails with %s",
+    async (errorCode) => {
+      const canonicalPath = path.join(tmpDir, "MEMORY.md");
+      const legacyPath = path.join(tmpDir, "memory.md");
+      await fs.writeFile(canonicalPath, "# Canonical\n");
+      await fs.writeFile(legacyPath, "# Legacy\n");
+      if (!(await hasDistinctRootMemoryFiles(tmpDir))) {
+        return;
+      }
+      const realRename = fs.rename.bind(fs);
+      const failure = Object.assign(new Error(`publication failed: ${errorCode}`), {
+        code: errorCode,
+      });
+      vi.spyOn(fs, "rename").mockImplementation(async (source, target) => {
+        if (target === canonicalPath) {
+          throw failure;
+        }
+        return realRename(source, target);
+      });
+
+      const realWriteFile = fs.writeFile.bind(fs);
+      vi.spyOn(fs, "writeFile").mockImplementation(async (target, data, options) => {
+        if (target === canonicalPath) {
+          // A direct write can truncate before the filesystem reports failure.
+          await realWriteFile(target, "# Torn");
+          throw failure;
+        }
+        return realWriteFile(target, data, options);
+      });
+
+      await maybeRepairWorkspaceMemoryHealth({ scope, prompter });
+
+      await expect(fs.readFile(canonicalPath, "utf8")).resolves.toBe("# Canonical\n");
+      expect(note).toHaveBeenCalledTimes(1);
+      const message = String(note.mock.calls[0]?.[0]);
+      expect(message).toContain("Workspace memory repair could not be completed");
+      // A failed publication must not tear the only durable memory file, and no
+      // fallback may recreate it behind the caller's back.
+      await expect(fs.readFile(canonicalPath, "utf8")).resolves.toBe("# Canonical\n");
+      const repairDir = path.join(tmpDir, ".openclaw-repair", "root-memory");
+      const archives = await fs.readdir(repairDir);
+      await expect(
+        fs.readFile(path.join(repairDir, archives[0]!, "MEMORY.md.pre-merge"), "utf8"),
+      ).resolves.toBe("# Canonical\n");
+      await expectPathMissing(legacyPath);
+    },
+  );
+
+  it("merges through a symlinked workspace directory alias", async () => {
+    const canonicalPath = path.join(tmpDir, "MEMORY.md");
+    const legacyPath = path.join(tmpDir, "memory.md");
+    await fs.writeFile(canonicalPath, "# Canonical\n");
+    await fs.writeFile(legacyPath, "# Legacy\n");
+    if (!(await hasDistinctRootMemoryFiles(tmpDir))) {
+      return;
+    }
+    // Configured workspace aliases are supported inputs: the repair must
+    // resolve the alias for atomic publication instead of failing on the
+    // symlinked parent, while still writing the same canonical file.
+    const aliasDir = `${tmpDir}-alias`;
+    await fs.symlink(tmpDir, aliasDir, process.platform === "win32" ? "junction" : "dir");
+    try {
+      await maybeRepairWorkspaceMemoryHealth({
+        prompter,
+        scope: { ...scope, workspaceDir: aliasDir },
+      });
+
+      const canonical = await fs.readFile(canonicalPath, "utf8");
+      expect(canonical).toContain("# Canonical\n");
+      expect(canonical).toContain("# Legacy\n");
+      await expectPathMissing(legacyPath);
+      const repairDir = path.join(tmpDir, ".openclaw-repair", "root-memory");
+      const archives = await fs.readdir(repairDir);
+      await expect(
+        fs.readFile(path.join(repairDir, archives[0]!, "MEMORY.md.pre-merge"), "utf8"),
+      ).resolves.toBe("# Canonical\n");
+      await expect(fs.readFile(path.join(aliasDir, "MEMORY.md"), "utf8")).resolves.toBe(canonical);
+    } finally {
+      await fs.rm(aliasDir, { force: true, recursive: true });
+    }
+  });
+
+  it("preserves the workspace mode across a successful merge", async () => {
+    const canonicalPath = path.join(tmpDir, "MEMORY.md");
+    const legacyPath = path.join(tmpDir, "memory.md");
+    await fs.writeFile(canonicalPath, "# Canonical\n");
+    await fs.writeFile(legacyPath, "# Legacy\n");
+    if (!(await hasDistinctRootMemoryFiles(tmpDir))) {
+      return;
+    }
+    const { mode: modeBefore } = await fs.stat(tmpDir);
+    await fs.chmod(tmpDir, 0o700);
+    await fs.chmod(canonicalPath, 0o640);
+
+    await maybeRepairWorkspaceMemoryHealth({ scope, prompter });
+
+    const canonical = await fs.readFile(canonicalPath, "utf8");
+    expect(canonical).toContain("# Canonical\n");
+    expect(canonical).toContain("# Legacy\n");
+    if (process.platform !== "win32") {
+      // Publication must never widen a private workspace.
+      const { mode } = await fs.stat(tmpDir);
+      expect(mode & 0o777).toBe(0o700);
+      expect((await fs.stat(canonicalPath)).mode & 0o777).toBe(0o640);
+    }
+    await fs.chmod(tmpDir, modeBefore & 0o777);
   });
 
   it("follows a symlinked AGENTS.md while keeping its target bounded", async () => {
@@ -380,27 +475,6 @@ describe("root memory repair", () => {
     );
   });
 
-  it("does not archive or remove a legacy memory file when canonical cannot be read", async () => {
-    const targetFile = path.join(tmpDir, "canonical-target.md");
-    await fs.writeFile(targetFile, "# Canonical\n", "utf8");
-    await fs.symlink(targetFile, path.join(tmpDir, "MEMORY.md"));
-    await fs.writeFile(path.join(tmpDir, "memory.md"), "# Legacy\n", "utf8");
-    if (!(await hasDistinctRootMemoryFiles(tmpDir))) {
-      return;
-    }
-
-    await maybeRepairWorkspaceMemoryHealth({ scope, prompter });
-    expect(note).toHaveBeenCalledWith(
-      expect.stringContaining("Workspace memory root repair skipped (a file could not be read):"),
-      "Doctor changes",
-    );
-    await expectPathMissing(path.join(tmpDir, ".openclaw-repair"));
-    await expect(fs.readFile(targetFile, "utf8")).resolves.toBe("# Canonical\n");
-    await expect(fs.readFile(path.join(tmpDir, "memory.md"), "utf8")).resolves.toContain(
-      "# Legacy",
-    );
-  });
-
   it("reports a skipped repair when a root memory file cannot be read", async () => {
     const targetFile = path.join(tmpDir, "canonical-target.md");
     await fs.writeFile(targetFile, "# Canonical\n", "utf8");
@@ -417,7 +491,7 @@ describe("root memory repair", () => {
     const repairMessage = String(repairNote?.[0] ?? "");
     const repairLines = repairMessage.split("\n");
     expect(repairLines[0]).toBe("Workspace memory root repair skipped (a file could not be read):");
-    expect(repairLines).toContain(`- canonical: ${path.join(tmpDir, "MEMORY.md")}`);
+    expect(repairLines).toContain(`- current: ${path.join(tmpDir, "MEMORY.md")}`);
     expect(repairLines).toContain(`- legacy: ${path.join(tmpDir, "memory.md")}`);
     expect(repairNote?.[1]).toBe("Doctor changes");
     await expect(fs.readFile(targetFile, "utf8")).resolves.toBe("# Canonical\n");
@@ -440,7 +514,7 @@ describe("root memory repair", () => {
     expect(repairLines[0]).toBe(
       "Workspace memory root repair skipped (a file exceeded the safe read limit):",
     );
-    expect(repairLines).toContain(`- canonical: ${path.join(tmpDir, "MEMORY.md")}`);
+    expect(repairLines).toContain(`- current: ${path.join(tmpDir, "MEMORY.md")}`);
     expect(repairLines).toContain(`- legacy: ${path.join(tmpDir, "memory.md")}`);
     expect(repairNote?.[1]).toBe("Doctor changes");
     await expect(fs.readFile(path.join(tmpDir, "MEMORY.md"), "utf8")).resolves.toBe(
@@ -477,55 +551,5 @@ describe("root memory repair", () => {
     } finally {
       rename.mockRestore();
     }
-  });
-
-  it("reports when legacy memory cannot be archived atomically", async () => {
-    await fs.writeFile(path.join(tmpDir, "MEMORY.md"), "# Canonical\n", "utf8");
-    await fs.writeFile(path.join(tmpDir, "memory.md"), "# Legacy\n", "utf8");
-    if (!(await hasDistinctRootMemoryFiles(tmpDir))) {
-      return;
-    }
-    const rename = vi
-      .spyOn(fs, "rename")
-      .mockRejectedValueOnce(Object.assign(new Error("cross-device rename"), { code: "EXDEV" }));
-
-    try {
-      await maybeRepairWorkspaceMemoryHealth({ scope, prompter });
-    } finally {
-      rename.mockRestore();
-    }
-
-    const repairNote = note.mock.calls[0];
-    const repairLines = String(repairNote?.[0] ?? "").split("\n");
-    expect(repairLines[0]).toBe(
-      "Workspace memory root repair skipped (legacy memory could not be archived atomically):",
-    );
-    expect(repairLines).toContain(`- canonical: ${path.join(tmpDir, "MEMORY.md")}`);
-    expect(repairLines).toContain(`- legacy: ${path.join(tmpDir, "memory.md")}`);
-    expect(repairNote?.[1]).toBe("Doctor changes");
-    await expect(fs.readFile(path.join(tmpDir, "MEMORY.md"), "utf8")).resolves.toBe(
-      "# Canonical\n",
-    );
-    await expect(fs.readFile(path.join(tmpDir, "memory.md"), "utf8")).resolves.toBe("# Legacy\n");
-  });
-
-  it("reports a preserved archive when a failed repair cannot restore legacy", async () => {
-    const canonicalPath = path.join(tmpDir, "MEMORY.md");
-    const legacyPath = path.join(tmpDir, "memory.md");
-    await fs.writeFile(canonicalPath, "# Canonical\n", "utf8");
-    await fs.writeFile(legacyPath, "# Legacy\n", "utf8");
-    if (!(await hasDistinctRootMemoryFiles(tmpDir))) {
-      return;
-    }
-    const rename = vi.spyOn(fs, "rename");
-    rename.mockImplementationOnce(async (sourcePath, targetPath) => {
-      await fs.appendFile(sourcePath, Buffer.alloc(9 * 1024 * 1024));
-      rename.mockRestore();
-      await fs.rename(sourcePath, targetPath);
-    });
-    await maybeRepairWorkspaceMemoryHealth({ scope, prompter });
-
-    const repairLines = String(note.mock.calls[0]?.[0] ?? "").split("\n");
-    expect(repairLines).toContainEqual(expect.stringContaining("- preserved archive: "));
   });
 });

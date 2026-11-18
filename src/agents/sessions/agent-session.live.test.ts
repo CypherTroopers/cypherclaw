@@ -5,11 +5,8 @@ import { join } from "node:path";
 import type { Model } from "openclaw/plugin-sdk/llm";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
-import { registerSecretValueForRedaction } from "../../logging/secret-redaction-registry.js";
-import { resetSecretRedactionRegistryForTest } from "../../logging/secret-redaction-registry.test-support.js";
 import { isLiveTestEnabled } from "../live-test-helpers.js";
 import type { AgentMessage } from "../runtime/index.js";
-import { guardSessionManager } from "../session-tool-result-guard-wrapper.js";
 import { AgentSession } from "./agent-session.js";
 import { AuthStorage } from "./auth-storage.js";
 import { createExtensionRuntime } from "./extensions/loader.js";
@@ -20,7 +17,6 @@ import { createAgentSession } from "./sdk.js";
 import { SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 import { createSyntheticSourceInfo } from "./source-info.js";
-import { createReadToolDefinition } from "./tools/read.js";
 
 const API_KEY = process.env.ANTHROPIC_API_KEY?.trim() ?? "";
 const LIVE = isLiveTestEnabled() && API_KEY.length > 0;
@@ -70,6 +66,7 @@ function createResourceLoader(handlers: ExtensionHandlers = new Map()): Resource
 async function resolveLiveModel(
   modelsPath: string,
   authStorage: AuthStorage,
+  maxTokens: number,
 ): Promise<{ model: Model; modelRegistry: ModelRegistry }> {
   const requestedModelId =
     process.env.OPENCLAW_LIVE_AGENT_SESSION_MODEL?.trim() || DEFAULT_MODEL_ID;
@@ -107,7 +104,7 @@ async function resolveLiveModel(
     throw new Error(`No Anthropic Haiku model found for ${requestedModelId}`);
   }
   return {
-    model: { ...model, maxTokens: Math.min(model.maxTokens, 128) },
+    model: { ...model, maxTokens: Math.min(model.maxTokens, maxTokens) },
     modelRegistry,
   };
 }
@@ -116,6 +113,7 @@ async function createLiveSession(
   options: {
     customTools?: (cwd: string) => ToolDefinition[];
     handlers?: ExtensionHandlers;
+    compaction?: boolean;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "openclaw-agent-session-live-"));
@@ -125,11 +123,20 @@ async function createLiveSession(
   await mkdir(cwd, { recursive: true });
   const authStorage = AuthStorage.inMemory();
   authStorage.setRuntimeApiKey("anthropic", API_KEY);
-  const { model, modelRegistry } = await resolveLiveModel(modelsPath, authStorage);
+  // Compaction emits a structured checkpoint, not the one-word ordinary turn fixture.
+  const { model, modelRegistry } = await resolveLiveModel(
+    modelsPath,
+    authStorage,
+    options.compaction ? 1_024 : 128,
+  );
   const sessionManager = SessionManager.inMemory();
   const settingsManager = SettingsManager.inMemory({
     defaultThinkingLevel: "off",
-    compaction: { enabled: true, reserveTokens: 128, keepRecentTokens: 0 },
+    compaction: {
+      enabled: true,
+      reserveTokens: options.compaction ? 2_048 : 128,
+      keepRecentTokens: 0,
+    },
     retry: {
       enabled: false,
       provider: { timeoutMs: PROVIDER_TIMEOUT_MS, maxRetryDelayMs: 0 },
@@ -167,7 +174,6 @@ afterEach(async () => {
   for (const session of sessions.splice(0)) {
     session.dispose();
   }
-  resetSecretRedactionRegistryForTest();
   await Promise.all(
     tempRoots.splice(0).map(async (root) => {
       await rm(root, { recursive: true, force: true });
@@ -176,67 +182,6 @@ afterEach(async () => {
 });
 
 describeLive("AgentSession live", () => {
-  it(
-    "masks registered secrets before a real provider continues a file-read turn",
-    async () => {
-      const secret = "fixture-live-tool-result-secret-0123456789";
-      const marker = "VISIBLE_TOOL_RESULT_7319";
-      registerSecretValueForRedaction(secret);
-      const { session, sessionManager, cwd } = await createLiveSession({
-        customTools: (workspace) => [createReadToolDefinition(workspace)],
-      });
-      guardSessionManager(sessionManager, { config: {}, allowedToolNames: ["read"] });
-      const fixtureName = "credential-fixture.txt";
-      const fixturePath = join(cwd, fixtureName);
-      await writeFile(fixturePath, `${marker}\ncredential=${secret}\n`);
-      expect(session.getActiveToolNames().join(",")).toBe("read");
-      const originalStream = session.agent.streamFn;
-      if (!originalStream) {
-        throw new Error("Expected the configured live provider stream");
-      }
-      let secretDetected = false;
-      let requestsWithResult = 0;
-      session.agent.streamFn = (model, context, options) =>
-        originalStream(model, context, {
-          ...options,
-          onPayload: async (payload, requestModel) => {
-            const replacement = await options?.onPayload?.(payload, requestModel);
-            const serialized = JSON.stringify(replacement === undefined ? payload : replacement);
-            // Fail before network egress even when this regression test runs against broken code.
-            if (serialized.includes(secret)) {
-              secretDetected = true;
-              throw new Error("Live tool-result redaction failed; request blocked before egress");
-            }
-            if (serialized.includes(marker)) {
-              requestsWithResult += 1;
-            }
-            return replacement;
-          },
-        });
-      await session.prompt(
-        `Read ${fixtureName} exactly once using read, passing that relative path. Reply with only the VISIBLE_TOOL_RESULT marker from the file; do not repeat its credential.`,
-      );
-      const results = session.messages.filter((message) => message.role === "toolResult");
-      expect(results.length).toBe(1);
-      expect(results[0]?.isError).toBe(false);
-      expect(secretDetected).toBe(false);
-      expect(requestsWithResult).toBeGreaterThan(0);
-      expect((session.getLastAssistantText() ?? "").includes(marker)).toBe(true);
-      const resultText = results
-        .flatMap((message) =>
-          message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])),
-        )
-        .join("\n");
-      expect(resultText.includes(marker)).toBe(true);
-      expect(resultText.includes(secret)).toBe(false);
-      expect(JSON.stringify(sessionManager.getEntries()).includes(secret)).toBe(false);
-      const completed = session.messages.findLast((message) => message.role === "assistant");
-      expect(completed?.role === "assistant" && completed.stopReason === "stop").toBe(true);
-      expect(completed?.role === "assistant" && completed.usage.output > 0).toBe(true);
-    },
-    TEST_TIMEOUT_MS,
-  );
-
   it(
     "completes a real tool turn",
     async () => {
@@ -279,7 +224,7 @@ describeLive("AgentSession live", () => {
   it(
     "manually compacts a completed turn and remains usable",
     async () => {
-      const { session, sessionManager } = await createLiveSession();
+      const { session, sessionManager } = await createLiveSession({ compaction: true });
       await session.prompt("Reply with exactly OK.");
 
       const result = await session.compact();

@@ -7,15 +7,15 @@ import {
   validateGatewaySuspendStatusParams,
   validateGatewaySuspendHandoffParams,
 } from "../../../packages/gateway-protocol/src/index.js";
-import { waitForGatewayDrain } from "../../infra/gateway-drain.js";
 import {
-  armGatewaySuspendHandoff,
   getGatewaySuspendStatus,
   prepareGatewaySuspend,
+  requestGatewaySuspendHandoff,
   resumeGatewaySuspend,
 } from "../../infra/gateway-suspend-coordinator.js";
 import { getGatewayProcessInstanceId } from "../process-instance.js";
 import { createGatewayServerActiveWorkInspectors } from "../server-active-work.js";
+import { readGatewayRequestMutationAuthority } from "./session-mutation-guards.js";
 import type { GatewayRequestContext } from "./shared-types.js";
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 
@@ -60,7 +60,8 @@ function respondSuspendStatus(
 }
 
 export const suspendHandlers: GatewayRequestHandlers = {
-  "gateway.suspend.handoff": ({ respond, params, context }) => {
+  "gateway.suspend.handoff": async (options) => {
+    const { respond, params, context } = options;
     if (!validateGatewaySuspendHandoffParams(params)) {
       respond(false, undefined, invalidParams("gateway.suspend.handoff"));
       return;
@@ -85,13 +86,20 @@ export const suspendHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const result = armGatewaySuspendHandoff({
+    const result = await requestGatewaySuspendHandoff({
       suspensionId: params.suspensionId.trim(),
       owner,
       commit: params.commit,
+      assertCurrent: readGatewayRequestMutationAuthority(options).assertCurrent,
+      signal: options.signal,
     });
     if (!result.ok) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, result.error));
+      context.logGateway.warn("gateway.suspend.handoff refused: " + result.error.message);
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.UNAVAILABLE, result.error.message, { details: result.error.details }),
+      );
       return;
     }
     respond(true, result.value);
@@ -124,23 +132,7 @@ export const suspendHandlers: GatewayRequestHandlers = {
       return;
     }
     const suspensionId = params.suspensionId.trim();
-    // A policy check must let transient final writes settle, without interrupting
-    // admitted work or treating a drain lease as authority to stop it.
-    const settleDeadline = performance.now() + 15_000;
-    await waitForGatewayDrain(
-      () => {
-        const status = getGatewaySuspendStatus(suspensionId, params.includeLifecycle === true);
-        return {
-          idle:
-            status.status !== "draining" ||
-            !status.writeCustody?.some(({ count }) => count > 0) ||
-            performance.now() >= settleDeadline,
-        };
-      },
-      15_000,
-      { pollMs: 250 },
-    );
-    // Lease expiry, replacement, and new writes can race the awaited observation.
+    // Polling reports custody; only the handoff owner decides whether it can stop.
     const result = getGatewaySuspendStatus(suspensionId, params.includeLifecycle === true);
     respondSuspendStatus(result, context, respond, "a different gateway suspension is prepared");
   },

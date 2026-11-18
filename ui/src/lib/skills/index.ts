@@ -41,7 +41,7 @@ export type SkillsState = {
   skillsDetailTab: "overview" | "card";
   skillOperation: SkillOperation;
   skillEdits: Record<string, string>;
-  skillMessages: SkillMessageMap;
+  skillMessages: Record<string, SkillMessage>;
   clawhubSearchQuery: string;
   clawhubSearchResults: ClawHubSearchResult[] | null;
   clawhubSearchLoading: boolean;
@@ -92,8 +92,6 @@ type SkillMessage = {
   kind: "success" | "error";
   message: string;
 };
-
-export type SkillMessageMap = Record<string, SkillMessage>;
 
 function setSkillMessage(state: SkillsState, key: string, message: SkillMessage) {
   if (!key.trim()) {
@@ -243,25 +241,6 @@ export async function loadSkills(
   }
 }
 
-async function loadCurrentSkillsForOperation(
-  state: SkillsState,
-  client: GatewayBrowserClient,
-  operation: ActiveSkillOperation,
-  clearMessages = false,
-) {
-  let shouldClearMessages = clearMessages;
-  // Reconciliation can change scope while a status request is pending. Keep
-  // the operation owner until one response belongs to the current scope.
-  while (ownsSkillOperation(state, client, operation)) {
-    const isCurrentAgent = captureSkillsAgentScope(state);
-    await loadSkills(state, { clearMessages: shouldClearMessages, operation });
-    shouldClearMessages = false;
-    if (!ownsSkillOperation(state, client, operation) || isCurrentAgent()) {
-      return;
-    }
-  }
-}
-
 export async function refreshSkills(state: SkillsState, loadAgents: () => Promise<void>) {
   const client = state.client;
   if (!client || !state.connected || state.skillsLoading || state.skillOperation) {
@@ -276,7 +255,11 @@ export async function refreshSkills(state: SkillsState, loadAgents: () => Promis
     if (!ownsSkillOperation(state, client, operation)) {
       return;
     }
-    await loadCurrentSkillsForOperation(state, client, operation, true);
+    const isCurrentAgent = captureSkillsAgentScope(state);
+    await loadSkills(state, { clearMessages: true, operation });
+    if (ownsSkillOperation(state, client, operation) && !isCurrentAgent()) {
+      await loadSkills(state, { operation });
+    }
   } finally {
     releaseSkillOperation(state, operation);
   }
@@ -457,7 +440,7 @@ async function runSkillMutation(
     }
   } finally {
     if (ownsSkillOperation(state, client, operation) && !isCurrentAgent()) {
-      await loadCurrentSkillsForOperation(state, client, operation);
+      await loadSkills(state, { operation });
     }
     releaseSkillOperation(state, operation);
   }
@@ -484,6 +467,7 @@ async function runSkillConfigUpdate(
   patch: { enabled: boolean } | { apiKey: string },
   message: string,
   canDispatch: () => boolean,
+  dispatchError = "Access changed before the skill update started.",
 ) {
   await runSkillMutation(state, { kind: "skill", skillKey }, async (client) => {
     const configPatch = { skillKey, ...patch };
@@ -493,15 +477,17 @@ async function runSkillConfigUpdate(
       state.runtimeConfig,
       client,
       (current) => current.request("skills.update", configPatch),
-      { canDispatch, dispatchError: "Access changed before the skill update started." },
+      { canDispatch, dispatchError },
     );
     return { kind: "success", message: refreshError ? `${message}\n${refreshError}` : message };
   });
 }
 
+/** `replaceable` says whether the stored key may be typed over; undefined until it is known. */
 export async function saveSkillApiKey(
   state: SkillsState,
   skillKey: string,
+  replaceable: () => boolean | undefined,
   canDispatch: () => boolean = () => true,
 ) {
   // Blank skills.update API keys clear credentials; this UI only replaces them.
@@ -509,12 +495,25 @@ export async function saveSkillApiKey(
   if (!apiKey) {
     return;
   }
+  const current = replaceable();
+  if (current !== true) {
+    setSkillMessage(state, skillKey, {
+      kind: "error",
+      message:
+        current === undefined
+          ? "API key not saved — the configuration hasn't loaded yet. Reopen the skill and try again."
+          : `API key not saved — skills.entries.${skillKey}.apiKey is set by a SecretRef or environment variable. Change it in Settings Raw mode or openclaw.json.`,
+    });
+    return;
+  }
   await runSkillConfigUpdate(
     state,
     skillKey,
     { apiKey },
     `API key saved — stored in openclaw.json (skills.entries.${skillKey})`,
-    canDispatch,
+    // Rechecked right before dispatch: a flushed Settings draft may have stored a reference.
+    () => canDispatch() && replaceable() === true,
+    "API key not saved — access or the stored key changed while saving. Reopen the skill to see how the key is stored; change a SecretRef or environment key in Settings Raw mode.",
   );
 }
 

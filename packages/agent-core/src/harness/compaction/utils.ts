@@ -341,19 +341,33 @@ export function findLatestCompactionUserMessage(
   );
 }
 
+const CREDENTIAL_PATTERNS = [
+  /\b(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[abprs]|glpat|AKIA|AIza)[-_A-Za-z0-9]{16,}/g,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/g,
+  /\b(?:api[_-]?key|token|secret|password|passwd|authorization|bearer)\b\s*[:=]\s*["']?[^\s"']{8,}/gi,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+];
+
+/**
+ * Text quoted verbatim into compaction artifacts. Summaries are persisted and replayed
+ * on every later request, so credential shapes are redacted here, before any caller
+ * clips an excerpt that could leave a fragment. The transcript itself stays raw.
+ */
 export function extractCompactionMessageText(message: AgentMessage): string {
   const content = Reflect.get(message, "content");
-  if (typeof content === "string") {
-    return content.trim();
-  }
-  return Array.isArray(content)
-    ? content
-        .flatMap((block) => {
-          const text = block && typeof block === "object" ? Reflect.get(block, "text") : undefined;
-          return typeof text === "string" && text.trim() ? [text.trim()] : [];
-        })
-        .join("\n")
-    : "";
+  const text =
+    typeof content === "string"
+      ? content.trim()
+      : Array.isArray(content)
+        ? content
+            .flatMap((block) => {
+              const value =
+                block && typeof block === "object" ? Reflect.get(block, "text") : undefined;
+              return typeof value === "string" && value.trim() ? [value.trim()] : [];
+            })
+            .join("\n")
+        : "";
+  return CREDENTIAL_PATTERNS.reduce((value, pattern) => value.replace(pattern, "[redacted]"), text);
 }
 
 /** Legacy producers cannot search past an independent input for a pending ask. */
@@ -696,4 +710,35 @@ export function serializeConversationWithinBudget(
     }
   }
   return { text: parts.join(ENTRY_SEPARATOR), omittedEntries, trimmedEntries };
+}
+
+export function removeGeneratedCompactionSection(
+  summary: string | undefined,
+  section: string,
+): string | undefined {
+  if (!summary) {
+    return summary;
+  }
+  if (summary.startsWith(section)) {
+    return summary.slice(section.length);
+  }
+  const delimitedSection = `\n\n${section}`;
+  const sectionIndex = summary.indexOf(delimitedSection);
+  return sectionIndex < 0
+    ? summary
+    : `${summary.slice(0, sectionIndex)}\n\n${summary.slice(sectionIndex + delimitedSection.length)}`;
+}
+
+/** Authoritative request owners clear stale model-written asks without rewriting other sections. */
+export function clearCompactionPendingAskSection(summary: string): string {
+  const heading = /^## Pending user asks[ \t]*$/mu.exec(summary);
+  if (!heading) {
+    return summary;
+  }
+  const contentStart = heading.index + heading[0].length;
+  const remaining = summary.slice(contentStart + 1);
+  const nextHeading = /^##[ \t]+\S.*$/mu.exec(remaining);
+  return `${summary.slice(0, contentStart)}\nNone.${
+    nextHeading ? `\n${remaining.slice(nextHeading.index)}` : ""
+  }`;
 }

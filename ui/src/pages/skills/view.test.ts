@@ -1,19 +1,19 @@
 /* @vitest-environment jsdom */
 
 import { expectDefined } from "@openclaw/normalization-core";
-import { render } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SkillStatusReport } from "../../api/types.ts";
 import { i18n } from "../../i18n/index.ts";
 import { clawhubVerdictKey } from "../../lib/skills/index.ts";
 import { getRenderedModalDialog } from "../../test-helpers/modal-dialog.ts";
+import { cleanupSkillsViews, renderSkills } from "./view.solid.test-support.tsx";
 import {
   createDialogMethodInstaller,
   createProps,
   createSkill,
   normalizeText,
 } from "./view.test-support.ts";
-import { renderSkills } from "./view.ts";
+afterEach(cleanupSkillsViews);
 
 const dialogRestores: Array<() => void> = [];
 const installDialogMethod = createDialogMethodInstaller(dialogRestores);
@@ -47,7 +47,7 @@ function createCodingAgentSkill(overrides: Parameters<typeof createSkill>[0] = {
 }
 
 function renderView(container: HTMLElement, overrides: Parameters<typeof createProps>[0] = {}) {
-  render(renderSkills(createProps(overrides)), container);
+  renderSkills(createProps(overrides), container);
 }
 
 function createLinkedSkill(ownerHandle?: string) {
@@ -121,6 +121,55 @@ describe("renderSkills", () => {
       }
     },
   );
+
+  it.each([
+    {
+      name: "literal",
+      apiKey: "__OPENCLAW_REDACTED__",
+      expected: "Stored in openclaw.json.",
+      disabled: false,
+    },
+    {
+      name: "environment",
+      apiKey: "${SET_TOKEN}",
+      expected: "From environment · SET_TOKEN",
+      disabled: true,
+    },
+    {
+      name: "reference",
+      apiKey: { source: "env", provider: "default", id: "SET_TOKEN" },
+      expected: "Set by a reference",
+      disabled: true,
+    },
+    { name: "unknown", apiKey: undefined, expected: "Key source unknown", disabled: true },
+  ])("shows and locks the $name key source", async ({ name, apiKey, expected, disabled }) => {
+    const container = createContainer();
+    installDialogMethod("showModal", function () {
+      this.setAttribute("open", "");
+    });
+    const config = { skills: { entries: { "repo-skill": { apiKey } } } };
+    renderView(container, {
+      detailKey: "repo-skill",
+      edits: { "repo-skill": "typed-not-real" },
+      apiKeyConfig: {
+        snapshot: () =>
+          name === "unknown"
+            ? null
+            : { valid: true, parsed: config, config, raw: JSON.stringify(config) },
+        error: () => null,
+        retry: () => undefined,
+      },
+    });
+    await getRenderedModalDialog(container);
+    expect(normalizeText(container)).toContain(expected);
+    expect(container.querySelector<HTMLInputElement>('input[type="password"]')?.disabled).toBe(
+      disabled,
+    );
+    const save = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => normalizeText(button) === "Save key",
+    );
+    expect(save?.disabled).toBe(disabled);
+  });
 
   it("preserves retained group identity and restores removed groups when filtering", async () => {
     const container = createContainer();
@@ -213,7 +262,9 @@ describe("renderSkills", () => {
     await Promise.resolve();
 
     expect(
-      container.querySelector<HTMLElement>("wa-switch.settings-toggle")?.hasAttribute("disabled"),
+      container
+        .querySelector<HTMLInputElement>("input.settings-toggle__input")
+        ?.matches(':disabled, [aria-disabled="true"]'),
     ).toBe(true);
     const install = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => normalizeText(button) === "Install skill-cli",
@@ -261,7 +312,7 @@ describe("renderSkills", () => {
       onInstall,
       onClawHubInstall,
     });
-    render(renderSkills(props), container);
+    renderSkills(props, container);
     await Promise.resolve();
 
     const refresh = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
@@ -270,12 +321,12 @@ describe("renderSkills", () => {
     expect(refresh?.disabled).toBe(true);
     expect(
       Array.from(
-        container.querySelectorAll<HTMLElement & { disabled: boolean }>(
-          "wa-switch.settings-toggle",
-        ),
-      ).every((toggle) => toggle.hasAttribute("disabled")),
+        container.querySelectorAll<HTMLInputElement>("input.settings-toggle__input"),
+      ).every((toggle) => toggle.matches(':disabled, [aria-disabled="true"]')),
     ).toBe(true);
-    expect(container.querySelectorAll(".plugins-item wa-switch")).toHaveLength(0);
+    expect(container.querySelectorAll(".plugins-item input.settings-toggle__input")).toHaveLength(
+      0,
+    );
     expect(container.querySelector<HTMLInputElement>('input[type="password"]')?.disabled).toBe(
       true,
     );
@@ -286,7 +337,9 @@ describe("renderSkills", () => {
     expect(mutationButtons.every((button) => button.disabled)).toBe(true);
 
     refresh?.click();
-    for (const toggle of container.querySelectorAll<HTMLElement>("wa-switch.settings-toggle")) {
+    for (const toggle of container.querySelectorAll<HTMLInputElement>(
+      "input.settings-toggle__input",
+    )) {
       toggle.click();
     }
     for (const button of mutationButtons) {
@@ -297,7 +350,7 @@ describe("renderSkills", () => {
     expect(onSaveKey).not.toHaveBeenCalled();
     expect(onInstall).not.toHaveBeenCalled();
 
-    render(renderSkills({ ...props, surface: "discovery" }), container);
+    renderSkills({ ...props, surface: "discovery" }, container);
     const remoteInstall = container.querySelector<HTMLButtonElement>(
       ".plugin-catalog-card__install",
     );

@@ -154,6 +154,7 @@ test("sessions.create forks the parent transcript into the new session", async (
   await writeSessionStore({
     entries: {
       main: sessionStoreEntry(parent.sessionId, {
+        visibility: "draft",
         sessionFile: parent.sessionFile,
         projectId: "qa-writer",
         spawnedCwd: projectRoot,
@@ -240,6 +241,7 @@ test("sessions.create forks the parent transcript into the new session", async (
 
   const key = requireNonEmptyString(created.payload?.key, "forked session key");
   expect(loadSessionEntry({ sessionKey: key, storePath })).toMatchObject({
+    visibility: "draft",
     projectId: "qa-writer",
     spawnedCwd: projectRoot,
     sessionRoot: projectRoot,
@@ -281,7 +283,16 @@ async function seedSizedForkParent(dir: string, entry: Parameters<typeof session
   });
 }
 
-test.each([
+test.each<{
+  name: string;
+  model: string;
+  provider: string;
+  tokens: number;
+  window?: number;
+  limit?: string;
+  nativeCatalog?: "missing" | "unknown";
+  configuredTokens?: number;
+}>([
   {
     name: "provider-scoped fallback",
     model: "unresolved-model",
@@ -314,9 +325,36 @@ test.each([
     window: 200_000,
     limit: "300000/200000 tokens",
   },
+  {
+    name: "missing native capacity beside API inventory",
+    model: "gpt-native",
+    provider: "openai",
+    tokens: 150_000,
+    window: 1_000_000,
+    nativeCatalog: "missing",
+    limit: "150000/100000 tokens",
+  },
+  {
+    name: "unknown native capacity beside warm API capacity",
+    model: "gpt-native",
+    provider: "openai",
+    tokens: 150_000,
+    window: 1_000_000,
+    nativeCatalog: "unknown",
+    limit: "150000/100000 tokens",
+  },
+  {
+    name: "authored capacity for a native runtime",
+    model: "gpt-native",
+    provider: "openai",
+    tokens: 150_000,
+    window: 1_000_000,
+    nativeCatalog: "unknown",
+    configuredTokens: 200_000,
+  },
 ])(
   "sessions.create enforces fork capacity: $name",
-  async ({ model, provider, tokens, window, limit }) => {
+  async ({ model, provider, tokens, window, limit, nativeCatalog, configuredTokens }) => {
     const { dir } = await createSessionStoreDir();
     testState.sessionConfig = { scope: "per-sender" };
     resetContextWindowCacheForTest();
@@ -352,16 +390,34 @@ test.each([
         },
       ];
     }
-    const inherited = !window || model === "gpt-large";
+    if (nativeCatalog) {
+      replaceDiscoveredContextTokenCache(
+        await prepareDiscoveredContextTokenCache({
+          modelCatalog: { entries: agentDiscoveryMock.models },
+        }),
+      );
+      if (nativeCatalog === "unknown") {
+        agentDiscoveryMock.models.push({
+          id: model,
+          name: model,
+          provider,
+          nativeRuntime: "codex",
+        });
+      }
+    }
+    const inherited = !window || model === "gpt-large" || Boolean(nativeCatalog);
     await seedSizedForkParent(dir, {
       totalTokens: tokens,
       ...(inherited ? { providerOverride: provider, modelOverride: model } : {}),
+      ...(nativeCatalog ? { agentRuntimeOverride: "codex" } : {}),
       ...(!window ? { modelOverrideSource: "user" } : {}),
     });
     const cfg = {
       ...getRuntimeConfig(),
       models: {
-        providers: { openai: { models: [{ id: model, contextTokens: 1_000_000 }] } },
+        providers: {
+          openai: { models: [{ id: model, contextTokens: configuredTokens ?? 1_000_000 }] },
+        },
       },
     };
     const created = await directSessionReq(
@@ -373,7 +429,7 @@ test.each([
         ...(!inherited ? { model: `${provider}/${model}` } : {}),
         ...(selectable ? { contextWindow: "200k" } : {}),
       },
-      selectable ? { context: { getRuntimeConfig: () => cfg } } : undefined,
+      selectable || configuredTokens ? { context: { getRuntimeConfig: () => cfg } } : undefined,
     );
     expect(created.ok, JSON.stringify(created.error)).toBe(limit === undefined);
     if (limit) {
@@ -391,6 +447,7 @@ test.each([undefined, "last-completed"] as const)(
     await writeSessionStore({
       entries: {
         main: sessionStoreEntry(parentSessionId, {
+          visibility: "draft",
           // The in-flight tail can make the whole parent exceed the cap; only the
           // selected completed prefix should govern this fork.
           totalTokens: 200_000,
@@ -440,6 +497,9 @@ test.each([undefined, "last-completed"] as const)(
         return;
       }
       expect(created.ok, JSON.stringify(created.error)).toBe(true);
+      expect(
+        loadSessionEntry({ sessionKey: created.payload?.key ?? "", storePath })?.visibility,
+      ).toBe("draft");
       const messages = await loadTranscriptEvents({
         sessionId: created.payload?.sessionId ?? "",
         sessionKey: created.payload?.key ?? "",

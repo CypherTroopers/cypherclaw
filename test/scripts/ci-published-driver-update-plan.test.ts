@@ -8,6 +8,7 @@ import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 import { runCiManifestFixture } from "./ci-workflow-manifest.test-support.js";
 import {
   evaluateWorkflowExpression,
+  evaluateWorkflowCondition,
   readCiWorkflow,
   readWorkflow,
   readWorkflowOutputs,
@@ -83,11 +84,17 @@ describe("published-driver update selection", () => {
     const job = readCiWorkflow().jobs["published-driver-update"];
     const revision = "a".repeat(40);
     expect(
-      evaluateWorkflowExpression(`\${{ ${job.if} }}`, {
+      evaluateWorkflowCondition(job.if, {
         eventName,
         repository: "openclaw/openclaw",
         runAttempt: 1,
         sha: revision,
+        additionalNeeds: {
+          "build-artifacts": {
+            result: "failure",
+            outputs: { published_driver_artifact_id: "fixture-run-artifact" },
+          },
+        },
         preflightOutputs: { ...result.outputs, checkout_revision: revision },
       }),
     ).toBe(selected);
@@ -123,6 +130,12 @@ describe("published-driver update selection", () => {
     const workflow = readCiWorkflow();
     const caller = workflow.jobs["published-driver-update"];
     const producer = workflow.jobs["build-artifacts"];
+    expect(caller.with.target_context_ref).toBe(
+      "${{ inputs.target_context_ref || github.base_ref || github.ref_name }}",
+    );
+    expect(caller.with.qualification_baselines_json).toBe(
+      "${{ inputs.qualification_baselines_json }}",
+    );
     expect(caller.needs).toContain("build-artifacts");
     for (const [input, output] of [
       ["candidate_artifact_id", "published_driver_artifact_id"],
@@ -221,6 +234,51 @@ describe("published-driver update selection", () => {
     },
   );
 
+  it.each(["extended-stable/2026.10.33", "release-prep/2026.10.33-final-notes", ""])(
+    "uses the frozen baseline instead of npm latest with context %j",
+    (targetContextRef) => {
+      const driver = readWorkflow(
+        ".github/workflows/ci-published-driver-update.yml",
+      ).jobs.update.steps.find((step: WorkflowStep) => step.id === "driver");
+      const root = tempDirs.make("openclaw-frozen-published-driver-");
+      const bin = path.join(root, "bin");
+      const lib = path.join(root, "scripts/lib");
+      const output = path.join(root, "outputs");
+      mkdirSync(bin);
+      mkdirSync(lib, { recursive: true });
+      for (const name of [
+        "release-version.mjs",
+        "release-upgrade-baseline.mjs",
+        "canonical-json.mjs",
+      ]) {
+        copyFileSync(`scripts/lib/${name}`, path.join(lib, name));
+      }
+      writeFileSync(path.join(root, "package.json"), JSON.stringify({ version: "2026.10.33" }));
+      writeExecutable(path.join(bin, "npm"), ["#!/bin/sh", `echo '"2026.11.5"'`]);
+      const result = runWorkflowShellScript(driver.run, {
+        cwd: root,
+        env: {
+          PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+          SystemRoot: process.env.SystemRoot,
+          BASH_ENV: "",
+          ENV: "",
+          TARGET_CONTEXT_REF: targetContextRef,
+          QUALIFICATION_BASELINES_JSON: JSON.stringify({
+            upgradeBaseline: "openclaw@2026.9.37",
+            upgradeSurvivorBaselines: ["openclaw@2026.10.10", "openclaw@2026.9.37"],
+          }),
+          DRIVER_CACHE_MODE: "restore",
+          GITHUB_OUTPUT: output,
+        },
+      });
+      expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+      expect(readWorkflowOutputs(output)).toEqual({
+        version: "2026.9.37",
+        "cache-mode": "restore",
+      });
+    },
+  );
+
   it.each<{
     eventName: Parameters<typeof evaluateWorkflowExpression>[1]["eventName"];
     ref: string;
@@ -262,6 +320,7 @@ describe("published-driver update selection", () => {
     };
     const cacheMode = String(evaluateWorkflowExpression(driver.env.DRIVER_CACHE_MODE, context));
     const root = tempDirs.make("openclaw-published-driver-cache-mode-");
+    writeFileSync(path.join(root, "package.json"), JSON.stringify({ version: "2026.9.7" }));
     const bin = path.join(root, "bin");
     const lib = path.join(root, "scripts/lib");
     const output = path.join(root, "outputs");
@@ -452,18 +511,21 @@ docker_e2e_run_with_harness() {
       repository: "openclaw/openclaw",
       runAttempt: 1,
       sha: "a".repeat(40),
+      additionalNeeds: {
+        "build-artifacts": { outputs: { published_driver_artifact_id: "fixture-run-artifact" } },
+      },
       preflightOutputs: {
         run_published_driver_update: "true",
         checkout_revision: "b".repeat(40),
       },
     };
-    expect(
-      evaluateWorkflowExpression(`\${{ ${workflow.jobs["published-driver-update"].if} }}`, context),
-    ).toBe(false);
+    expect(evaluateWorkflowCondition(workflow.jobs["published-driver-update"].if, context)).toBe(
+      false,
+    );
     const notice = workflow.jobs["ci-gate"].steps.find(
       (step: WorkflowStep) => step.name === "Record published-driver dispatch limitation",
     );
-    expect(evaluateWorkflowExpression(`\${{ ${notice.if} }}`, context)).toBe(true);
+    expect(evaluateWorkflowCondition(notice.if, context)).toBe(true);
     expect(notice.run).toContain("no published-driver cell proof for the selected revision");
   });
 });

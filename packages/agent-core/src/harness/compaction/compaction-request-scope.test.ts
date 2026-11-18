@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentMessage } from "../../types.js";
 import type { SessionTreeEntry } from "../types.js";
+import { parseCompactionDetails } from "./compaction-details.js";
 import { compactWithoutSummary, prepareCompaction } from "./compaction.js";
 import {
   createContextUsage,
@@ -60,9 +61,14 @@ describe("run-owned compaction requests", () => {
   it.each(internalSources)(
     "retains the $label source when its split turn falls back without a summary",
     ({ label, metadata }) => {
-      const source = "Inspect the worker artifact; do not publish it.";
+      const source = "Inspect the worker artifact; do not publish it. token=FAKEtok12345";
+      const redacted = "Inspect the worker artifact; do not publish it. [redacted]";
       const input = Object.assign(
-        { role: "user" as const, content: source, timestamp: 3 },
+        {
+          role: "user" as const,
+          content: [{ type: "text" as const, text: source }],
+          timestamp: 3,
+        },
         metadata,
       );
       const entries = [
@@ -72,12 +78,15 @@ describe("run-owned compaction requests", () => {
         messageEntry(assistant("The internal task is still running.", 4), 3),
       ];
       const preparation = prepare(entries);
+      expect(preparation.requestState).toBe("none");
       expect(preparation.isSplitTurn).toBe(true);
       const result = compactWithoutSummary(preparation);
       if (!result.ok) {
         throw result.error;
       }
-      expect(result.value.summary).toContain(`[${label}]: ${source}`);
+      expect(result.value.summary).toContain(`[${label}]: ${redacted}`);
+      expect(result.value.summary).not.toContain("FAKEtok12345");
+      expect(input.content[0]?.text).toBe(source);
       expect(result.value.firstKeptEntryId).toBe("entry-3");
     },
   );
@@ -100,7 +109,7 @@ describe("run-owned compaction requests", () => {
   );
 
   it("keeps the admitted human request across later internal updates", () => {
-    const request = "Review the patch; do not deploy it.";
+    const request = "Review the patch; do not deploy it. token=FAKEtok12345";
     const entries = [
       messageEntry({ role: "user", content: "Completed earlier task", timestamp: 1 }, 0),
       messageEntry(assistant("Completed.", 2), 1),
@@ -117,7 +126,9 @@ describe("run-owned compaction requests", () => {
       ),
       messageEntry(assistant("Review continues.", 6), 5),
     ];
-    expect(prepare(entries, "entry-2").latestUnresolvedUserRequest).toBe(request);
+    expect(prepare(entries, "entry-2").latestUnresolvedUserRequest).toBe(
+      "Review the patch; do not deploy it. [redacted]",
+    );
   });
 
   it("does not carry a prior checkpoint's pending ask into a new internal run", () => {
@@ -152,5 +163,104 @@ describe("run-owned compaction requests", () => {
       expect(fallback.value.summary).not.toContain("Old human ask");
       expect(fallback.value.summary).toContain("Prior work completed.");
     }
+  });
+});
+
+describe("processed request recovery across compaction", () => {
+  function checkpoint(request: string): SessionTreeEntry {
+    return {
+      type: "compaction",
+      id: "checkpoint",
+      parentId: "entry-0",
+      timestamp: new Date(2).toISOString(),
+      firstKeptEntryId: "entry-0",
+      tokensBefore: 100,
+      summary:
+        "Prior context.\n\n## Pending user asks\n- " +
+        request +
+        "\n\n## Decisions\nKeep the review offline.\n\n## Latest unresolved user request\n" +
+        JSON.stringify(request) +
+        "\n\n",
+      details: { readFiles: [], modifiedFiles: [], latestUnresolvedUserRequest: request },
+    };
+  }
+  it("recovers the admitted request after its processed entry leaves the semantic window", () => {
+    const request = "Review only; do not deploy.";
+    const entries = [
+      messageEntry(assistant("Retained work", 1), 0),
+      checkpoint(request),
+      messageEntry(
+        Object.assign(
+          { role: "user" as const, content: "Worker progress", timestamp: 3 },
+          { provenance: { kind: "inter_session" } },
+        ),
+        2,
+      ),
+      messageEntry(assistant("Continuing review", 4), 3),
+    ];
+    const prepared = prepare(entries, "already-compacted-request");
+    expect(prepared.latestUnresolvedUserRequest).toBe(request);
+    const result = compactWithoutSummary(prepared);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(parseCompactionDetails(result.value.details)?.latestUnresolvedUserRequest).toBe(
+        request,
+      );
+    }
+    const missingUnprocessed = prepareCompaction(entries, settings, "unresolved", {
+      requestFromEntryId: "already-compacted-request",
+      preserveFromEntryId: "already-compacted-request",
+    });
+    expect(missingUnprocessed.ok).toBe(false);
+  });
+  it("clears model-written pending asks for a new internal run without deleting decisions", () => {
+    const request = "Old human task";
+    const entries = [
+      messageEntry(assistant("Retained work", 1), 0),
+      checkpoint(request),
+      messageEntry(
+        Object.assign(
+          { role: "user" as const, content: "Independent cron task", timestamp: 3 },
+          { provenance: { kind: "internal_system" } },
+        ),
+        2,
+      ),
+      messageEntry(assistant("Working on cron", 4), 3),
+    ];
+    const prepared = prepare(entries);
+    expect(prepared.requestState).toBe("none");
+    const result = compactWithoutSummary(prepared);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.summary).not.toContain(request);
+      expect(result.value.summary).toContain("## Pending user asks\nNone.");
+      expect(result.value.summary).toContain("Keep the review offline.");
+    }
+  });
+  it("does not strip a matching latest-request heading embedded in literal text", () => {
+    const request = "Literal test";
+    const literal =
+      'literal prefix ## Latest unresolved user request\n"Literal test"\n\nquoted example';
+    const entry = checkpoint(request);
+    if (entry.type !== "compaction") {
+      throw new Error("checkpoint");
+    }
+    entry.summary = literal;
+    const prepared = prepareCompaction(
+      [
+        messageEntry(assistant("Retained work", 1), 0),
+        entry,
+        messageEntry(assistant("Continuing", 3), 2),
+      ],
+      settings,
+    );
+    if (!prepared.ok || !prepared.value) {
+      throw new Error("expected preparation");
+    }
+    const result = compactWithoutSummary(prepared.value);
+    if (!result.ok) {
+      throw result.error;
+    }
+    expect(result.value.summary).toContain(literal);
   });
 });

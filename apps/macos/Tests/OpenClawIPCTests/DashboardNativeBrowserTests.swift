@@ -432,7 +432,7 @@ struct DashboardNativeBrowserHostTests {
         #expect(fixture.host.state.tabs.count == 2)
 
         try fixture.host.close(tabId: current.id)
-        fixture.host.navigationDidFail(for: original)
+        fixture.host.navigationDidFail(for: original, error: URLError(.cannotConnectToHost))
         #expect(try fixture.host.open(tabId: "mac-retry", url: requested, sessionKey: "") == "mac-retry")
         #expect(fixture.host.state.tabs.map(\.id) == ["mac-original", "mac-retry"])
 
@@ -557,5 +557,279 @@ struct DashboardNativeBrowserHostTests {
             dashboardWebView: dashboard, container: container,
             websiteDataStore: store, onStateChange: onStateChange)
         return (host, container, dashboard)
+    }
+}
+
+@MainActor
+private final class DashboardInterruptionNavigationObserver: NSObject, WKNavigationDelegate {
+    private let controller: DashboardWindowController
+    private var interruptedNavigation: WKNavigation?
+    let failureCompleted = AsyncTestGate()
+    private(set) var failure: NSError?
+
+    init(controller: DashboardWindowController) {
+        self.controller = controller
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void)
+    {
+        self.controller.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void)
+    {
+        self.controller.webView(webView, decidePolicyFor: navigationResponse, decisionHandler: decisionHandler)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @MainActor @Sendable (
+            URLSession.AuthChallengeDisposition, URLCredential?) -> Void)
+    {
+        self.controller.webView(webView, didReceive: challenge, completionHandler: completionHandler)
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        self.controller.webView(webView, didStartProvisionalNavigation: navigation)
+        // Installed after the article loads: the first navigation is the interrupted
+        // request, not the replacement that may start before its failure arrives.
+        if self.interruptedNavigation == nil {
+            self.interruptedNavigation = navigation
+        }
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        self.controller.webView(webView, didCommit: navigation)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        self.controller.webView(webView, didFinish: navigation)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error)
+    {
+        self.controller.webView(webView, didFailProvisionalNavigation: navigation, withError: error)
+        self.recordFailure(navigation, error: error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        self.controller.webView(webView, didFail: navigation, withError: error)
+        self.recordFailure(navigation, error: error)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        self.controller.webViewWebContentProcessDidTerminate(webView)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationAction: WKNavigationAction,
+        didBecome download: WKDownload)
+    {
+        self.controller.webView(webView, navigationAction: navigationAction, didBecome: download)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationResponse: WKNavigationResponse,
+        didBecome download: WKDownload)
+    {
+        self.controller.webView(webView, navigationResponse: navigationResponse, didBecome: download)
+    }
+
+    private func recordFailure(_ navigation: WKNavigation?, error: Error) {
+        guard let navigation, let interruptedNavigation,
+              navigation === interruptedNavigation, self.failure == nil else { return }
+        // This records the real controller's completed call, not KVO settlement.
+        // Record unexpected errors too, so classification fails instead of hanging.
+        self.failure = error as NSError
+        self.failureCompleted.open()
+    }
+}
+
+@Suite(.serialized, .timeLimit(.minutes(1)))
+@MainActor
+struct DashboardNativeBrowserFailureTests {
+    private static let favicon = "data:image/png;base64," +
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
+
+    @Test func `a failed first load explains the failure and Reload retries the attempted URL`() async throws {
+        let (port, attempted) = try await Self.releasedEndpoint("/article")
+        let dashboard = try await DashboardHTTPFixture.start()
+        defer { dashboard.stop() }
+        let controller = Self.controller(dashboard)
+        defer { controller.closeDashboard() }
+        try controller.nativeBrowser.open(tabId: "mac-offline", url: attempted, sessionKey: "")
+        let webView = try #require(controller.nativeBrowser.webView(for: "mac-offline"))
+        let browser = try #require(controller.nativeBrowser.browserTab(for: webView))
+
+        try await TestWait.state("failed first load") { !webView.isLoading && browser.failureView != nil }
+        let failure = try #require(browser.failureView)
+        #expect(failure.superview === webView)
+        #expect(!failure.titleLabel.stringValue.isEmpty)
+        #expect(!failure.messageLabel.stringValue.isEmpty)
+        #expect(!failure.messageLabel.stringValue.contains("127.0.0.1"))
+        #expect(webView.url == nil)
+        #expect(controller.nativeBrowser.state.tabs.first?.url == attempted.absoluteString)
+
+        let revived = try await Self.reclaim(port)
+        defer { revived.stop() }
+        failure.reloadButton.performClick(nil)
+        try await TestWait.state("retried first load") {
+            !webView.isLoading && webView.url == attempted && webView.title == "Article"
+        }
+        #expect(browser.failureView == nil)
+        #expect(failure.superview == nil)
+        #expect(controller.nativeBrowser.state.tabs.first?.url == attempted.absoluteString)
+    }
+
+    @Test func `a failed navigation covers the loaded page and toolbar Reload retries the failed URL`() async throws {
+        let (port, attempted) = try await Self.releasedEndpoint("/article")
+        let server = try await Self.server()
+        defer { server.stop() }
+        let controller = Self.controller(server)
+        defer { controller.closeDashboard() }
+        try controller.nativeBrowser.open(tabId: "mac-article", url: server.url("/article"), sessionKey: "")
+        let webView = try #require(controller.nativeBrowser.webView(for: "mac-article"))
+        let browser = try #require(controller.nativeBrowser.browserTab(for: webView))
+        try await TestWait.state("loaded article") {
+            !webView.isLoading && webView.title == "Article"
+        }
+
+        try controller.nativeBrowser.navigate(tabId: "mac-article", url: attempted)
+        try await TestWait.state("failed navigation") { !webView.isLoading && browser.failureView != nil }
+        #expect(webView.url == server.url("/article"))
+        let failed = try #require(controller.nativeBrowser.state.tabs.first)
+        #expect(failed.url == attempted.absoluteString)
+
+        let revived = try await Self.reclaim(port)
+        defer { revived.stop() }
+        try controller.nativeBrowser.perform(.reload, tabId: "mac-article")
+        try await TestWait.state("retried navigation") {
+            !webView.isLoading && webView.url == attempted && webView.title == "Article"
+        }
+        #expect(browser.failureView == nil)
+        #expect(webView.canGoBack)
+    }
+
+    @Test(arguments: ["download", "stop", "replacement"])
+    func `deliberate interruptions keep the page without failure UI`(_ trigger: String) async throws {
+        let server = try await Self.server()
+        defer { server.stop() }
+        let requestReceived = AsyncTestGate()
+        let releaseResponse = AsyncTestGate()
+        defer { releaseResponse.open() }
+        let stalled = try await DashboardHTTPFixture.start(beforeResponse: {
+            requestReceived.open()
+            await releaseResponse.wait()
+        })
+        defer { stalled.stop() }
+        let controller = Self.controller(server)
+        defer { controller.closeDashboard() }
+        try controller.nativeBrowser.open(tabId: "mac-article", url: server.url("/article"), sessionKey: "")
+        let webView = try #require(controller.nativeBrowser.webView(for: "mac-article"))
+        let browser = try #require(controller.nativeBrowser.browserTab(for: webView))
+        try await TestWait.state("loaded article") { !webView.isLoading && webView.title == "Article" }
+
+        let observer = DashboardInterruptionNavigationObserver(controller: controller)
+        webView.navigationDelegate = observer
+        defer {
+            withExtendedLifetime(observer) {
+                webView.navigationDelegate = controller
+            }
+        }
+
+        let expectedPath: String
+        switch trigger {
+        case "download":
+            try controller.nativeBrowser.navigate(tabId: "mac-article", url: server.url("/archive.bin"))
+            expectedPath = "/article"
+        case "stop":
+            try controller.nativeBrowser.navigate(tabId: "mac-article", url: stalled.url("/pending"))
+            // An accepted TCP connection can precede the HTTP request and navigation.
+            try await requestReceived.wait("HTTP request reaches the stalled server")
+            try controller.nativeBrowser.perform(.stop, tabId: "mac-article")
+            expectedPath = "/article"
+        default:
+            try controller.nativeBrowser.navigate(tabId: "mac-article", url: stalled.url("/pending"))
+            // An accepted TCP connection can precede the HTTP request and navigation.
+            try await requestReceived.wait("HTTP request reaches the stalled server")
+            try controller.nativeBrowser.navigate(tabId: "mac-article", url: server.url("/plain"))
+            expectedPath = "/plain"
+        }
+        do {
+            try await observer.failureCompleted.wait("\(trigger) cancellation callback completes")
+            let error = try #require(observer.failure)
+            #expect(
+                (error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled) ||
+                    (error.domain == "WebKitErrorDomain" && error.code == 102),
+                "\(trigger)")
+            // The cancelled predecessor can finish while its replacement still loads.
+            try await TestWait.state("\(trigger) settles") { !webView.isLoading && webView.url?.path == expectedPath }
+        } catch {
+            // Separate the conjunction on failure without changing the Stop contract.
+            print("Browser interruption \(trigger): loading=\(webView.isLoading), " +
+                "path=\(webView.url?.path ?? "nil"), title=\(webView.title ?? "nil"), " +
+                "failureUI=\(browser.failureView != nil), expectedPath=\(expectedPath)")
+            throw error
+        }
+        #expect(browser.failureView == nil, "\(trigger)")
+        #expect(controller.nativeBrowser.state.tabs.first?.url == webView.url?.absoluteString, "\(trigger)")
+    }
+
+    /// Reserves a loopback port and releases it, so loads fail with a refused connection.
+    private static func releasedEndpoint(_ path: String) async throws -> (UInt16, URL) {
+        let fixture = try await DashboardHTTPFixture.start()
+        defer { fixture.stop() }
+        return (fixture.port, fixture.url(path))
+    }
+
+    private static func reclaim(_ port: UInt16) async throws -> DashboardHTTPFixture {
+        var revived: DashboardHTTPFixture?
+        try await TestWait.state("released endpoint accepts again") {
+            revived = try? await self.server(port: port)
+            return revived != nil
+        }
+        return try #require(revived)
+    }
+
+    private static func server(port: UInt16 = 0) async throws -> DashboardHTTPFixture {
+        try await DashboardHTTPFixture.start(
+            port: port,
+            html: """
+            <!doctype html><html><head><title>Article</title><link rel="icon" href="\(self.favicon)"></head>
+            <body>Article</body></html>
+            """,
+            contentSecurityPolicy: "default-src 'none'; img-src data:; connect-src data:",
+            rawResponseHandler: { request in
+                let responses = [
+                    "/archive.bin": ("application/octet-stream", "PK\u{3}\u{4}"),
+                    "/plain": ("text/html", "<!doctype html><title>Plain</title>"),
+                ]
+                guard let (type, body) = responses.first(where: { request.hasPrefix("GET \($0.key) ") })?.value
+                else { return nil }
+                return .init(data: Data((
+                    "HTTP/1.1 200 OK\r\nContent-Type: \(type)\r\nContent-Length: \(body.utf8.count)\r\n" +
+                        "Connection: close\r\n\r\n\(body)").utf8))
+            })
+    }
+
+    private static func controller(_ server: DashboardHTTPFixture) -> DashboardWindowController {
+        DashboardWindowController(
+            url: server.url("/control/"),
+            auth: DashboardWindowAuth.unauthenticated,
+            websiteDataStore: .nonPersistent(),
+            windowAutosaveName: "",
+            requestBrowserProfileImportOffer: { _ in false })
     }
 }

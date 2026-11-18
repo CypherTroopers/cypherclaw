@@ -16,11 +16,14 @@ import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { createPluginRuntimeMock } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { setRuntimeConfigSnapshot } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
-import { closeOpenClawStateDatabaseAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import {
+  closeOpenClawStateDatabaseAsync,
+  withNativeSessionMutationForTest,
+} from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { vi } from "vitest";
 import type { AgentsApiBinding } from "./agentsapi-bindings.js";
 import { AgentsApiClient } from "./agentsapi-client.js";
-import { createModel, createHostedSession } from "./agentsapi.test-support.js";
+import { createModel, createHostedSession, createTurn } from "./agentsapi.test-support.js";
 import plugin from "./index.js";
 
 export function registerHarness(
@@ -153,11 +156,18 @@ export function requireExecutorHarness(runtime: PluginRuntime) {
       "The Agents API harness requires run, reset, deletion, context reset, and disposal",
     );
   }
+  const mutationHook =
+    (hook: "withSessionDeletion" | "withSessionContextReset") =>
+    (
+      target: Parameters<typeof withNativeSessionMutationForTest>[0]["target"],
+      run: Parameters<typeof withNativeSessionMutationForTest>[0]["run"],
+    ) =>
+      withNativeSessionMutationForTest({ pluginId: "agentsapi", harness, hook, target, run });
   return {
     runAttempt: harness.runAttempt.bind(harness),
     reset: harness.reset.bind(harness),
-    withSessionDeletion: harness.withSessionDeletion,
-    withSessionContextReset: harness.withSessionContextReset,
+    withSessionDeletion: mutationHook("withSessionDeletion"),
+    withSessionContextReset: mutationHook("withSessionContextReset"),
     dispose: harness.dispose.bind(harness),
   };
 }
@@ -167,6 +177,13 @@ function createBindingRuntime(env: NodeJS.ProcessEnv, current: () => OpenClawCon
   const runtime = createPluginRuntimeMock({ config: { current } });
   runtime.state.openKeyedStore = <T>(options: Parameters<typeof runtime.state.openKeyedStore>[0]) =>
     createPluginStateKeyedStoreForTests<T>("agentsapi", { ...options, env });
+  runtime.state.openKeyedStoreV2 = <T>(
+    options: Parameters<typeof runtime.state.openKeyedStoreV2>[0],
+    authority?: Parameters<typeof runtime.state.openKeyedStoreV2>[1],
+  ) => {
+    const store = createPluginStateKeyedStoreForTests<T>("agentsapi", { ...options, env });
+    return authority ? store.withCurrent(authority) : store;
+  };
   runtime.state.openSyncKeyedStore = <T>(
     options: Parameters<typeof runtime.state.openSyncKeyedStore>[0],
   ) => createPluginStateSyncKeyedStoreForTests<T>("agentsapi", { ...options, env });
@@ -242,4 +259,27 @@ export function mockClient(sessionId: string) {
   const message = vi.spyOn(AgentsApiClient.prototype, "message").mockResolvedValue();
   vi.spyOn(AgentsApiClient.prototype, "items").mockResolvedValue([]);
   return { create, update, message, session };
+}
+
+export function createCompletedSessionFactory(): typeof import("./agentsapi-session.js").createAgentsApiSession {
+  return (options) => {
+    const turn = createTurn({ id: `turn-${options.sessionId}`, session_id: options.sessionId });
+    return {
+      isAvailable: () => false,
+      isSettled: () => true,
+      wasSubmitted: () => true,
+      queueMessage: async () => {},
+      readUsageTurns: async () => [],
+      run: async (prompt, persistInput, onSubmitted) => {
+        await persistInput();
+        await options.client.message(options.sessionId, prompt, options.signal);
+        await options.connectEnvironment?.("executor-environment");
+        onSubmitted();
+        options.onSettled?.();
+        return { turn, cancelled: false, terminatedByTool: false };
+      },
+      close: async () => {},
+      reconcileAfterClose: async () => turn,
+    };
+  };
 }

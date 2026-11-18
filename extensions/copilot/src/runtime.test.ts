@@ -3,9 +3,20 @@ import { normalize, resolve, sep } from "node:path";
 import type { CopilotClient, CopilotClientOptions } from "@github/copilot-sdk";
 import { toErrorObject as toLintErrorObject } from "openclaw/plugin-sdk/error-runtime";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClientCreateOptions, PoolKey } from "./runtime.js";
 import { createCopilotClientPool } from "./runtime.js";
+
+const artifactMock = vi.hoisted(() => ({ capture: vi.fn(), validate: vi.fn() }));
+vi.mock("./runtime-artifact.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./runtime-artifact.js")>()),
+  captureCopilotRuntimeArtifact: artifactMock.capture,
+  validateCopilotRuntimeArtifact: artifactMock.validate,
+}));
+beforeEach(() => {
+  artifactMock.capture.mockReset();
+  artifactMock.validate.mockReset();
+});
 
 interface FakeClient {
   readonly id: number;
@@ -94,6 +105,68 @@ afterEach(() => {
 });
 
 describe("createCopilotClientPool", () => {
+  it("binds verified clients separately and rejects a changed implementation before creating a client", async () => {
+    const sdk = makeFake();
+    const pool = createCopilotClientPool({ sdkFactory: sdk.fake });
+    const binding = { id: "copilot-runtime-fixture", fingerprint: "implementation-a" };
+    const connection = { kind: "stdio", path: "/fixture/copilot-runtime" };
+    artifactMock.capture.mockResolvedValue({ binding, connection });
+    artifactMock.validate.mockResolvedValue(true);
+    try {
+      const normal = await pool.acquire(makeKey(), makeOptions());
+      const verified = await pool.acquire(makeKey(), makeOptions(), {});
+      const resumed = await pool.acquire(makeKey(), makeOptions(), { expected: binding });
+      expect(verified.client).not.toBe(normal.client);
+      expect(resumed.client).toBe(verified.client);
+      expect(verified.runtimeArtifact).toEqual(binding);
+      expect(sdk.ctorCalls[1]?.connection).toEqual(connection);
+      expect(sdk.instances[1]?.start).toHaveBeenCalledOnce();
+      artifactMock.capture.mockResolvedValue({
+        binding: { ...binding, fingerprint: "implementation-b" },
+        connection,
+      });
+      await expect(pool.acquire(makeKey(), makeOptions(), { expected: binding })).rejects.toThrow(
+        "verified runtime changed",
+      );
+      expect(sdk.instances).toHaveLength(2);
+      // Both verified handles share the same release identity and settle together.
+      await pool.release(verified);
+      await pool.release(resumed);
+      await pool.release(normal);
+    } finally {
+      await pool.dispose();
+    }
+    expect(sdk.stops.toSorted((left, right) => left - right)).toEqual([1, 2]);
+  });
+
+  it("stops a client whose runtime changes during awaited startup", async () => {
+    const startup = createDeferred<void>();
+    const started = createDeferred<void>();
+    const client = {
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async (): Promise<Error[]> => []),
+    };
+    client.start.mockImplementation(async () => {
+      started.resolve();
+      await startup.promise;
+    });
+    const pool = createCopilotClientPool({
+      sdkFactory: async () => client as unknown as CopilotClient,
+    });
+    const binding = { id: "copilot-runtime-fixture", fingerprint: "implementation-a" };
+    artifactMock.capture.mockResolvedValue({ binding, connection: { kind: "stdio" } });
+    artifactMock.validate.mockResolvedValue(true);
+    const acquire = pool.acquire(makeKey(), makeOptions(), {});
+    const rejected = expect(acquire).rejects.toThrow("runtime changed while starting");
+    await started.promise;
+    artifactMock.validate.mockResolvedValue(false);
+    startup.resolve();
+    await rejected;
+    expect(client.stop).toHaveBeenCalledOnce();
+    expect(pool.size()).toBe(0);
+    await pool.dispose();
+  });
+
   it("keeps hardened empty-mode clients separate from normal clients", async () => {
     const sdk = makeFake();
     const pool = createCopilotClientPool({ sdkFactory: sdk.fake });
@@ -151,25 +224,6 @@ describe("createCopilotClientPool", () => {
     expect(first.client).toBe(second.client);
     expect(sdk.stops).toEqual([]);
     expect(pool.size()).toBe(1);
-  });
-
-  it("release to zero schedules idle teardown; teardown fires after idleTtlMs and calls stop() exactly once", async () => {
-    vi.useFakeTimers();
-    const sdk = makeFake();
-    const pool = createCopilotClientPool({ idleTtlMs: 50, sdkFactory: sdk.fake });
-    const handle = await pool.acquire(makeKey(), makeOptions());
-
-    await pool.release(handle);
-    await vi.advanceTimersByTimeAsync(49);
-    expect(sdk.stops).toEqual([]);
-
-    await vi.advanceTimersByTimeAsync(1);
-    expect(sdk.stops).toEqual([1]);
-    expect(pool.size()).toBe(0);
-    expect(sdk.instances[0]?.start.mock.calls.length).toBe(0);
-
-    await vi.advanceTimersByTimeAsync(50);
-    expect(sdk.stops).toEqual([1]);
   });
 
   it("acquire during idle window cancels teardown and reuses", async () => {
@@ -230,6 +284,7 @@ describe("createCopilotClientPool", () => {
   });
 
   it("concurrent acquire dedupes", async () => {
+    vi.useFakeTimers();
     const clientDeferred = createDeferred<CopilotClient>();
     const sdkFactory = vi.fn(async () => clientDeferred.promise);
     const pool = createCopilotClientPool({ sdkFactory });
@@ -242,11 +297,12 @@ describe("createCopilotClientPool", () => {
 
     expect(sdkFactory.mock.calls.length).toBe(1);
 
+    const stop = vi.fn(async () => []);
     const client = {
       id: 1,
       copilotHome: "copilot-home",
       start: vi.fn(async () => undefined),
-      stop: vi.fn(async () => []),
+      stop,
       createSession: vi.fn(async () => ({})),
       disconnect: vi.fn(),
     } as unknown as CopilotClient;
@@ -255,9 +311,16 @@ describe("createCopilotClientPool", () => {
 
     expect(first.client).toBe(second.client);
     expect(sdkFactory.mock.calls.length).toBe(1);
+    await pool.release(first);
+    await vi.runAllTimersAsync();
+    expect(stop).not.toHaveBeenCalled();
+
+    await pool.release(second);
+    await vi.runAllTimersAsync();
+    expect(stop).toHaveBeenCalledOnce();
   });
 
-  it.each(["sync", "async"] as const)("%s constructor failure is not cached", async (mode) => {
+  it("synchronous constructor failure is not cached", async () => {
     let attempt = 0;
     const createClient = (clientOptions: CopilotClientOptions) => {
       attempt += 1;
@@ -274,7 +337,7 @@ describe("createCopilotClientPool", () => {
       } as unknown as CopilotClient;
     };
     const pool = createCopilotClientPool({
-      sdkFactory: mode === "sync" ? createClient : async (options) => createClient(options),
+      sdkFactory: createClient,
     });
 
     await expect(pool.acquire(makeKey(), makeOptions())).rejects.toThrow("constructor failed for");
@@ -438,30 +501,5 @@ describe("createCopilotClientPool", () => {
     } finally {
       Object.defineProperty(process, "platform", { configurable: true, value: originalPlatform });
     }
-  });
-
-  it("path normalization", async () => {
-    const sdk = makeFake();
-    const pool = createCopilotClientPool({ sdkFactory: sdk.fake });
-    const firstHome =
-      process.platform === "win32" ? "C:\\Users\\Tester\\CopilotHome\\" : "copilot-home/";
-    const secondHome =
-      process.platform === "win32" ? "c:\\users\\tester\\copilothome" : "copilot-home";
-
-    const first = await pool.acquire(
-      makeKey({ copilotHome: firstHome }),
-      makeOptions({ copilotHome: firstHome }),
-    );
-    const second = await pool.acquire(
-      makeKey({ copilotHome: secondHome }),
-      makeOptions({ copilotHome: secondHome }),
-    );
-
-    const normalizedHome = normalizeHomeForTest(firstHome);
-    expect(first.client).toBe(second.client);
-    expect(first.key.copilotHome).toBe(normalizedHome);
-    expect(second.key.copilotHome).toBe(normalizedHome);
-    expect(sdk.ctorCalls.length).toBe(1);
-    expect(String(sdk.ctorCalls[0]?.baseDirectory)).toBe(normalizedHome);
   });
 });

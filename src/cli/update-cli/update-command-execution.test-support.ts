@@ -29,8 +29,6 @@ const mocks = vi.hoisted(() => ({
   runGitUpdate: vi.fn(),
   runPackageUpdate: vi.fn(),
   runtimeError: vi.fn(),
-  revalidateSchemaContext:
-    vi.fn<typeof import("./update-command-managed-context.js").revalidateUpdateDatabaseContext>(),
   validateCanary: vi.fn(),
   nativeSupport:
     vi.fn<
@@ -56,6 +54,11 @@ vi.mock("../../infra/update-candidate-canary.js", () => ({
   validateUpdateCandidateCanary: mocks.validateCanary,
 }));
 
+// Like the canary above, the activated-release boot is a process boundary.
+vi.mock(import("../../infra/update-activated-gateway-check.js"), async (original) => ({
+  ...(await original()),
+  checkActivatedGatewayStartup: async ({ result }) => result,
+}));
 vi.mock("./update-command-plugin-preflight.js", () => ({
   preflightConfiguredNpmPluginTargets: mocks.pluginPreflight,
 }));
@@ -104,7 +107,6 @@ vi.mock("./update-command-managed-context.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./update-command-managed-context.js")>()),
   captureOwnedManagedUpdateContext: mocks.captureManagedContext,
   captureOwnedManagedUpdatePreflightContext: mocks.captureManagedPreflight,
-  revalidateUpdateDatabaseContext: mocks.revalidateSchemaContext,
 }));
 
 vi.mock("./update-command-package.js", async (importOriginal) => ({
@@ -235,7 +237,6 @@ beforeEach(() => {
   mocks.captureManagedContext.mockResolvedValue(undefined);
   mocks.captureManagedPreflight.mockResolvedValue(schemaContext("default"));
   mocks.captureSchemaContext.mockResolvedValue(schemaContext("invoker"));
-  mocks.revalidateSchemaContext.mockImplementation(async (context) => context);
   mocks.checkTargetSchemas.mockResolvedValue({ incompatible: [], indeterminate: [] });
   mocks.formatSchemaRefusalLines.mockReturnValue(["schema refused"]);
   mocks.hasSchemaRefusal.mockImplementation(

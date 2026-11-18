@@ -9,6 +9,7 @@ import type {
 import type { PrepareAssistantTranscriptMessage } from "../config/sessions/transcript-assistant-delivery.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { DiagnosticTraceContext } from "../infra/diagnostic-trace-context.js";
+import type { ImageContent } from "../llm/types.js";
 import type {
   PluginHookAgentContext,
   PluginHookContextWindow,
@@ -405,7 +406,11 @@ export type PluginHookReplyDispatchContext = {
   dispatcher: ReplyDispatcher;
   abortSignal?: AbortSignal;
   onReplyStart?: () => Promise<void> | void;
+  /** @deprecated Use onPreparedAgentRunStart. Final compatibility day: 2026-12-31. */
   onAgentRunStart?: GetReplyOptions["onAgentRunStart"];
+  onPreparedAgentRunStart?: GetReplyOptions["onPreparedAgentRunStart"];
+  /** Host-owned input custody; adopt before backend submission and propagate refusal. */
+  turnAdoption?: { adopt: () => Promise<void>; assertCurrent: () => void };
   userTurnTranscriptRecorder?: GetReplyOptions["userTurnTranscriptRecorder"];
   /** Host-owned display facts applied before the assistant transcript is published. */
   prepareAssistantTranscriptMessage?: PrepareAssistantTranscriptMessage;
@@ -802,6 +807,8 @@ type PluginHookBeforeInstallResult = {
 export type PluginHookBeforeAgentRunEvent = {
   /** The user's message that triggered this run. */
   prompt: string;
+  /** Prepared current-turn images. Treat this cloned content as read-only. */
+  images?: ImageContent[];
   /** Loaded session history before the current prompt is submitted. */
   messages: unknown[];
   /** Active system prompt prepared for this run. */

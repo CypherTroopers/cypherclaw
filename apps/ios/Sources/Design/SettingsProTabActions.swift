@@ -35,8 +35,7 @@ extension SettingsProTab {
                         .font(OpenClawType.subheadSemiBold)
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(OpenClawBrand.accent)
+                .openClawProminentButton()
             }
         }
     }
@@ -250,6 +249,7 @@ extension SettingsProTab {
     func syncAfterOnboardingReset() {
         self.invalidateGatewaySetupAttempt()
         self.setupStatusText = nil
+        self.setupCode = ""
         self.stagedGatewaySetupLink = nil
         self.gatewayAuthFields.pendingOverride = nil
         self.syncSettingsState()

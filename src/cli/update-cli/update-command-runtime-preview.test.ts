@@ -15,19 +15,57 @@ import * as databaseContext from "./update-command-database-context.js";
 import { installFreshUpdateFixture, targetMetadata } from "./update-command-fresh.test-support.js";
 import * as runtimeRecovery from "./update-command-node-runtime-resolution.js";
 import * as packageUpdate from "./update-command-package.js";
+import * as commandRun from "./update-command-run.js";
 import { stubNodeRuntime } from "./update-command-runtime-recovery.test-support.js";
 import { updateCommand } from "./update-command.js";
 
 vi.mock("../../infra/container-environment.js", () => ({ isContainerEnvironment: () => false }));
 
 const { fixture } = installFreshUpdateFixture();
-const quote = process.platform === "win32" ? quotePowerShellArg : quoteCliArg;
-const lastJson = () => vi.mocked(defaultRuntime.writeJson).mock.lastCall?.[0];
-const matchingEntry = (shape: object) => expect.arrayContaining([expect.objectContaining(shape)]);
 beforeEach(() => {
   // This synthetic installation has no plugins to include in its recovery baseline.
   vi.stubEnv("OPENCLAW_DISABLE_BUNDLED_PLUGINS", "1");
 });
+it.each([
+  ["24.16.0", true],
+  ["26.1.0", false],
+] as const)(
+  "warns without refusing an update preview under compatible service Node %s",
+  async (version, json) => {
+    stubNodeRuntime();
+    fixture.managedServiceNodeRunner = process.execPath;
+    vi.spyOn(runtimePaths, "resolveNodeRuntimeInfo").mockResolvedValue({
+      status: "supported",
+      version,
+      sqliteVersion: "3.53.0",
+      nodeSharedSqlite: false,
+      sqliteProbe: { available: true, version: "3.53.0", text: true, blob: true, json: true },
+    });
+    vi.mocked(packageMetadata.fetchNpmPackageTargetStatus).mockResolvedValue({
+      ...targetMetadata,
+      nodeEngine: ">=24.16.0 <25 || >=26.1.0",
+    });
+    const log = vi.spyOn(defaultRuntime, "log").mockImplementation(() => undefined);
+
+    await updateCommand({
+      channel: "stable",
+      tag: targetMetadata.version,
+      yes: true,
+      dryRun: true,
+      json,
+    });
+
+    const output = json
+      ? JSON.stringify(vi.mocked(defaultRuntime.writeJson).mock.lastCall?.[0])
+      : log.mock.calls.flat().join("\n");
+    expect(output).toContain("SECURITY WARNING");
+    expect(output).toContain(`Node.js ${version}`);
+    expect(output).not.toContain("Would refuse update");
+    expect(packageUpdate.stagePackageInstallUpdate).not.toHaveBeenCalled();
+    expect(fs.existsSync(fixture.databasePath)).toBe(false);
+  },
+);
+
 it.each([
   { name: "no restart", restart: false, debugCapture: true },
   { name: "replacement" },
@@ -126,7 +164,13 @@ it.each([
     }
     const log = vi.spyOn(defaultRuntime, "log").mockImplementation(() => undefined);
     const manifest = fs.readFileSync(path.join(fixture.root, "package.json"));
-    const opts = { tag: targetMetadata.version, yes: true, json, restart };
+    const opts = {
+      channel: "stable" as const,
+      tag: targetMetadata.version,
+      yes: true,
+      json,
+      restart,
+    };
 
     await updateCommand({ ...opts, dryRun: true });
 
@@ -163,7 +207,7 @@ it.each([
           : []),
         {
           kind: "continue-update",
-          command: `node ${process.platform === "win32" ? quotePowerShellArg(path.join(fixture.root, "openclaw.mjs")) : quoteCliArg(path.join(fixture.root, "openclaw.mjs"))} update --tag 2026.9.2`,
+          command: `node ${process.platform === "win32" ? quotePowerShellArg(path.join(fixture.root, "openclaw.mjs")) : quoteCliArg(path.join(fixture.root, "openclaw.mjs"))} update --channel stable --tag 2026.9.2`,
         },
       ];
       const message = [
@@ -220,18 +264,24 @@ it.each([
           expect.objectContaining({ nodeRunner: replacement ? "/current/node" : "/service/node" }),
         );
       } else {
-        expect(lastJson()).toMatchObject({
-          reason: "preflight-node-runtime-incompatible",
-          steps: matchingEntry({
-            stderrTail: expect.stringContaining(
-              `node ${quote(path.join(fixture.root, "openclaw.mjs"))} update --tag 2026.9.2`,
-            ),
-            failureFacts: matchingEntry({
-              code: "node-runtime-preflight",
-              message: expect.stringContaining("Required: openclaw@2026.9.2 Node >=26.12.1"),
-            }),
+        expect(defaultRuntime.writeJson).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            reason: "preflight-node-runtime-incompatible",
+            steps: expect.arrayContaining([
+              expect.objectContaining({
+                stderrTail: expect.stringContaining(
+                  `node ${process.platform === "win32" ? quotePowerShellArg(path.join(fixture.root, "openclaw.mjs")) : quoteCliArg(path.join(fixture.root, "openclaw.mjs"))} update --channel stable --tag 2026.9.2`,
+                ),
+                failureFacts: expect.arrayContaining([
+                  expect.objectContaining({
+                    code: "node-runtime-preflight",
+                    message: expect.stringContaining("Required: openclaw@2026.9.2 Node >=26.12.1"),
+                  }),
+                ]),
+              }),
+            ]),
           }),
-        });
+        );
         expect(packageUpdate.stagePackageInstallUpdate).not.toHaveBeenCalled();
       }
       expect(fs.existsSync(fixture.databasePath)).toBe(false);
@@ -273,5 +323,36 @@ it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     } finally {
       fs.chmodSync(globalRoot, 0o755);
     }
+  },
+);
+
+it.each([false, true])(
+  "warns about the unchanged invoking CLI before a redirected update (json=%s)",
+  async (json) => {
+    stubNodeRuntime();
+    const prepare = vi.mocked(commandRun.prepareUpdateCommand).getMockImplementation()!;
+    vi.mocked(commandRun.prepareUpdateCommand).mockImplementation(async (opts) => ({
+      ...(await prepare(opts)),
+      servicePlan: {
+        rootRedirect: { root: fixture.root, previousRoot: "/other-node/lib/node_modules/openclaw" },
+      },
+    }));
+    const log = vi.spyOn(defaultRuntime, "log").mockImplementation(() => undefined);
+    await updateCommand({
+      channel: "stable",
+      tag: targetMetadata.version,
+      yes: true,
+      dryRun: true,
+      json,
+    });
+    const output = json
+      ? JSON.stringify(vi.mocked(defaultRuntime.writeJson).mock.calls.at(-1)?.[0])
+      : log.mock.calls.flat().join("\n");
+    expect(output).toContain("will remain unchanged");
+    expect(output).toContain("incompatible with shared config and plugins");
+    expect(output).toContain(`Use the CLI from ${fixture.root}`);
+    expect(output).toContain("/other-node/lib/node_modules/openclaw");
+    expect(packageUpdate.stagePackageInstallUpdate).not.toHaveBeenCalled();
+    expect(fs.existsSync(fixture.databasePath)).toBe(false);
   },
 );

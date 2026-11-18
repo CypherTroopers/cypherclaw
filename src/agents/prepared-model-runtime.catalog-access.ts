@@ -1,4 +1,3 @@
-import { raceWithTimeout } from "@openclaw/retry";
 import pLimit from "p-limit";
 import { withRemoteModelCatalogSnapshot } from "../model-catalog/remote-overlay.js";
 import { resolveInstalledManifestRegistryIndexFingerprint } from "../plugins/manifest-registry-installed.js";
@@ -23,8 +22,13 @@ import {
   loadScopedModelCatalogAuth,
   prepareInitialModelCatalogAuth,
   replacePreparedModelCatalogAuth,
+  withPreparedModelCatalogPluginScope,
 } from "./prepared-model-runtime.catalog-auth.js";
-import type { PreparedModelRuntimeCatalogAccessParams } from "./prepared-model-runtime.catalog-contract.js";
+import type {
+  PreparedModelCatalogCandidate,
+  PreparedModelRuntimeCatalogAccess,
+  PreparedModelRuntimeCatalogAccessParams,
+} from "./prepared-model-runtime.catalog-contract.js";
 import { createPreparedModelCatalogProjection } from "./prepared-model-runtime.catalog-projection.js";
 import {
   filterPreparedProviderCatalog,
@@ -39,17 +43,13 @@ import {
 } from "./prepared-model-runtime.catalog-source.js";
 import * as retry from "./prepared-model-runtime.discovery-retry.js";
 import { assertPreparedModelRuntimeInputCurrent } from "./prepared-model-runtime.errors.js";
+import { preparedModelInventoryKey } from "./prepared-model-runtime.facts.js";
+import { fingerprintPreparedRuntimeFacts } from "./prepared-model-runtime.fingerprint.js";
 import {
-  fingerprintPreparedRuntimeFacts,
-  preparedModelInventoryKey,
-} from "./prepared-model-runtime.facts.js";
-import {
-  type PreparedModelRuntimeCatalogAccess,
   isPreparedModelCatalogFull,
   markPreparedModelCatalogFull,
 } from "./prepared-model-runtime.full-catalog.js";
 import { capturePreparedModelRuntimeLifetime } from "./prepared-model-runtime.lifecycle.js";
-import { retainPreparedPluginGeneration } from "./prepared-model-runtime.plugin-lifetime.js";
 import {
   createCatalogAttemptReporter,
   notifyPreparedModelCatalogPublication,
@@ -64,7 +64,6 @@ import type {
 
 export const MAX_CONCURRENT_FULL_MODEL_CATALOG_BUILDS = 1;
 const limitFullModelCatalogBuild = pLimit(MAX_CONCURRENT_FULL_MODEL_CATALOG_BUILDS);
-const MODEL_CATALOG_FOREGROUND_WAIT_MS = 5_000;
 
 export async function createFullModelCatalogAccess(
   params: PreparedModelRuntimeCatalogAccessParams,
@@ -107,6 +106,8 @@ export async function createFullModelCatalogAccess(
     params.agentFacts.input.agentDir,
     params.agentFacts.input.inheritedAuthDir,
   );
+  const readCurrentUsage = (store: Parameters<typeof readUsage>[0]) =>
+    params.isCurrent() ? readUsage(store) : store;
   const setCatalogAuth = (catalog: ModelCatalogSnapshot, auth: PreparedModelCatalogAuth) =>
     setPreparedModelFullCatalogAuth(catalog, auth, (store) =>
       params.isCurrent() ? readUsage(store) : store,
@@ -152,12 +153,7 @@ export async function createFullModelCatalogAccess(
   const hasNativeCatalog = params.pluginGeneration.pluginRegistry?.agentHarnesses.some(
     ({ harness }) => typeof harness.loadModelCatalog === "function",
   );
-  type CatalogCandidate = {
-    inventory: PreparedModelCatalogInventory | undefined;
-    configuredRuntimeModels: typeof params.catalogFacts.configuredRuntimeModels;
-    nativeCatalogAcquired: boolean;
-  };
-  type Publication = CatalogCandidate & { catalog: ModelCatalogSnapshot | undefined };
+  type Publication = PreparedModelCatalogCandidate & { catalog: ModelCatalogSnapshot | undefined };
   let published: Publication = {
     catalog: undefined,
     inventory: retainedInventory,
@@ -218,7 +214,10 @@ export async function createFullModelCatalogAccess(
       published.nativeCatalogAcquired,
     );
   }
-  const publishCatalog = (candidate: CatalogCandidate, source: "provider" | "native") => {
+  const publishCatalog = (
+    candidate: PreparedModelCatalogCandidate,
+    source: "provider" | "native",
+  ) => {
     assertCurrent();
     const previous = published;
     let next: Publication = { ...candidate, catalog: previous.catalog };
@@ -265,10 +264,13 @@ export async function createFullModelCatalogAccess(
     return { previous, current: published, staticCatalog };
   };
   const acquireProviderCatalog = async (
-    providerIds: readonly string[] | undefined,
+    requestedProviderIds: readonly string[] | undefined,
     refresh: boolean,
-  ): Promise<CatalogCandidate> =>
-    limitFullModelCatalogBuild(async () => {
+  ): Promise<PreparedModelCatalogCandidate> => {
+    const providerIds = requestedProviderIds
+      ? [...preparedSyntheticAuthProviderScope(requestedProviderIds)]
+      : undefined;
+    return limitFullModelCatalogBuild(async () => {
       assertCurrent();
       const providers = providerIds ?? eligibleProviders;
       const {
@@ -354,198 +356,202 @@ export async function createFullModelCatalogAccess(
         nativeCatalogAcquired: published.nativeCatalogAcquired,
       };
     });
+  };
 
   const acquireNativeCatalog = (
     providerIds?: readonly string[],
     selection?: PreparedNativeModelSelection,
-  ): Promise<ModelCatalogSnapshot> => {
-    const captured = selection
-      ? getPreparedModelRuntimeBorrowedSnapshot(params.pluginGeneration)
-      : undefined;
-    const borrowed =
-      captured?.loadNativeModelCatalog === loadNativeModelCatalog ? captured : undefined;
-    const assertLifetime = capturePreparedModelRuntimeLifetime();
-    const isObservationCurrent = () => {
-      assertLifetime();
-      return borrowed
-        ? getPreparedModelRuntimeBorrowedSnapshot(params.pluginGeneration) === borrowed
-        : params.isCurrent();
-    };
-    const input = borrowed
-      ? { ...params.agentFacts.input, config: borrowed.config }
-      : params.agentFacts.input;
-    const capturedCatalog = borrowed
-      ? (readCapturedPreparedModelRuntimeCatalog(borrowed) ?? borrowed.modelCatalog)
-      : undefined;
-    const readCatalog = () =>
-      (!params.isCurrent() ? capturedCatalog : undefined) ?? published.catalog ?? staticCatalog;
-    const assertObservationCurrent = () =>
-      assertPreparedModelRuntimeInputCurrent(input, isObservationCurrent);
-    const readReadyCatalog = () => {
-      assertObservationCurrent();
-      const snapshot = readCatalog();
-      const ready =
-        selection &&
-        isPreparedNativeModelCatalogReady({
-          input,
-          pluginGeneration: params.pluginGeneration,
-          snapshot,
-          selection,
-        });
-      // Readiness invokes plugin code, which may close the captured authority.
-      assertObservationCurrent();
-      return ready ? snapshot : undefined;
-    };
-    const readyCatalog = readReadyCatalog();
-    if (readyCatalog) {
-      return Promise.resolve(readyCatalog);
-    }
-    const previousNative = nativePending;
-    let failedProviders: readonly string[] | undefined;
-    const promise = (async () => {
-      await previousNative?.catch(() => undefined);
-      const settledCatalog = readReadyCatalog();
-      if (settledCatalog) {
-        return settledCatalog;
-      }
-      await using _ = {
-        [Symbol.asyncDispose]: retainPreparedPluginGeneration(params.pluginGeneration),
+    refresh = false,
+  ): Promise<ModelCatalogSnapshot> =>
+    withPreparedModelCatalogPluginScope(params.pluginGeneration, async () => {
+      const captured = selection
+        ? getPreparedModelRuntimeBorrowedSnapshot(params.pluginGeneration)
+        : undefined;
+      const borrowed =
+        captured?.loadNativeModelCatalog === loadNativeModelCatalog ? captured : undefined;
+      const assertLifetime = capturePreparedModelRuntimeLifetime();
+      const isObservationCurrent = () => {
+        assertLifetime();
+        return borrowed
+          ? getPreparedModelRuntimeBorrowedSnapshot(params.pluginGeneration) === borrowed
+          : params.isCurrent();
       };
-      if (params.isCurrent()) {
-        attempt.setPending([], "native");
-      }
-      let discoveredProviders: string[] = [];
-      let completed = false;
-      const failures: Array<{ error: unknown; providers?: readonly string[] }> = [];
-      const startupProviders = new Set(params.agentFacts.providerIds.map(normalizeProvider));
-      const rawCatalog = await augmentPreparedModelCatalogWithAgentHarness({
-        input,
-        nativeSelection: selection,
-        snapshot: params.isCurrent()
-          ? (published.inventory?.catalog ?? params.catalogFacts.modelCatalog)
-          : readCatalog(),
-        normalizeProvider,
-        preparedSnapshot: readCatalog(),
-        pluginRegistry: params.pluginGeneration.pluginRegistry,
-        isCurrent: isObservationCurrent,
-        includesProvider: providerIds
-          ? (provider) => providerIds.includes(normalizeProvider(provider))
-          : undefined,
-        onDiscoveryStarted: (provider) => {
-          if (params.isCurrent()) {
-            attempt.setPending([normalizeProvider(provider)], "native");
-          }
-        },
-        onError: (error, failedProviderIds) => {
-          failures.push({ error, providers: failedProviderIds?.map(normalizeProvider) });
-        },
-        onDiscoveryCompleted: (rows) => {
-          completed = true;
-          discoveredProviders = [
-            ...new Set(
-              rows
-                .map((entry) => normalizeProvider(entry.provider))
-                .filter((provider) => !startupProviders.has(provider)),
-            ),
-          ];
-        },
-      });
-      assertObservationCurrent();
-      if (!completed && failures.length) {
-        failedProviders = failures.flatMap((failure) => failure.providers ?? []);
-        throw failures[0]!.error;
-      }
-      if (!params.isCurrent()) {
-        const catalog = projectInventory(
-          {
-            catalog: rawCatalog,
-            discoveryOrigins: capturedCatalog?.acceptedDiscoveryOrigins ?? [],
-          },
-          params.catalogFacts.configuredRuntimeModels,
-        );
-        setCatalogAuth(
-          catalog,
-          getPreparedModelFullCatalogAuth(capturedCatalog ?? staticCatalog) ?? currentAuth,
-        );
+      const input = borrowed
+        ? { ...params.agentFacts.input, config: borrowed.config }
+        : params.agentFacts.input;
+      const capturedCatalog = borrowed
+        ? (readCapturedPreparedModelRuntimeCatalog(borrowed) ?? borrowed.modelCatalog)
+        : undefined;
+      const readCatalog = () =>
+        (!params.isCurrent() ? capturedCatalog : undefined) ?? published.catalog ?? staticCatalog;
+      const assertObservationCurrent = () =>
+        assertPreparedModelRuntimeInputCurrent(input, isObservationCurrent);
+      const readReadyCatalog = () => {
         assertObservationCurrent();
-        return catalog;
+        const snapshot = readCatalog();
+        const ready =
+          !refresh &&
+          isPreparedNativeModelCatalogReady({
+            input,
+            pluginGeneration: params.pluginGeneration,
+            snapshot,
+            selection,
+            catalogAcquired: published.nativeCatalogAcquired,
+          });
+        // Readiness invokes plugin code, which may close the captured authority.
+        assertObservationCurrent();
+        return ready ? snapshot : undefined;
+      };
+      const readyCatalog = readReadyCatalog();
+      if (readyCatalog) {
+        return readyCatalog;
       }
-      // Selected native membership is a foreground harness fact, not a provider-auth refresh.
-      // Full inventory acquisition alone discovers additional paired provider credentials.
-      const nativeAuth =
-        !selection && completed && discoveredProviders.length
-          ? await worker.loadAuth({ providerIds: discoveredProviders })
-          : undefined;
-      assertCurrent();
-      // Provider renewal may finish during native discovery. Commit native observations onto
-      // that latest provider publication; a captured pre-await inventory must never replace it.
-      const latest = published;
-      const latestInventory = latest.inventory;
-      const auth =
-        getPreparedModelFullCatalogAuth(latest.inventory?.catalog ?? staticCatalog) ?? currentAuth;
-      const nativeScope = preparedSyntheticAuthProviderScope(discoveredProviders);
-      const catalogAuth = nativeAuth
-        ? replacePreparedModelCatalogAuth(auth, nativeAuth, (provider) =>
-            nativeScope.has(normalizeProvider(provider)),
-          )
-        : auth;
-      const acquiredNative =
-        latest.nativeCatalogAcquired || (!selection && (!providerIds || completed));
-      const nextInventory = completed
-        ? {
-            catalog: {
-              ...rawCatalog,
-              authoritative: (latestInventory?.catalog ?? params.catalogFacts.modelCatalog)
-                .authoritative,
-            },
-            runtimeModels: latestInventory?.runtimeModels ?? new Map(),
-            key: inventoryKey,
-            pluginFingerprint,
-            nativeSource,
-            providers: latestInventory?.providers ?? new Map(),
-            discoveryOrigins: latestInventory?.discoveryOrigins ?? [],
+      const previousNative = nativePending;
+      let failedProviders: readonly string[] | undefined;
+      const promise = (async () => {
+        await previousNative?.catch(() => undefined);
+        const settledCatalog = readReadyCatalog();
+        if (settledCatalog) {
+          return settledCatalog;
+        }
+        if (params.isCurrent()) {
+          attempt.setPending([], "native");
+        }
+        let discoveredProviders: string[] = [];
+        let completed = false;
+        const failures: Array<{ error: unknown; providers?: readonly string[] }> = [];
+        const startupProviders = new Set(params.agentFacts.providerIds.map(normalizeProvider));
+        const rawCatalog = await augmentPreparedModelCatalogWithAgentHarness({
+          input,
+          nativeSelection: selection,
+          snapshot: params.isCurrent()
+            ? (published.inventory?.catalog ?? params.catalogFacts.modelCatalog)
+            : readCatalog(),
+          normalizeProvider,
+          preparedSnapshot: readCatalog(),
+          pluginRegistry: params.pluginGeneration.pluginRegistry,
+          includesProvider: providerIds
+            ? (provider) => providerIds.includes(normalizeProvider(provider))
+            : undefined,
+          onDiscoveryStarted: (provider) => {
+            if (params.isCurrent()) {
+              attempt.setPending([normalizeProvider(provider)], "native");
+            }
+          },
+          onError: (error, failedProviderIds) => {
+            failures.push({ error, providers: failedProviderIds?.map(normalizeProvider) });
+          },
+          onDiscoveryCompleted: (rows) => {
+            completed = true;
+            discoveredProviders = [
+              ...new Set(
+                rows
+                  .map((entry) => normalizeProvider(entry.provider))
+                  .filter((provider) => !startupProviders.has(provider)),
+              ),
+            ];
+          },
+        });
+        assertObservationCurrent();
+        if (!params.isCurrent()) {
+          if (!completed && failures.length) {
+            throw failures[0]!.error;
           }
-        : latestInventory;
-      if (nextInventory) {
-        if (nativeAuth) {
-          accountCatalog.reconcileAuth(nativeAuth.authStore, (provider) =>
-            nativeScope.has(normalizeProvider(provider)),
+          const catalog = projectInventory(
+            {
+              catalog: rawCatalog,
+              discoveryOrigins: capturedCatalog?.acceptedDiscoveryOrigins ?? [],
+            },
+            params.catalogFacts.configuredRuntimeModels,
           );
+          setCatalogAuth(
+            catalog,
+            getPreparedModelFullCatalogAuth(capturedCatalog ?? staticCatalog) ?? currentAuth,
+          );
+          assertObservationCurrent();
+          return catalog;
         }
-        setCatalogAuth(nextInventory.catalog, catalogAuth);
-      }
-      if (completed) {
-        attempt.published(providerIds, "native");
-      } else {
-        attempt.setPending(undefined, "native");
-      }
-      for (const failure of failures) {
-        attempt.failed(failure.error, failure.providers, "native");
-      }
-      const change = publishCatalog(
-        { ...latest, inventory: nextInventory, nativeCatalogAcquired: acquiredNative },
-        "native",
-      );
-      if (params.isPublished?.() !== false) {
-        notifyPreparedModelCatalogPublication(change);
-      }
-      return published.catalog ?? staticCatalog;
-    })()
-      .catch((error: unknown) => {
-        attempt.failed(error, failedProviders ?? providerIds, "native");
-        if (params.isCurrent() && published.catalog) {
-          attempt.withRefreshStatus(published.catalog);
+        // Selected native membership is a foreground harness fact, not a provider-auth refresh.
+        // Full inventory acquisition alone discovers additional paired provider credentials.
+        const nativeAuth =
+          !selection && completed && discoveredProviders.length
+            ? await worker.loadAuth({ providerIds: discoveredProviders })
+            : undefined;
+        assertCurrent();
+        // Provider renewal may finish during native discovery. Commit native observations onto
+        // that latest provider publication; a captured pre-await inventory must never replace it.
+        const latest = published;
+        const latestInventory = latest.inventory;
+        const auth =
+          getPreparedModelFullCatalogAuth(latest.inventory?.catalog ?? staticCatalog) ??
+          currentAuth;
+        const nativeScope = preparedSyntheticAuthProviderScope(discoveredProviders);
+        const catalogAuth = nativeAuth
+          ? replacePreparedModelCatalogAuth(auth, nativeAuth, (provider) =>
+              nativeScope.has(normalizeProvider(provider)),
+            )
+          : auth;
+        const acquiredNative = latest.nativeCatalogAcquired || (!selection && !providerIds);
+        const nextInventory =
+          completed || failures.length
+            ? {
+                catalog: {
+                  ...rawCatalog,
+                  authoritative: (latestInventory?.catalog ?? params.catalogFacts.modelCatalog)
+                    .authoritative,
+                },
+                runtimeModels: latestInventory?.runtimeModels ?? new Map(),
+                key: inventoryKey,
+                pluginFingerprint,
+                nativeSource,
+                providers: latestInventory?.providers ?? new Map(),
+                discoveryOrigins: latestInventory?.discoveryOrigins ?? [],
+              }
+            : latestInventory;
+        if (nextInventory) {
+          if (nativeAuth) {
+            accountCatalog.reconcileAuth(nativeAuth.authStore, (provider) =>
+              nativeScope.has(normalizeProvider(provider)),
+            );
+          }
+          setCatalogAuth(nextInventory.catalog, catalogAuth);
         }
-        throw error;
-      })
-      .finally(() => {
-        if (nativePending === promise) {
-          nativePending = undefined;
+        if (completed) {
+          attempt.published(providerIds, "native");
+        } else {
+          attempt.setPending(undefined, "native");
         }
-      });
-    nativePending = promise;
-    return promise;
-  };
+        for (const failure of failures) {
+          attempt.failed(failure.error, failure.providers, "native");
+        }
+        const change = publishCatalog(
+          { ...latest, inventory: nextInventory, nativeCatalogAcquired: acquiredNative },
+          "native",
+        );
+        if (params.isPublished?.() !== false) {
+          notifyPreparedModelCatalogPublication(change);
+        }
+        if (!completed && failures.length && (selection || refresh)) {
+          failedProviders = failures.flatMap((failure) => failure.providers ?? []);
+          throw failures[0]!.error;
+        }
+        return published.catalog ?? staticCatalog;
+      })()
+        .catch((error: unknown) => {
+          attempt.failed(error, failedProviders ?? providerIds, "native");
+          if (params.isCurrent() && published.catalog) {
+            attempt.withRefreshStatus(published.catalog);
+          }
+          throw error;
+        })
+        .finally(() => {
+          if (nativePending === promise) {
+            nativePending = undefined;
+          }
+        });
+      nativePending = promise;
+      return promise;
+    });
 
   const authOwner = {
     pluginGeneration: params.pluginGeneration,
@@ -578,7 +584,7 @@ export async function createFullModelCatalogAccess(
   );
   const refreshExpiredModelCatalog = () => {
     assertCurrent();
-    recheckNativeLogin();
+    void recheckNativeLogin();
     if (pending || !published.inventory) {
       return;
     }
@@ -603,10 +609,10 @@ export async function createFullModelCatalogAccess(
       !options.refresh &&
       !options.changedOnly &&
       published.catalog &&
-      isPreparedModelCatalogFull(published.catalog)
+      eligibleProviders.every((provider) => published.inventory?.providers.has(provider))
     ) {
       refreshExpiredModelCatalog();
-      return published.catalog;
+      return await acquireNativeCatalog();
     }
     const requestedProviders = [
       ...new Set((options.providerIds ?? eligibleProviders).map(normalizeProvider)),
@@ -618,10 +624,7 @@ export async function createFullModelCatalogAccess(
     // would, including hosted rows for providers without credentials.
     const fullRefresh =
       !options.providerIds && (!options.changedOnly || !published.inventory?.providers.size);
-    const includeNative =
-      trigger === "request" &&
-      hasNativeCatalog &&
-      (!options.changedOnly || !published.nativeCatalogAcquired);
+    const includeNative = trigger === "request" && hasNativeCatalog && !options.changedOnly;
     const nativeScope = options.providerIds ? requestedProviders : undefined;
     const nativeProviders = includeNative ? nativeScope : [];
     if (!providers.length && !includeNative && !fullRefresh) {
@@ -646,10 +649,7 @@ export async function createFullModelCatalogAccess(
     }
     attempt.setPending(fullRefresh || providers.length ? providers : undefined);
     const providerIds = fullRefresh ? undefined : providers;
-    const promise = (async () => {
-      await using _ = {
-        [Symbol.asyncDispose]: retainPreparedPluginGeneration(params.pluginGeneration),
-      };
+    const promise = withPreparedModelCatalogPluginScope(params.pluginGeneration, async () => {
       if (fullRefresh || providers.length) {
         const candidate = await acquireProviderCatalog(providerIds, refreshResponses).catch(
           (error: unknown) => {
@@ -662,10 +662,10 @@ export async function createFullModelCatalogAccess(
         attempt.published(providerIds, "provider", () => publishCatalog(candidate, "provider"));
       }
       if (includeNative) {
-        return await acquireNativeCatalog(nativeScope);
+        return await acquireNativeCatalog(nativeScope, undefined, options.refresh);
       }
       return published.catalog ?? staticCatalog;
-    })().finally(() => {
+    }).finally(() => {
       pending = undefined;
       retryFailedDiscovery();
     });
@@ -677,11 +677,19 @@ export async function createFullModelCatalogAccess(
     () => (pending ? undefined : published.inventory),
     (options) => acquireCatalog(options, "expiry"),
   );
-  const loadNativeModelCatalog = async (selection: PreparedNativeModelSelection) =>
-    await acquireNativeCatalog([normalizeProvider(selection.provider)], selection);
+  const loadNativeModelCatalog = async (selection?: PreparedNativeModelSelection) =>
+    await retry.waitForDiscovery(
+      acquireNativeCatalog(
+        selection ? [normalizeProvider(selection.provider)] : undefined,
+        selection,
+      ),
+      () => published.catalog ?? staticCatalog,
+      Boolean(selection),
+    );
   return {
     accountCatalog,
     initialAuth: currentAuth,
+    readUsage: readCurrentUsage,
     isCurrent: params.isCurrent,
     withRefreshStatus: attempt.withRefreshStatus,
     loadAuth: (scope) => loadScopedModelCatalogAuth(authOwner, scope),
@@ -696,17 +704,12 @@ export async function createFullModelCatalogAccess(
       return published.inventory?.runtimeModels;
     },
     loadNativeModelCatalog,
-    loadFullModelCatalog: async (options) => {
-      // Standalone commands cannot publish background discovery after their process exits.
-      if (options?.refresh && (options.wait || params.inventoryOwner.provenance === "standalone")) {
-        return await acquireCatalog(options);
-      }
-      return await raceWithTimeout(
+    // Standalone commands cannot publish background discovery after their process exits.
+    loadFullModelCatalog: (options) =>
+      retry.waitForDiscovery(
         acquireCatalog(options),
-        MODEL_CATALOG_FOREGROUND_WAIT_MS,
         () => published.catalog ?? staticCatalog,
-        { ref: false },
-      );
-    },
+        options?.refresh && (options.wait || params.inventoryOwner.provenance === "standalone"),
+      ),
   };
 }

@@ -403,6 +403,40 @@ exec "$REAL_GIT" "$@"`,
   },
 );
 
+releasePolicyIt(
+  "recovers stalled shallow hydration without changing the pinned ancestry proof",
+  () => {
+    const fixture = createAncestryFixture({
+      sourceDistance: 8,
+      targetDistance: 220,
+      related: true,
+    });
+    // Replay the observed no-progress fetch; recovery and ancestry use real Git.
+    const proxy = writeGitProxy(
+      fixture,
+      "recoverable-no-progress-git",
+      `if [[ " $* " == *" fetch "* && " $* " == *" --deepen=128 "* ]]; then
+  exit 0
+fi
+exec "$REAL_GIT" "$@"`,
+    );
+    try {
+      const checkout = cloneAncestrySource(fixture, "checkout");
+      expectPolicySuccess(
+        runReleaseAncestry(checkout, "merge-base", {
+          PATH: `${proxy.binDir}:${process.env.PATH ?? ""}`,
+          REAL_GIT: proxy.realGit,
+        }),
+        "merge-base",
+      );
+      expect(fixtureGit(checkout, ["rev-parse", "--is-shallow-repository"])).toBe("false");
+      expect(fixtureGit(checkout, ["rev-parse", "refs/remotes/origin/main"])).toBe(fixture.target);
+    } finally {
+      rmSync(fixture.root, { force: true, recursive: true });
+    }
+  },
+);
+
 releasePolicyIt.for([false, true])("rejects unprovable release history (stalled=%s)", (stalled) => {
   const fixture = createAncestryFixture({
     sourceDistance: 8,
@@ -413,7 +447,7 @@ releasePolicyIt.for([false, true])("rejects unprovable release history (stalled=
     ? writeGitProxy(
         fixture,
         "no-progress-git",
-        `if [[ " $* " == *" fetch "* && " $* " == *" --deepen=128 "* ]]; then
+        `if [[ " $* " == *" fetch "* && ( " $* " == *" --deepen=128 "* || " $* " == *" --unshallow "* ) ]]; then
   exit 0
 fi
 exec "$REAL_GIT" "$@"`,
@@ -571,7 +605,11 @@ linuxIt.for([
     fixtureGit(origin, ["init", "--quiet"]);
     const script = "scripts/ci-additional-checks.sh";
     const trustedScript = readFileSync(script, "utf8");
-    for (const file of [".github/actions/setup-node-env/action.yml", script]) {
+    for (const file of [
+      ".github/actions/setup-node-env/action.yml",
+      script,
+      "scripts/ci-collect-checks.sh",
+    ]) {
       mkdirSync(dirname(join(origin, file)), { recursive: true });
       writeFileSync(join(origin, file), readFileSync(file));
     }
@@ -1572,6 +1610,7 @@ posixIt.for(
   { timeout: 55_000 },
   async ({ operation, code }, { signal }) => {
     const report = await publisherRun(signal, { gitFault: { match: `^${operation} `, code } });
+    expect(report.readyAttempts).toHaveLength(1);
     expect(report.code, report.output).toBe(code === "cancel" ? 143 : 125);
     expect(report.commands.at(-1)?.args[0]).toBe(operation);
     expect(report.githubSummary).toBe("");
@@ -1975,6 +2014,7 @@ posixIt(
   "generated publisher reconciliation accepts a tree merged after PR mutation",
   async ({ signal }) => {
     const report = await publisherRun(signal, { publisher: { reconciliation: "merged" } });
+    expect(report.readyAttempts).toEqual([]);
     expect(report.code, report.output).toBe(0);
     expect(report.fetches).toHaveLength(2);
     expect(report.pushes).toHaveLength(1);

@@ -129,12 +129,11 @@ function buildRedactionLookup(hints: ConfigUiHints): Set<string> {
 type RedactionContext = {
   hints: ConfigUiHints | undefined;
   lookup: ReadonlySet<string> | undefined;
-  warnOnMissingOriginal: boolean;
 };
 
 function createRedactionContext(hints?: ConfigUiHints): RedactionContext {
   const lookup = hints ? buildRedactionLookup(hints) : undefined;
-  return { hints, lookup: lookup?.has("") ? lookup : undefined, warnOnMissingOriginal: true };
+  return { hints, lookup: lookup?.has("") ? lookup : undefined };
 }
 
 // Schema lookup coverage is prefix-scoped. After a path misses, heuristic detection must own the
@@ -324,13 +323,7 @@ export function redactConfigSnapshot(
     redactedRaw &&
     shouldFallbackToStructuredRawRedaction({
       redactedRaw,
-      originalConfig: snapshot.parsed ?? snapshot.config,
-      // Missing originals only reject this raw-text view; actual writes still warn.
-      restoreParsed: (parsed) =>
-        restoreRedactedValuesWithContext(parsed, snapshot.config, {
-          ...context,
-          warnOnMissingOriginal: false,
-        }),
+      redactedConfig: redactedParsed ?? redactedConfig,
     })
   ) {
     redactedRaw = null;
@@ -411,14 +404,11 @@ function restoreOriginalValueOrThrow(
   original: Record<string, unknown>,
   key: string,
   path: string,
-  context: RedactionContext,
 ): unknown {
   if (Object.hasOwn(original, key)) {
     return original[key];
   }
-  if (context.warnOnMissingOriginal) {
-    log.warn(`Cannot un-redact config key ${path} as it doesn't have any value`);
-  }
+  log.warn(`Cannot un-redact config key ${path} as it doesn't have any value`);
   throw new RedactionError(path);
 }
 
@@ -479,7 +469,14 @@ function maybeRestoreSecretRefId(params: {
     );
   }
 
-  if (incomingObj.source !== originalObj.source || incomingObj.provider !== originalObj.provider) {
+  const restored = { ...incomingObj, id: originalObj.id };
+  // Unhinted secret objects also mask their identity fields during heuristic redaction.
+  if (incomingObj.source === REDACTED_SENTINEL && incomingObj.provider === REDACTED_SENTINEL) {
+    restored.source = originalObj.source;
+    restored.provider = originalObj.provider;
+  }
+
+  if (restored.source !== originalObj.source || restored.provider !== originalObj.provider) {
     // Changing source/provider while keeping a redacted id would silently bind the old secret id to
     // a different backend. Require an explicit id for that edit.
     throw new RedactionError(
@@ -488,7 +485,7 @@ function maybeRestoreSecretRefId(params: {
     );
   }
 
-  return { handled: true, value: { ...incomingObj, id: originalObj.id } };
+  return { handled: true, value: restored };
 }
 
 type RedactedArrayIdentity = {
@@ -601,7 +598,7 @@ function restoreRedactedValue(
       hasSensitiveUrlHintPath(context.hints, hintPaths) ||
       isSensitiveUrlConfigPath(path);
     if (value === REDACTED_SENTINEL && canRestore) {
-      result[key] = restoreOriginalValueOrThrow(orig, key, candidate ?? path, context);
+      result[key] = restoreOriginalValueOrThrow(orig, key, candidate ?? path);
     } else if (typeof value === "object" && value !== null) {
       const restoredSecretRef =
         candidate || canRestore

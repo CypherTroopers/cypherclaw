@@ -4,7 +4,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import * as tar from "tar";
+import { build } from "tsdown";
 import { describe, expect, it, vi } from "vitest";
+import { createRuntimeDependencyOwnershipBuildPlugin } from "../../../scripts/lib/runtime-dependency-ownership-build-plugin.mts";
 import { collectPackageDistInventory } from "../../infra/package-dist-inventory.js";
 import * as tmpDirs from "../../infra/tmp-openclaw-dir.js";
 import { createDeferredCore } from "../../shared/deferred.js";
@@ -29,6 +31,91 @@ vi.mock("./node-bootstrap-artifact-worker.js", async () => {
 const { fixture, tempDirs } = useNodeBootstrapArtifactFixtures();
 
 describe("node bootstrap distribution", () => {
+  it.each([
+    { qa: false, rootShared: false },
+    { qa: true, rootShared: false },
+    { qa: false, rootShared: true },
+  ])(
+    "packages built local SDK testing chunks (QA: $qa, root shared: $rootShared)",
+    async ({ qa, rootShared }) => {
+      const { root, packageRoot, provider, sourcePackage } = await fixture();
+      const sources = {
+        "test/helpers/sqlite-worker-fault.ts":
+          'export const faultWorker = () => new URL("./sqlite-worker-fault.worker.mjs", import.meta.url);',
+        "src/plugin-sdk/sqlite-runtime-testing.ts":
+          'export { faultWorker } from "../../test/helpers/sqlite-worker-fault.ts";',
+        "src/plugin-sdk/test-state.ts":
+          'export { faultWorker } from "../../test/helpers/sqlite-worker-fault.ts";',
+        "src/plugin-sdk/qa-runtime.ts":
+          'export { faultWorker } from "../../test/helpers/sqlite-worker-fault.ts";',
+        "src/bootstrap-probe.ts": rootShared
+          ? 'export { faultWorker } from "./plugin-sdk/sqlite-runtime-testing.ts";'
+          : "export const ready = true;",
+        "extensions/qa-lab/index.ts":
+          'export { faultWorker } from "../../src/plugin-sdk/sqlite-runtime-testing.ts";',
+      };
+      for (const [file, source] of Object.entries(sources)) {
+        await write(packageRoot, file, source);
+      }
+      await write(packageRoot, "package.json", {
+        ...sourcePackage,
+        files: [
+          ...sourcePackage.files,
+          "!dist/extensions/qa-lab/**",
+          "!dist/plugin-sdk/sqlite-runtime-testing.*",
+          "!dist/plugin-sdk/test-state.*",
+        ],
+      });
+      const { bundles } = await build({
+        config: false,
+        tsconfig: false,
+        cwd: packageRoot,
+        entry: {
+          "bootstrap-probe": "src/bootstrap-probe.ts",
+          "plugin-sdk/sqlite-runtime-testing": "src/plugin-sdk/sqlite-runtime-testing.ts",
+          "plugin-sdk/test-state": "src/plugin-sdk/test-state.ts",
+          ...(qa
+            ? {
+                "plugin-sdk/qa-runtime": "src/plugin-sdk/qa-runtime.ts",
+                "extensions/qa-lab/index": "extensions/qa-lab/index.ts",
+              }
+            : {}),
+        },
+        outDir: "dist",
+        clean: false,
+        format: "esm",
+        platform: "node",
+        dts: false,
+        logLevel: "silent",
+        plugins: [createRuntimeDependencyOwnershipBuildPlugin(packageRoot)],
+      });
+      for (const bundle of bundles) {
+        await bundle[Symbol.asyncDispose]();
+      }
+      const built = await collectPackageDistInventory(packageRoot);
+      expect(built.some((file) => /sqlite-worker-fault-.*[.]m?js$/u.test(file))).toBe(true);
+      if (rootShared) {
+        await expect(provider.prepare()).rejects.toThrow(
+          "imports missing dist/sqlite-worker-fault.worker.mjs",
+        );
+        return;
+      }
+      const artifact = await provider.prepare();
+      const installed = path.join(root, "node");
+      await fs.mkdir(installed);
+      await tar.extract({ file: artifact.tarballPath, cwd: installed });
+      expect(
+        (await collectPackageDistInventory(path.join(installed, "package"))).some((file) =>
+          /sqlite-worker-fault-.*[.]m?js$/u.test(file),
+        ),
+      ).toBe(false);
+      const { stdout } = await promisify(execFile)(process.execPath, [
+        path.join(installed, "package/openclaw.mjs"),
+      ]);
+      expect(stdout.trim()).toBe("local-ai:cloud-ready");
+    },
+  );
+
   it("packs and runs an installed CommonJS bundle with extensionless relative requires", async () => {
     const { root, packageRoot, provider, sourcePackage } = await fixture();
     const bundledName = "@fixture/undici";
@@ -311,6 +398,8 @@ describe("node bootstrap distribution", () => {
       entry: "ownership",
     },
     { name: "public plugin ownership", extensions: ["remote-runtime"], entry: "ownership" },
+    { name: "a root import of local-only chunks", extensions: [], entry: "root" },
+    { name: "a root require of local-only chunks", extensions: [], entry: "require" },
     { name: "a current root import", extensions: ["qa-lab"], entry: "root" },
     { name: "a current root createRequire", extensions: ["qa-lab"], entry: "require" },
     { name: "a transitive current root import", extensions: ["qa-lab"], entry: "transitive" },
@@ -371,16 +460,20 @@ describe("node bootstrap distribution", () => {
 
   it.each([
     { metadata: "stale", error: /ownership.*match/u },
+    { metadata: "local-only-stale", error: /ownership.*match/u },
     { metadata: "malformed", error: /ownership artifact/u },
     { metadata: "missing", error: /incomplete built import closure/u },
   ])("refuses private runtime omission with $metadata ownership", async ({ metadata, error }) => {
     const { packageRoot, provider } = await fixture();
     const source = 'import "./qa-runtime-private.mjs";\n';
     await writeOwnedChunks(packageRoot, {
-      "opaque-A1b2C3.mjs": { source, extensions: ["qa-lab"] },
+      "opaque-A1b2C3.mjs": {
+        source,
+        extensions: metadata === "local-only-stale" ? [] : ["qa-lab"],
+      },
     });
     await write(packageRoot, "dist/qa-runtime-private.mjs", "export {};\n");
-    if (metadata === "stale") {
+    if (metadata === "stale" || metadata === "local-only-stale") {
       await write(packageRoot, "dist/opaque-A1b2C3.mjs", `${source}export const changed = true;\n`);
     } else if (metadata === "malformed") {
       await write(packageRoot, "dist/runtime-dependency-ownership.json", { chunks: [] });
@@ -388,57 +481,6 @@ describe("node bootstrap distribution", () => {
       await fs.rm(path.join(packageRoot, "dist/runtime-dependency-ownership.json"));
     }
     await expect(provider.prepare()).rejects.toThrow(error);
-  });
-
-  it("rejects a retained entry changed after import inspection and removes its archive", async () => {
-    const { packageRoot, provider } = await fixture();
-    await writeOwnedChunks(packageRoot, {
-      "opaque-A1b2C3.mjs": {
-        source: 'import "./qa-runtime-private.mjs";\n',
-        extensions: ["qa-lab"],
-      },
-    });
-    await write(packageRoot, "dist/qa-runtime-private.mjs", "export {};\n");
-    const entryPath = path.join(packageRoot, "dist/entry.js");
-    const original = await fs.readFile(entryPath, "utf8");
-    const openFile = fs.open.bind(fs);
-    const makeTemp = fs.mkdtemp.bind(fs);
-    let entryReads = 0;
-    let changed = false;
-    let artifactRoot: string | undefined;
-    const destination = vi.spyOn(fs, "mkdtemp").mockImplementationOnce(async (...args) => {
-      artifactRoot = await makeTemp(...args);
-      return artifactRoot;
-    });
-    const reader = vi.spyOn(fs, "open").mockImplementation(async (...args) => {
-      if (args[0] === entryPath) {
-        entryReads += 1;
-      }
-      // The first open inspects imports; the second reads the bytes for the archive.
-      if (args[0] === entryPath && entryReads === 2) {
-        changed = true;
-        await fs.writeFile(entryPath, `import "./opaque-A1b2C3.mjs";\n${original}`);
-      }
-      return await openFile(...args);
-    });
-    try {
-      await expect(provider.prepare()).rejects.toThrow("changed after import inspection");
-      expect(changed).toBe(true);
-      expect(entryReads).toBe(2);
-      expect(artifactRoot).toBeDefined();
-      await expect(fs.access(artifactRoot!)).rejects.toMatchObject({ code: "ENOENT" });
-    } finally {
-      reader.mockRestore();
-      destination.mockRestore();
-    }
-  });
-
-  it("rejects stale running build identity before transferring a same-version distribution", async () => {
-    const { packageRoot, provider } = await fixture();
-    await write(packageRoot, "dist/build-info.json", { version, buildId: "newer-build" });
-    await expect(provider.prepare()).rejects.toThrow("running Gateway build");
-    await write(packageRoot, "dist/build-info.json", { version, buildId });
-    await expect(provider.prepare()).resolves.toMatchObject({ buildId });
   });
 
   it("refuses a shortened non-JavaScript package member", async () => {
@@ -504,29 +546,6 @@ describe("node bootstrap distribution", () => {
       destination.mockRestore();
     }
     await expect(provider.prepare()).resolves.toMatchObject({ buildId });
-  });
-
-  it("does not return an artifact when its lifecycle closes during preparation", async () => {
-    const { provider } = await fixture();
-    const pending = provider.prepare();
-    const closing = provider.close();
-    await expect(pending).rejects.toThrow("closed");
-    await closing;
-  });
-
-  it("keeps a retired artifact until its active enrollment closes", async () => {
-    const { provider } = await fixture();
-    const enrollment = new AbortController();
-    const artifact = await provider.prepare(enrollment.signal);
-    const closing = provider.close();
-    try {
-      await expect(fs.access(artifact.tarballPath)).resolves.toBeUndefined();
-      await expect(provider.prepare()).rejects.toThrow("closed");
-    } finally {
-      enrollment.abort();
-      await closing;
-    }
-    await expect(fs.access(artifact.tarballPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("cancels one waiting enrollment without abandoning shared artifact preparation", async () => {
@@ -612,19 +631,6 @@ describe("node bootstrap distribution", () => {
       );
     },
   );
-
-  it("gives different archive identities to different built bytes with the same package version", async () => {
-    const first = await fixture();
-    const second = await fixture();
-    await write(
-      second.packageRoot,
-      "dist/shared.js",
-      'export const answer = "dirty-source-build";',
-    );
-    const [left, right] = await Promise.all([first.provider.prepare(), second.provider.prepare()]);
-    expect(left.openclawVersion).toBe(right.openclawVersion);
-    expect(left.tarballSha256).not.toBe(right.tarballSha256);
-  });
 
   it("rejects streamed bytes that differ from the verified source", async () => {
     const { provider } = await fixture();

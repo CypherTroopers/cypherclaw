@@ -63,7 +63,7 @@ If you are unsure, report privately. We would rather route a careful report than
 
 - Search existing advisories before filing.
 - Include likely duplicate GHSA IDs in your report when applicable.
-- Maintainers may close lower-quality/later duplicates in favor of the earliest high-quality canonical report.
+- Maintainers may close lower-quality/later duplicates in favor of the earliest high-quality report.
 
 ## Security Posture and Report Rules
 
@@ -244,6 +244,17 @@ Hardening roadmap may add explicit visibility modes (for example `all`, `allowli
 - Hook/webhook-driven payloads should be treated as untrusted content; keep unsafe bypass flags disabled unless doing tightly scoped debugging (`hooks.gmail.allowUnsafeExternalContent`, `hooks.mappings[].allowUnsafeExternalContent`).
 - Weak model tiers are generally easier to prompt-inject. For tool-enabled or hook-driven agents, prefer strong modern model tiers and strict tool policy (for example `tools.profile: "messaging"` or stricter), plus sandboxing where possible.
 
+Delegated OpenClaw administration is a separate host-held capability. Explicit
+Full Access, or `tools.openclaw.autoApproveChanges: true`, grants standing
+authorization for permitted system-agent changes, including changes that can
+enable host code execution even when direct execution or editing tools are
+denied. Inferred Full Access requires effective unrestricted Gateway-host
+execution; settings for disabled tools do not grant authority. Set
+`autoApproveChanges: false` globally or per agent to require human approval for
+delegated persistent changes. Filesystem, sandbox, inherited-authority, and
+operation restrictions remain enforced, and a model cannot automatically approve
+broadening this grant. See [Delegated setup and repair](https://docs.openclaw.ai/gateway/permission-modes#delegated-setup-and-repair).
+
 ### Gateway and Node Trust Concept
 
 OpenClaw separates routing from execution, but both remain inside the same operator trust boundary:
@@ -334,19 +345,19 @@ OpenClaw's web interface (Gateway Control UI + HTTP endpoints) is intended for *
 
 ### Node.js Version
 
-OpenClaw requires **Node.js 24.22.1+ or Node.js 26.12.1+**. Node 26 is recommended; Node 24 is the supported LTS line. These minimum versions include the upstream SQLite WAL-reset corruption fix and preserve embedded NUL characters in SQLite TEXT reads. Node 22, 23, and 25 are unsupported.
+OpenClaw requires **Node.js 24.16+ or Node.js 26.1+**. Node 26 is recommended; Node 24 is the supported LTS line. These minimum versions include the upstream SQLite WAL-reset corruption fix and preserve embedded NUL characters in SQLite TEXT reads. Node 22, 23, and 25 are unsupported.
 
 Verify your Node.js version:
 
 ```bash
-node --version  # Should be v24.22.1+ or v26.12.1+
+node --version  # Should be v24.16+ or v26.1+
 ```
 
 ### Docker Security
 
 When running OpenClaw in Docker:
 
-1. The official image runs as a non-root user (`node`) for reduced attack surface
+1. The official image runs as a non-root user (`node`) to limit what a compromised process can do
 2. Use `--read-only` flag when possible for additional filesystem protection
 3. Limit container capabilities with `--cap-drop=ALL`
 

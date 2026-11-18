@@ -22,7 +22,14 @@ const source = readFileSync(".github/workflows/full-release-validation.yml", "ut
 type Workflow = {
   jobs: Record<
     string,
-    { if?: string; steps: Array<Record<string, unknown>>; "timeout-minutes"?: number }
+    {
+      env?: Record<string, string>;
+      "runs-on"?: string;
+      if?: string;
+      needs?: string[];
+      steps: Array<Record<string, unknown>>;
+      "timeout-minutes"?: number;
+    }
   >;
   on: { workflow_dispatch: { inputs: Record<string, unknown> } };
 };
@@ -415,8 +422,35 @@ else console.log(JSON.stringify({id:202,workflow_id:88,head_branch:'main',event:
       }
     }
     expect(String(workflow.jobs.qualify_npm_package?.if)).not.toContain("github.run_attempt");
+    expect(workflow.jobs.release_execution_plan?.needs).toEqual(
+      expect.arrayContaining([
+        "prepare_npm_package",
+        "qualify_npm_package",
+        "prepare_plugin_npm",
+        "prepare_docker_release",
+      ]),
+    );
+    for (const jobName of ["release_decision", "diagnostic_drain"]) {
+      expect(workflow.jobs[jobName]?.needs).toEqual(
+        expect.arrayContaining([
+          "prepare_npm_package",
+          "qualify_npm_package",
+          "prepare_plugin_npm",
+          "prepare_docker_release",
+        ]),
+      );
+    }
     expect(source).not.toContain("continuationSource");
     expect(source).not.toContain("continuation_plan_json");
+  });
+
+  it("keeps immutable plan cache writers and admission readers on the same hosted backend", () => {
+    const reader = workflow.jobs.resolve_target?.["runs-on"];
+    const writer = workflow.jobs.release_execution_plan?.["runs-on"];
+    expect(writer).toBe(reader);
+    expect(reader).toContain("ubuntu-24.04");
+    expect(reader).not.toContain("OPENCLAW_CI_RUNNER_BACKEND");
+    expect(reader).not.toContain("blacksmith");
   });
 
   it("restores the immutable attempt-one plan instead of rebuilding child identity", () => {
@@ -527,6 +561,22 @@ else console.log(JSON.stringify({id:202,workflow_id:88,head_branch:'main',event:
     }
   });
 
+  it("waits for installation quota before candidate dispatch", () => {
+    const candidateSteps = workflow.jobs.candidate_acquisition?.steps ?? [];
+    const quotaIndex = candidateSteps.findIndex(
+      (candidate) => candidate?.name === "Wait for candidate acquisition GitHub API quota",
+    );
+    const dispatchIndex = candidateSteps.findIndex(
+      (candidate) => candidate?.name === "Dispatch immutable validation candidate producer",
+    );
+    expect(quotaIndex).toBeGreaterThan(-1);
+    expect(dispatchIndex).toBeGreaterThan(quotaIndex);
+    expect(String(candidateSteps[quotaIndex]?.if)).toContain("github.run_attempt == 1");
+    expect(String(candidateSteps[quotaIndex]?.run)).toContain(
+      "wait-for-github-api-quota.mjs --minimum-remaining 6 --max-wait-seconds 18000",
+    );
+  });
+
   it.each([
     {
       job: "summary",
@@ -549,4 +599,23 @@ else console.log(JSON.stringify({id:202,workflow_id:88,head_branch:'main',event:
   ])("supplies $job with its evidence and cancellation contract", ({ job, name, env }) => {
     expect(step(job, name).env).toMatchObject(env);
   });
+});
+
+it("scans with publisher tooling while the plugin npm preflight child runs", () => {
+  const job = workflow.jobs.prepare_plugin_npm;
+  const names = job?.steps.map((entry) => entry.name) ?? [];
+  const from = names.indexOf("Dispatch exact plugin npm artifact preflight") + 1;
+  const scan = job?.steps.slice(
+    from,
+    names.indexOf("Resolve and seal exact plugin npm artifact descriptor"),
+  );
+  expect(scan?.map((entry) => entry.if)).toEqual(
+    Array(5).fill(
+      "env.PUBLISHER_SHA != '' && env.PUBLISHER_SHA != github.sha && env.PUBLICATION_ROUTE == 'normal'",
+    ),
+  );
+  expect(job?.env?.PUBLISHER_SHA).toContain(".qualificationAdmission.workflowSha");
+  expect(scan?.at(-1)?.run).toMatch(
+    /tsx \.release-tooling\/scripts\/plugin-npm-release-plan\.ts[\s\S]*tsx \.release-tooling\/scripts\/check-plugin-npm-security-scan\.mts \\\n\s+--tooling-root \.release-tooling/u,
+  );
 });

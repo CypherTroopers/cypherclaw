@@ -97,7 +97,15 @@ Stored Canvas documents still require broader read access through
 `canvas.document.view`.
 
 In the Control UI, session writers can use **New Session**, send messages in
-their own conversations, and stop their own active runs. Their model, effort,
+their own conversations, fork from a persisted user message in an owned settled
+conversation, use **Advanced → Fork conversation** on their own conversation,
+and stop their own active runs. Whole-conversation forks preserve the saved
+conversation history; while the source is working, they copy through its last
+completed reply. A whole-conversation fork of a Draft stays Draft unless the
+creation request explicitly selects another audience. If new Draft creation is
+disabled, creating that Draft copy is refused; the existing Draft remains available
+for continued work. Forking does not grant access to another creator's conversation
+or change the source's workspace and isolation rules. Their model, effort,
 fast-mode, and non-full permission choices use the same session grant and the
 Gateway's allowed model catalog. Full permission mode, sandbox changes, and
 changes to an existing session's context window still require administrator access.
@@ -344,7 +352,7 @@ policy, even after role changes. Recovery and branching requested by another
 person use that person's own role rather than the source session's policy.
 
 Required creation provenance is immutable. Role changes, sharing, participation,
-`sessions.patch`, whole-entry replacement, legacy imports, and canonical-key
+`sessions.patch`, whole-entry replacement, legacy imports, and normalized-key
 repair cannot remove or replace an existing required stamp. Blocked persisted
 overwrites emit a `session-sqlite` warning. Inspect them with
 [`openclaw logs --follow`](/cli/logs). Existing unstamped sessions and new sessions
@@ -366,6 +374,23 @@ Git author. Effective `"shared"` scope refuses this injection and logs a warning
 naming the agent. `openclaw security audit` warns for each opted-in agent. See
 [GitHub identity](/gateway/config-tools/github-identity#sandbox-opt-in) for the
 credential boundary and backend requirements.
+
+A required sandbox contains the session's exec and file tools. It does not
+contain these paths, so configure them before admitting people you do not trust
+with the Gateway host:
+
+- Code Mode under the default `node` executor runs cells in the Gateway process.
+  Use the [QuickJS executor](/tools/code-mode/executors#choose-an-executor).
+- [CLI backends](/gateway/cli-backends) such as Claude CLI own their native
+  tools and sandboxing on the Gateway host. Exclude them with the role's
+  `modelPolicy`.
+- `worker-turn` cloud workers receive the agent's shared GitHub identity
+  regardless of `allowInSandbox`. Keep restricted people off worker profiles.
+- `sessions.others: "view"` exposes complete shared transcripts, including tool
+  output, from every agent. Keep sensitive work in draft sessions.
+- Gateway-brokered GitHub publication uses the shared account. See
+  [Workflow and CI changes](/gateway/config-tools/github-identity#workflow-and-ci-changes)
+  for what pull request workflows can run.
 
 The role's `scopes` list caps scopes granted through connection auth, identity
 grants, pairing, scope upgrades, and authenticated trusted-proxy HTTP requests.
@@ -392,6 +417,16 @@ cookie. Plugin HTTP requests reapply the profile's current role ceiling and
 reject grants without a matching durable identity when roles are enabled.
 Include `operator.admin` explicitly only when that role should retain
 administrative connection authority.
+
+[Principal-bound remote ingress](/plugins/sdk-gateway-ingress) uses a separate
+plugin-approved ceiling intersected with the bound person's current role.
+**Read + write** uses `operator.read` and `operator.write`; **Full** uses
+`operator.admin`, whose implications are still limited by the role. Thus Full
+for a read-only role yields read access, while an empty role or grant remains
+empty. The same exact effective scopes apply to the remote UI and grant-bound
+Gateway RPC: neither identity grants nor an admin plugin caller adds authority.
+Role or profile changes fence existing delegated work. Ingress never issues a
+reusable device token, and device scope upgrades cannot widen its grant ceiling.
 
 An administrator-attested [channel identity link](/concepts/user-model#channel-identity-links)
 also lets a sender inherit channel-owner authority from their effective role's
@@ -454,7 +489,7 @@ Identity grants apply only to `operator`-role connections. `node`-role connectio
 
 Each Gateway RPC has a least-privilege method scope that decides whether a
 request reaches its handler. Params-aware methods derive that scope before
-dispatch so authorization failures have one canonical structured response:
+dispatch so authorization failures have one standard structured response:
 
 - `agent` needs `operator.write` for ordinary turns and `operator.admin` for
   `/new` or `/reset` session lifecycle commands.
@@ -470,7 +505,15 @@ dispatch so authorization failures have one canonical structured response:
   require an exact match, or `operator.admin`.
 - `sessions.create` accepts `operator.sessions.write` for ordinary own-session
   creation, including a `projectId`, or the broader `operator.write` scope.
-  Incognito sessions and any `execNode` request require `operator.admin`.
+  Repository URLs (`projectGitUrl`) require the broader `operator.write` scope.
+  Existing device folders (`deviceFolder: { deviceId, path }`) require that scope,
+  a connected session host advertising folder support, and
+  node-local consent through `nodeHost.workerRuns.folders`. They do not grant
+  arbitrary node execution, but the selected folder becomes the session's
+  workspace root. If you rely on `tools.fs.workspaceOnly` or exec restrictions to
+  contain `operator.write` sessions, also set `nodeHost.workerRuns.folders` on the
+  device. Incognito sessions and any `execNode` request require
+  `operator.admin`.
   For non-admin callers, the handler limits `cwd` to configured agent
   workspaces. `projectId` cannot be combined with `cwd` or `execNode`.
 - `environments.list` needs `operator.read` for plain inventory and
@@ -522,7 +565,15 @@ Project RPCs use these scopes:
 | `projects.list`                        | `operator.sessions.read` or broader read access; only callers satisfying `operator.write` receive `repoRoot` and `originUrl`. |
 | `projects.add`                         | `operator.write` and the `controlPlaneWrite` method flag.                                                                     |
 | `projects.register`, `projects.remove` | `operator.admin`.                                                                                                             |
-| `projects.searchRemote`                | `operator.read`.                                                                                                              |
+| `projects.searchRemote`                | `operator.write`.                                                                                                             |
+
+Restricted callers (without `operator.write`) can discover and start only public
+GitHub registry projects on the configured GitHub host, plus permitted agent
+workspace pseudo-projects. Private, Enterprise-internal, unknown, and different-host
+repositories are unavailable. Discovery may cache visibility for ten minutes; each
+new session or native child source handoff independently checks current visibility.
+Internal maintenance and broad writer access remain unchanged, as do existing
+checkouts and their custody. `worktrees.list` requires `operator.write`.
 
 Some handlers then apply stricter checks based on the concrete thing being
 approved or mutated:

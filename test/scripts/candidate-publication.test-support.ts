@@ -40,6 +40,7 @@ export function candidatePublicationFixture(
     transportRef?: string;
     runId?: string;
     purpose?: "publish" | "main-qualification" | "diagnostic";
+    protectedTag?: boolean;
   } = {},
 ) {
   const fixture = trustedMainNpmFixture();
@@ -81,7 +82,7 @@ export function candidatePublicationFixture(
       laneInputs,
     ),
   });
-  const admission = admissionFixture(true, {
+  const admission = admissionFixture(options.protectedTag ?? true, {
     inputs,
     candidateSha: q,
     transportRef: branch,
@@ -314,6 +315,15 @@ export function candidatePublicationFixture(
   };
   const client = {
     ...fixture.client,
+    verifyRetainedPublicationArtifacts() {
+      throw new Error("Fresh candidate fixture does not reuse publication artifacts");
+    },
+    downloadArtifactArchive() {
+      throw new Error("Fresh candidate fixture does not download reused artifacts");
+    },
+    getRunArtifacts() {
+      throw new Error("Fresh candidate fixture does not enumerate reused artifacts");
+    },
     validateChildReuse() {
       throw new Error("Fresh candidate fixture does not contain reused children");
     },

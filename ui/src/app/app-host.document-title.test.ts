@@ -1,6 +1,5 @@
 /* @vitest-environment jsdom */
 
-import type { LitElement } from "lit";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { resolveThemeBranding } from "../../../packages/gateway-protocol/src/theme.ts";
 import { createDeferred } from "../../../test/helpers/promise.js";
@@ -12,10 +11,9 @@ import {
   sessionsResult,
 } from "../lib/sessions/session-capability.test-support.ts";
 import { setupSidebarTest } from "../test-helpers/app-sidebar-setup.ts";
-import { settleLitElement } from "../test-helpers/lit-settle.ts";
 import { createStorageMock } from "../test-helpers/storage.ts";
-import "./app-host.ts";
-import { bootstrapApplication, type ApplicationRuntime } from "./bootstrap.ts";
+import { createShellOwner, mountShellView, settleShell } from "./app-host-solid.test-support.ts";
+import { bootstrapApplication } from "./bootstrap.ts";
 import type { ApplicationContext } from "./context.ts";
 import { currentThemeBranding, setCurrentThemeBranding } from "./theme-branding.ts";
 
@@ -62,31 +60,27 @@ async function createConnectedSessionShell() {
   const runtime = bootstrapApplication();
   const replace = vi.fn();
   const context = { ...runtime.context, sessions: harness.sessions, replace };
-  const shell = document.createElement("openclaw-app-shell") as LitElement & {
-    runtime: ApplicationRuntime;
-    activeSessionKey: string;
-    routeState: { routeId?: RouteId };
-    render: () => unknown;
-  };
+  const shell = createShellOwner();
   onTestFinished(() => {
-    shell.remove();
+    shell.disconnect();
+    shell.element.remove();
     runtime.stop();
   });
   shell.runtime = { ...runtime, context };
-  document.body.append(shell);
-  await settleLitElement(shell);
+  document.body.append(shell.element);
+  mountShellView(shell);
+  shell.connect();
+  await settleShell(shell);
   shell.routeState = { routeId: "chat" };
   shell.activeSessionKey = active.key;
   await vi.dynamicImportSettled();
-  await settleLitElement(shell);
+  await settleShell(shell);
   return { ...harness, shell, context, active, background, deletion, replace };
 }
 
-describe("CypherClaw shell document title", () => {
+describe("OpenClaw shell document title", () => {
   function createShell(context?: ApplicationContext): ShellDocumentTitleState {
-    const shell = document.createElement(
-      "openclaw-app-shell",
-    ) as unknown as ShellDocumentTitleState;
+    const shell = createShellOwner() as unknown as ShellDocumentTitleState;
     if (context) {
       shell.runtime = { context };
     }
@@ -137,10 +131,10 @@ describe("CypherClaw shell document title", () => {
 
     shell.syncDocumentTitle();
 
-    expect(document.title).toBe("Chat — CypherClaw");
+    expect(document.title).toBe("Chat — OpenClaw");
   });
 
-  it.each(["CypherClaw", "Northstar"])(
+  it.each(["OpenClaw", "Northstar"])(
     "uses %s and the environment in route and custodian titles",
     (brandName) => {
       const shell = createShell(
@@ -169,12 +163,12 @@ describe("CypherClaw shell document title", () => {
 
     shell.syncDocumentTitle();
 
-    expect(document.title).toBe("Quarterly launch plan — CypherClaw");
+    expect(document.title).toBe("Quarterly launch plan — OpenClaw");
   });
 
   it("updates the active title without rendering the shell for session publications", async () => {
     const { shell, emitEvent, active, background } = await createConnectedSessionShell();
-    const renderShell = vi.spyOn(shell, "render");
+    const renderShell = vi.spyOn(shell, "invalidate");
     for (const session of [
       { ...background, updatedAt: 2, hasActiveRun: true },
       { ...active, updatedAt: 3, derivedTitle: "Revised launch plan" },
@@ -185,10 +179,10 @@ describe("CypherClaw shell document title", () => {
         payload: { sessionKey: session.key, reason: "title", session },
       });
       await vi.advanceTimersByTimeAsync(20);
-      await settleLitElement(shell);
+      await settleShell(shell);
     }
 
-    expect(document.title).toBe("Revised launch plan — CypherClaw");
+    expect(document.title).toBe("Revised launch plan — OpenClaw");
     expect(renderShell).not.toHaveBeenCalled();
   });
 
@@ -201,27 +195,30 @@ describe("CypherClaw shell document title", () => {
     expect(replace).toHaveBeenCalledExactlyOnceWith("chat", { pathname: "/chat/main" });
     deletion.resolve({ deleted: false });
     await operation;
-    await settleLitElement(shell);
+    await settleShell(shell);
 
     const replacement = createSessionCapabilityHarness(
       vi.fn(async () => sessionsResult([background], 1)) as GatewayBrowserClient["request"],
     );
     await replacement.sessions.refresh({ force: true });
-    shell.runtime = { ...shell.runtime, context: { ...context, sessions: replacement.sessions } };
+    shell.disconnect();
+    shell.runtime = { ...shell.runtime!, context: { ...context, sessions: replacement.sessions } };
+    shell.connect();
     document.title = "New context is pending";
     sessions.patchRowLocal(background.key, { derivedTitle: "Retired title" });
     expect(document.title).toBe("New context is pending");
-    await settleLitElement(shell);
+    await settleShell(shell);
     shell.routeState = { routeId: "chat" };
     shell.activeSessionKey = background.key;
-    await settleLitElement(shell);
+    await settleShell(shell);
     replacement.sessions.patchRowLocal(background.key, { derivedTitle: "Replacement title" });
     await vi.advanceTimersByTimeAsync(20);
-    await settleLitElement(shell);
-    expect(document.title).toBe("Replacement title — CypherClaw");
+    await settleShell(shell);
+    expect(document.title).toBe("Replacement title — OpenClaw");
 
-    shell.remove();
-    await settleLitElement(shell);
+    shell.disconnect();
+    shell.element.remove();
+    await settleShell(shell);
     document.title = "Disconnected shell";
     replacement.sessions.patchRowLocal(background.key, { derivedTitle: "Detached title" });
     await vi.advanceTimersByTimeAsync(20);
@@ -240,7 +237,7 @@ describe("CypherClaw shell document title", () => {
 
     shell.syncDocumentTitle();
 
-    expect(document.title).toBe("Molty — CypherClaw");
+    expect(document.title).toBe("Molty — OpenClaw");
   });
 
   it("falls back to the session display name when the main agent is missing", () => {
@@ -258,7 +255,7 @@ describe("CypherClaw shell document title", () => {
 
     shell.syncDocumentTitle();
 
-    expect(document.title).toBe("Fallback thread — CypherClaw");
+    expect(document.title).toBe("Fallback thread — OpenClaw");
   });
 
   it("prefixes the pending approval count", () => {
@@ -267,15 +264,24 @@ describe("CypherClaw shell document title", () => {
 
     shell.syncDocumentTitle();
 
-    expect(document.title).toBe("(2) Usage — CypherClaw");
+    expect(document.title).toBe("(2) Usage — OpenClaw");
   });
 
-  it("shows disconnected instead of a stale approval count", () => {
-    const shell = createShell(createContext({ connected: false, approvalCount: 2 }));
-    shell.routeState = { routeId: "usage" };
+  it.each(["reconnecting", "offline", "reload-required"] as const)(
+    "keeps the destination title without stale approvals while %s",
+    (phase) => {
+      const context = createContext({ phase, approvalCount: 2 });
+      const shell = createShell(context);
+      shell.routeState = { routeId: "usage" };
 
-    shell.syncDocumentTitle();
+      shell.syncDocumentTitle();
 
-    expect(document.title).toBe("(Disconnected) Usage — CypherClaw");
-  });
+      expect(document.title).toBe("Usage — OpenClaw");
+
+      context.gateway.snapshot.phase = "connected";
+      shell.syncDocumentTitle();
+
+      expect(document.title).toBe("(2) Usage — OpenClaw");
+    },
+  );
 });

@@ -1702,7 +1702,7 @@ EOF
   );
 
   it("required installer lifecycle: preserves the interactive exec onboarding handoff", () => {
-    expect(script).toMatch(/exec <\/dev\/tty\s+exec "\$claw" onboard/);
+    expect(script).toMatch(/exec <"\$\(controlling_tty_path\)"\s+exec "\$claw" onboard/);
   });
 
   it("keeps the npm owner runnable when a npm-to-git candidate fails", () => {
@@ -2104,59 +2104,47 @@ EOF
     );
   });
 
-  it("mirrors the canonical support policy for Node release labels", () => {
-    const pkg = JSON.parse(readFileSync("package.json", "utf8")) as {
-      engines?: { node?: string };
-    };
-    expect(pkg.engines?.node).toBe(">=24.22.1 <25 || >=26.12.1");
-
-    const tmp = tempDirs.make("openclaw-install-node-floor-");
-    const bin = join(tmp, "bin");
-    mkdirSync(bin, { recursive: true });
-
-    const nodePath = join(bin, "node");
-    writeFileSync(
-      nodePath,
-      ["#!/bin/sh", 'printf "%s\\n" "${FAKE_NODE_VERSION:-v0.0.0}"', ""].join("\n"),
-    );
-    chmodSync(nodePath, 0o755);
-
-    const result = runInstallShell(
-      [
-        `cd ${JSON.stringify(process.cwd())}`,
-        `source ${JSON.stringify(SCRIPT_PATH)}`,
-        "set +e",
-        `PATH=${JSON.stringify(`${bin}:/usr/bin:/bin`)}`,
-        "export PATH",
-        "unset -f node 2>/dev/null || true",
-        "unalias node 2>/dev/null || true",
-        'node() { printf "%s\\n" "${FAKE_NODE_VERSION:-v0.0.0}"; }',
-        ...NODE_RELEASE_VERSION_CASES.flatMap((version, index) => [
-          `FAKE_NODE_VERSION=${JSON.stringify(version)}`,
-          "export FAKE_NODE_VERSION",
-          "node_version_is_supported",
-          `printf '${index}=%s\\n' "$?"`,
-        ]),
-        "exit 0",
-      ].join("\n"),
-      {
-        PATH: `${bin}:/usr/bin:/bin`,
-        TERM: "dumb",
-      },
-    );
-
-    expect(result.status).toBe(0);
-    for (const [index, version] of NODE_RELEASE_VERSION_CASES.entries()) {
-      const expectedStatus = isSupportedOpenClawNodeVersion(version) ? 0 : 1;
-      expect(result.stdout, version).toContain(`${index}=${expectedStatus}`);
-    }
-  });
+  it.each(["install.sh", "install-cli.sh"])(
+    "checks canonical Node release labels in %s",
+    (installer) => {
+      const pkg = JSON.parse(readFileSync("package.json", "utf8")) as {
+        engines?: { node?: string };
+      };
+      expect(pkg.engines?.node).toBe(">=24.16.0 <25 || >=26.1.0");
+      const result = runInstallShell(
+        [
+          `source "scripts/${installer}"`,
+          "set +e",
+          'node() { printf "%s\\n" "$FAKE_NODE_VERSION"; }',
+          ...NODE_RELEASE_VERSION_CASES.flatMap((version, index) => [
+            `FAKE_NODE_VERSION=${JSON.stringify(version)}`,
+            installer === "install.sh"
+              ? "node_version_is_supported"
+              : 'node_release_version_is_supported "$FAKE_NODE_VERSION"',
+            `printf '${index}=%s\\n' "$?"`,
+          ]),
+          "exit 0",
+        ].join("\n"),
+        { TERM: "dumb", OPENCLAW_INSTALL_CLI_SH_NO_RUN: "1" },
+      );
+      expect(result.status).toBe(0);
+      for (const [index, version] of NODE_RELEASE_VERSION_CASES.entries()) {
+        expect(result.stdout, version).toContain(
+          `${index}=${isSupportedOpenClawNodeVersion(version) ? 0 : 1}`,
+        );
+      }
+    },
+  );
 
   it.each(
     [
       { version: "24.22.1", defect: "none", expected: 0 },
       { version: "24.22.1", defect: "text", expected: 1 },
+      { version: "24.16.0+vendor.1", defect: "none", expected: 0 },
+      { version: "26.1.0", defect: "none", expected: 0 },
+      { version: "24.16.0", defect: "text", expected: 1 },
       { version: "24.15.0+vendor.1", defect: "none", expected: 1 },
+      { version: "26.0.0+vendor.1", defect: "none", expected: 1 },
       { version: "24.22.1", defect: "blob", expected: 1 },
       { version: "24.22.1", defect: "json", expected: 1 },
     ].flatMap(({ version, defect, expected }) =>
@@ -3076,6 +3064,22 @@ describe("install.sh macOS Homebrew Node behavior", () => {
     expect(result.stdout).not.toContain("ensure-called");
   });
 
+  it("falls back to a managed runtime when Homebrew is below the security floor", () => {
+    const result = runInstallShell(`
+      set -euo pipefail
+      source "${SCRIPT_PATH}"
+      OS=macos
+      run_quiet_step() { return 0; }
+      brew() { return 0; }
+      ensure_macos_default_node_active() { return 1; }
+      install_node_with_user_prefix() { echo "managed-runtime-installed"; }
+      install_node
+    `);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("managed-runtime-installed");
+  });
+
   it("does not print PATH advice when Homebrew node is missing at runtime", () => {
     const result = runInstallShell(`
       set -euo pipefail
@@ -3236,7 +3240,7 @@ describe("install.sh duplicate OpenClaw install detection", () => {
   });
 
   it.each([
-    { noPrompt: 0, visible: "1", expected: "/dev/tty" },
+    { noPrompt: 0, visible: "1", expected: "/dev/ttys003" },
     { noPrompt: 0, visible: "0", expected: "/dev/null" },
     { noPrompt: 1, visible: "", expected: "/dev/null" },
   ])(
@@ -3248,12 +3252,29 @@ describe("install.sh duplicate OpenClaw install detection", () => {
       NO_PROMPT=${noPrompt}
       ${noPrompt === 0 ? "needs_stdin_isolation() { return 0; }" : ""}
       has_controlling_tty() { return 0; }
+      controlling_tty_path() { echo /dev/ttys003; }
       resolve_subprocess_stdin_path ${visible}
     `);
       expect(result.status).toBe(0);
       expect(result.stdout.trim()).toBe(expected);
     },
   );
+
+  // A detached Node child aborts on macOS when its inherited stdin is the /dev/tty alias (#200244).
+  it.each([
+    { ps: 'echo " null "', expected: "/dev/null" },
+    { ps: 'echo "??"', expected: "/dev/tty" },
+    { ps: "return 1", expected: "/dev/tty" },
+  ])("resolves the terminal device when ps reports $ps", ({ ps, expected }) => {
+    const result = runInstallShell(`
+      set -euo pipefail
+      source "${SCRIPT_PATH}"
+      ps() { ${ps}; }
+      controlling_tty_path
+    `);
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(expected);
+  });
 
   it("captures visible prompt output before resolving subprocess stdin", () => {
     const result = runInstallShell(`

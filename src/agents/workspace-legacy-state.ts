@@ -135,9 +135,15 @@ export function legacyWorkspaceSiblingAttestationMayExist(filePath: string): boo
   }
 }
 
-function findUnmigratedWorkspaceSource(sources: LegacyWorkspaceSourcePaths): string | undefined {
+function findUnmigratedWorkspaceSource(
+  sources: LegacyWorkspaceSourcePaths,
+  stateDirOnly = false,
+): string | undefined {
   const withClaims = (paths: string[]) =>
     paths.flatMap((filePath) => [filePath, `${filePath}${WORKSPACE_DOCTOR_CLAIM_SUFFIX}`]);
+  if (stateDirOnly) {
+    return withClaims(sources.stateDirAttestationPaths).find(pathMayExistSync);
+  }
   return (
     withClaims([...sources.setupStatePaths, ...sources.stateDirAttestationPaths]).find(
       pathMayExistSync,
@@ -164,6 +170,8 @@ function workspaceMigrationError(
 /** Recheck lifecycle readiness without reusing a running turn's verified-absence cache. */
 export function assertWorkspaceStateMigrationReady(params: {
   workspaceDirs: readonly string[];
+  /** Sandbox-writable dirs: only state-dir attestations, which sandboxes cannot write, count. */
+  sandboxWritableDirs?: ReadonlySet<string>;
   env?: NodeJS.ProcessEnv;
   homedir?: () => string;
   operation?: "doctor";
@@ -171,6 +179,7 @@ export function assertWorkspaceStateMigrationReady(params: {
   const blocked = params.workspaceDirs.flatMap((workspaceDir) => {
     const sourcePath = findUnmigratedWorkspaceSource(
       resolveLegacyWorkspaceSourcePaths(workspaceDir, params),
+      params.sandboxWritableDirs?.has(workspaceDir),
     );
     return sourcePath ? [params.operation === "doctor" ? sourcePath : workspaceDir] : [];
   });
@@ -221,34 +230,31 @@ export function prepareLegacyWorkspaceStateReset(
   options?: { env?: NodeJS.ProcessEnv; homedir?: () => string },
 ): LegacyWorkspaceResetPlan {
   const sources = resolveLegacyWorkspaceSourcePaths(workspaceDir, options);
-  const candidates = [
-    ...sources.setupStatePaths.map((sourcePath) => ({
-      rootDir: path.dirname(sourcePath),
-      sourcePath,
-      requireAttestationHeader: false,
-    })),
-    ...sources.stateDirAttestationPaths.map((sourcePath) => ({
-      rootDir: path.dirname(path.dirname(sourcePath)),
-      sourcePath,
-      // Hashed paths inside OpenClaw-owned attestation directories are
-      // reserved state. Explicit reset must remove malformed blockers too.
-      requireAttestationHeader: false,
-    })),
-    ...sources.siblingAttestationPaths.map((sourcePath) => ({
-      rootDir: path.dirname(sourcePath),
-      sourcePath,
-      requireAttestationHeader: true,
-    })),
-  ].flatMap((candidate) => [
-    candidate,
-    {
-      ...candidate,
-      sourcePath: `${candidate.sourcePath}${WORKSPACE_DOCTOR_CLAIM_SUFFIX}`,
-      // Sibling claims remain outside OpenClaw-owned roots. Renaming a claimed
-      // marker preserves its header, so require that ownership proof there too.
-      requireAttestationHeader: candidate.requireAttestationHeader,
-    },
-  ]);
+  // Hashed paths are reserved state; sibling markers outside owned roots need a header.
+  const groups = [
+    [sources.setupStatePaths, "workspace"],
+    [sources.stateDirAttestationPaths, "state-dir"],
+    [sources.siblingAttestationPaths, "sibling"],
+  ] as const;
+  const candidates = groups
+    .flatMap(([paths, kind]) =>
+      paths.map((sourcePath) => ({
+        rootDir:
+          kind === "state-dir" ? path.dirname(path.dirname(sourcePath)) : path.dirname(sourcePath),
+        sourcePath,
+        requireAttestationHeader: kind === "sibling",
+      })),
+    )
+    .flatMap((candidate) => [
+      candidate,
+      {
+        ...candidate,
+        sourcePath: `${candidate.sourcePath}${WORKSPACE_DOCTOR_CLAIM_SUFFIX}`,
+        // Sibling claims remain outside OpenClaw-owned roots. Renaming a claimed
+        // marker preserves its header, so require that ownership proof there too.
+        requireAttestationHeader: candidate.requireAttestationHeader,
+      },
+    ]);
   return { candidates };
 }
 

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync, StatementSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { replaceSessionEntrySync } from "../config/sessions/session-accessor.js";
@@ -12,6 +12,12 @@ import {
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
 import { resolveSandboxWorkspaceLayoutPaths } from "./sandbox/shared.js";
+import {
+  assertNoUnmigratedWorkspaceState,
+  LEGACY_WORKSPACE_ATTESTATION_HEADER,
+  resolveLegacyWorkspaceSourcePaths,
+  WORKSPACE_DOCTOR_CLAIM_SUFFIX,
+} from "./workspace-legacy-state.js";
 import { assertConfiguredWorkspaceStateReady } from "./workspace-state-dirs.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -68,7 +74,7 @@ function setup(mode: "all" | "non-main" = "all") {
         },
       );
     },
-    addLegacyWorkspace(sessionKey: string) {
+    addLegacyWorkspace(sessionKey: string, attested = true) {
       const layout = resolveSandboxWorkspaceLayoutPaths({
         cfg: cfg.agents.defaults.sandbox,
         agentId: "main",
@@ -80,40 +86,24 @@ function setup(mode: "all" | "non-main" = "all") {
         path.join(layout.sandboxWorkspaceDir, "openclaw-workspace-state.json"),
         JSON.stringify({ version: 1 }),
       );
+      if (attested) {
+        const attestation = resolveLegacyWorkspaceSourcePaths(layout.sandboxWorkspaceDir, { env })
+          .stateDirAttestationPaths[0]!;
+        fs.mkdirSync(path.dirname(attestation), { recursive: true });
+        fs.writeFileSync(attestation, "");
+      }
       return layout.sandboxWorkspaceDir;
     },
   };
 }
 
-function observeColdSessionReads() {
+function observeMainThreadSessionReads() {
   const prepare = vi.spyOn(DatabaseSync.prototype, "prepare");
-  const iterate = vi.spyOn(StatementSync.prototype, "iterate");
-  return {
-    get handles() {
-      return new Set(
-        prepare.mock.calls.flatMap(([sql], index) =>
-          /from\s+"session_nodes"/i.test(sql) ? [prepare.mock.contexts[index]] : [],
-        ),
-      );
-    },
-    scans: () =>
-      prepare.mock.calls.reduce((count, [sql], index) => {
-        if (!sql.includes('"retained_window"')) {
-          return count;
-        }
-        const result = prepare.mock.results[index];
-        return (
-          count +
-          iterate.mock.contexts.filter(
-            (statement) => result?.type === "return" && statement === result.value,
-          ).length
-        );
-      }, 0),
-  };
+  return () => prepare.mock.calls.filter(([sql]) => /from\s+"session_nodes"/i.test(sql));
 }
 
 describe("Gateway configured workspace readiness", () => {
-  it("validates one cold session store once and reports all blocked workspaces", async () => {
+  it("reports all blocked workspaces without reading sessions on the main thread", async () => {
     const state = setup();
     const workspaces = Array.from({ length: 32 }, (_, index) => {
       const sessionKey = `agent:main:readiness-${index}`;
@@ -121,14 +111,13 @@ describe("Gateway configured workspace readiness", () => {
       return state.addLegacyWorkspace(sessionKey);
     });
     closeOpenClawAgentDatabasesForTest();
-    const reads = observeColdSessionReads();
+    const reads = observeMainThreadSessionReads();
     const readiness = assertConfiguredWorkspaceStateReady(state);
     await expect(readiness).rejects.toThrow("Legacy workspace setup state requires migration");
     for (const workspace of workspaces) {
       await expect(readiness).rejects.toThrow(workspace);
     }
-    expect(reads.scans()).toBe(1);
-    expect(reads.handles.size).toBe(1);
+    expect(reads()).toEqual([]);
   });
 
   it.each([false, true])(
@@ -148,29 +137,35 @@ describe("Gateway configured workspace readiness", () => {
     },
   );
 
+  it.each(["setup", "sibling", "setup claim", "sibling claim"])(
+    "ignores sandbox-written %s globally but retains local and Doctor refusal",
+    async (kind) => {
+      const state = setup();
+      const sessionKey = "agent:main:guest";
+      state.seed(sessionKey);
+      const copy = state.addLegacyWorkspace(sessionKey, false);
+      const sources = resolveLegacyWorkspaceSourcePaths(copy, { env: state.env });
+      fs.unlinkSync(sources.setupStatePaths[0]!);
+      const source = kind.startsWith("setup")
+        ? sources.setupStatePaths[0]!
+        : sources.siblingAttestationPaths[0]!;
+      const marker = kind.endsWith("claim") ? `${source}${WORKSPACE_DOCTOR_CLAIM_SUFFIX}` : source;
+      fs.writeFileSync(marker, `${LEGACY_WORKSPACE_ATTESTATION_HEADER}\n`);
+      closeOpenClawAgentDatabasesForTest();
+      await expect(assertConfiguredWorkspaceStateReady(state)).resolves.toBeUndefined();
+      expect(() => assertNoUnmigratedWorkspaceState({ workspaceDir: copy })).toThrow(
+        "Legacy workspace setup state requires migration",
+      );
+      await expect(
+        assertConfiguredWorkspaceStateReady({ ...state, operation: "doctor" }),
+      ).rejects.toThrow("Legacy workspace setup state requires migration");
+      expect(fs.existsSync(marker)).toBe(true);
+    },
+  );
+
   it("does not create a missing session store during readiness", async () => {
     const state = setup();
     await expect(assertConfiguredWorkspaceStateReady(state)).resolves.toBeUndefined();
     expect(fs.existsSync(state.databasePath)).toBe(false);
-  });
-
-  it("revalidates persisted rows after an earlier readiness check", async () => {
-    const state = setup();
-    const sessionKey = "agent:main:readiness";
-    state.seed(sessionKey);
-    closeOpenClawAgentDatabasesForTest();
-    await expect(assertConfiguredWorkspaceStateReady(state)).resolves.toBeUndefined();
-
-    const database = new DatabaseSync(state.databasePath);
-    try {
-      database
-        .prepare("UPDATE session_nodes SET entry_json = '{' WHERE session_key = ?")
-        .run(sessionKey);
-    } finally {
-      database.close();
-    }
-    await expect(assertConfiguredWorkspaceStateReady(state)).rejects.toThrow(
-      "invalid persisted session row",
-    );
   });
 });

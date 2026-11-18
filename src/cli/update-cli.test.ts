@@ -3,7 +3,6 @@ import path from "node:path";
 import { CANCEL_SYMBOL } from "@clack/core";
 import { Command } from "commander";
 import { describe, expect, it, vi } from "vitest";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { applyDevUpdateTargetEnv } from "../infra/update-dev-target.js";
 import { cleanupStaleManagedServiceUpdateHandoffs } from "../infra/update-managed-service-handoff-cleanup.js";
 import type { UpdateRunResult } from "../infra/update-runner-types.js";
@@ -19,7 +18,6 @@ import {
   lastNpmPluginUpdateCall,
   lastReplaceConfigCall,
   lastWriteJsonCall,
-  packageInstallCommandCall,
   requireValue,
   spawnCall,
   syncPluginCall,
@@ -86,6 +84,7 @@ await vi.hoisted(() => import("./update-cli-mocks.test-support.js"));
 describe("update-cli", () => {
   const nodeExecutable = resolveTestNodeExecPath();
   const {
+    baseConfig,
     configSnapshot,
     createCaseDir,
     mockCurrentProcessFreshDoctor,
@@ -274,32 +273,20 @@ describe("update-cli", () => {
     expect(lastNpmPluginUpdateCall()?.coreVersion).toBe("2026.6.33");
   });
 
-  it.each([{ name: "stored", explicit: false }])(
-    "rejects --tag for an $name extended-stable channel",
-    async ({ explicit }) => {
-      await mockPackageInstallAtCaseDir();
-      if (!explicit) {
-        const config = { update: { channel: "extended-stable" } } as OpenClawConfig;
-        vi.mocked(readConfigFileSnapshot).mockResolvedValue(configSnapshot(config));
-      }
-
-      await expect(
-        updateCommand({
-          ...(explicit ? { channel: "extended-stable" as const } : {}),
-          tag: "latest",
-          yes: true,
-        }),
-      ).rejects.toEqual(new ExitError(1));
-
-      expect(resolveExtendedStablePackage).not.toHaveBeenCalled();
-      expect(packageInstallCommandCall()?.[0]).toBeUndefined();
-      expectNoSideEffects(
-        replaceConfigFile,
-        launchdUpdateCleanupMocks.disableCurrentOpenClawUpdateLaunchdJob,
-      );
-      expect(defaultRuntime.exit).not.toHaveBeenCalled();
-    },
-  );
+  it("honors a one-off tag without replacing the stored extended-stable channel", async () => {
+    await mockPackageInstallAtCaseDir();
+    readPackageVersion.mockResolvedValueOnce("1.0.0").mockResolvedValue("9999.0.0");
+    vi.mocked(readConfigFileSnapshot).mockResolvedValue(
+      configSnapshot({ update: { channel: "extended-stable" } }),
+    );
+    await updateCommand({ tag: "latest", yes: true, restart: false });
+    expect(resolveExtendedStablePackage).not.toHaveBeenCalled();
+    expectPackageInstallSpec("openclaw@9999.0.0");
+    expect(replaceConfigFile).not.toHaveBeenCalled();
+    expect(syncPluginCall()?.channel).toBe("extended-stable");
+    expect(syncPluginCall()?.coreVersion).toBe("9999.0.0");
+    expect(defaultRuntime.exit).not.toHaveBeenCalled();
+  });
 
   it("rejects extended-stable Git updates before handoff, conversion, or config mutation", async () => {
     await expect(updateCommand({ channel: "extended-stable", yes: true })).rejects.toEqual(
@@ -408,6 +395,7 @@ describe("update-cli", () => {
       shouldRunPackageUpdate: true,
     },
   ])("$name in non-interactive mode", async ({ options, shouldExit, shouldRunPackageUpdate }) => {
+    baseConfig.update = { channel: "stable" };
     const root = await setupNonInteractiveDowngrade();
     const runsBefore = listUpdateRuns();
     if (shouldRunPackageUpdate) {
@@ -656,6 +644,7 @@ describe("update-cli", () => {
     expect(defaultRuntime.exit).not.toHaveBeenCalled();
   });
   it("reports activation failure when the updated CLI entrypoint is missing", async () => {
+    baseConfig.update = { channel: "stable" };
     const root = await mockPackageInstallAtCaseDir();
     mockRunningManagedGateway([
       nodeExecutable,
@@ -678,6 +667,7 @@ describe("update-cli", () => {
   it.each([true])(
     "tries the updated install restart when package service refresh fails (JSON: %s)",
     async (json) => {
+      baseConfig.update = { channel: "stable" };
       const { updatedRoot, updatedEntrypoint } = setupNpmUpdatedRootRefresh();
       serviceLoaded.mockResolvedValue(true);
       primeServiceCommand([nodeExecutable, updatedEntrypoint, "gateway", "run"]);
@@ -738,6 +728,7 @@ describe("update-cli", () => {
   });
 
   it("shows the matching-version probe failure when a JSON package update restart stays unhealthy", async () => {
+    baseConfig.update = { channel: "stable" };
     setupNpmUpdatedRootRefresh();
     serviceLoaded.mockResolvedValue(true);
     restartHealthTestControl.snapshot = {

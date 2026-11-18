@@ -84,6 +84,7 @@ function createChannelOwner(
 ) {
   const subagent: PluginRuntime["subagent"] = {
     complete: vi.fn<PluginRuntime["subagent"]["complete"]>(),
+    forkSession: vi.fn<PluginRuntime["subagent"]["forkSession"]>(),
     run: vi.fn<PluginRuntime["subagent"]["run"]>(),
     waitForRun: vi.fn<PluginRuntime["subagent"]["waitForRun"]>(),
     getSessionMessages: vi.fn<PluginRuntime["subagent"]["getSessionMessages"]>(),
@@ -243,7 +244,7 @@ describe("prepared channel runtime ownership", () => {
       await acquired.releaseRegistry();
       acquired.releaseWork();
     });
-    const scope = acquired.resources.createInvocationScope(acquired.registry);
+    const scope = acquired.resources.createInvocationScope(acquired.registry, [live.instance]);
     releases.push(() => scope.release());
     const entry = acquired.registry.channels[0]!;
     const send = scope.wrap(entry.plugin).outbound!.sendText!;

@@ -33,12 +33,8 @@ export function readConfigValueAtPath(
       return { found: false };
     }
     // Reads allow array properties and indices beyond the CLI writer's sparse-write limit.
-    const index = /^\d+$/.test(part) ? Number(part) : undefined;
-    if (index !== undefined && Array.isArray(current)) {
-      current = current[index];
-    } else {
-      current = (current as Record<string, unknown>)[part];
-    }
+    const key = Array.isArray(current) && /^\d+$/.test(part) ? Number(part) : part;
+    current = (current as Record<string | number, unknown>)[key];
     if (current === undefined) {
       return { found: false };
     }
@@ -139,7 +135,7 @@ export function formatConfigValidationLine(snapshot: ConfigFileSnapshot): string
 
 /** A CLI command already wrote its failure to the runtime before calling exit. */
 export class SystemAgentOperationExitError extends Error {
-  constructor(code: number | undefined) {
+  constructor(readonly code: number | undefined) {
     super(`operation exited with code ${code}`);
   }
 }

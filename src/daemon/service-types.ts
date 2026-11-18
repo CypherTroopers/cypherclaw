@@ -68,6 +68,8 @@ export type GatewayServiceManageArgs = {
 };
 
 export type GatewayServiceControlArgs = {
+  /** One caller-owned budget for native activation and its recovery. */
+  deadline?: { remainingMs: () => number; signal: AbortSignal };
   /** Retained POSIX recovery observes attempts before a native restart can accept writes. */
   onRestartAttempted?: () => void;
   /** Correlation only: native stop needs live update authority and transferred helpers also revalidate their lease. */
@@ -203,10 +205,14 @@ export type SystemdGatewayInstallation =
 
 /** Bounded service inspection; strict reads reject unverified commands/environments and return null only for proven absence. */
 export type GatewayServiceReadOptions = {
+  /** Inspect state selectors and filesystem mapping before claiming separate state. */
+  inspectStateIdentity?: boolean;
   systemdReadTarget?: SystemdServiceReadTarget;
   systemdReadBinding?: SystemdServiceReadBinding;
   timeoutMs?: number;
   requireEffective?: boolean;
+  /** Reinstall may replace an absent LaunchAgent plist; existing definitions still require strict reads. */
+  allowMissingDefinition?: boolean;
   /** Carry the command reader's verdict into runtime inspection without repeating it. */
   commandInspection?: GatewayServiceCommandInspection;
   onCommandInspection?: (inspection: GatewayServiceCommandInspection) => void;
@@ -292,6 +298,8 @@ export function assertServiceDefinitionWritable(capability: ServiceDefinitionMut
 }
 
 export type GatewayServiceCommandSnapshot = {
+  /** Missing environment or namespace facts cannot prove separate state. */
+  stateIdentityUnverified?: true;
   programArguments: string[];
   workingDirectory?: string;
   environment?: Record<string, string>;

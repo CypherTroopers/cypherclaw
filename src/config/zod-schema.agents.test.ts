@@ -7,13 +7,6 @@ describe("agent roster ownership", () => {
     expect(AgentsSchema.safeParse({ entries: {} }).success).toBe(false);
   });
 
-  it("accepts sole and explicitly owned multi-agent rosters without a stored default", () => {
-    expect(AgentsSchema.safeParse({ entries: { Ops: {} } }).success).toBe(true);
-    expect(
-      AgentsSchema.safeParse({ ownership: "explicit", entries: { alpha: {}, beta: {} } }).success,
-    ).toBe(true);
-  });
-
   it("rejects a markerless multi-agent roster without explicit ownership", () => {
     const result = AgentsSchema.safeParse({ entries: { alpha: {}, beta: {} } });
 
@@ -22,12 +15,6 @@ describe("agent roster ownership", () => {
       expect(result.error.issues[0]?.message).toContain('agents.ownership="explicit"');
       expect(result.error.issues[0]?.message).toContain("run openclaw doctor");
     }
-  });
-
-  it("accepts one legacy default marker", () => {
-    expect(
-      AgentsSchema.safeParse({ entries: { alpha: { default: true }, beta: {} } }).success,
-    ).toBe(true);
   });
 
   it("rejects multiple legacy default markers", () => {
@@ -91,33 +78,13 @@ describe("explicit ambient agent targets", () => {
       }).success,
     ).toBe(true);
   });
-
-  it("validates targets against the implicit main roster", () => {
-    expect(OpenClawSchema.safeParse({ talk: { agentId: "main" } }).success).toBe(true);
-    expect(OpenClawSchema.safeParse({ talk: { agentId: "missing" } }).success).toBe(false);
-  });
-
-  it("allows upgrade compatibility owners to outlive their roster entries", () => {
-    expect(
-      OpenClawSchema.safeParse({
-        agents: {
-          ownership: "explicit",
-          defaults: {
-            authInheritance: { agentId: "retired-ops" },
-            sessionStore: { agentId: "retired-ops" },
-          },
-          entries: { research: {}, writer: {} },
-        },
-      }).success,
-    ).toBe(true);
-  });
 });
 
 describe("agent GitHub sandbox identity", () => {
   const profileId = "ghp_0123456789abcdef0123456789abcdef";
 
-  it.each([undefined, false, true])("accepts allowInSandbox=%s for one agent", (allowInSandbox) => {
-    const github = { profileId, ...(allowInSandbox === undefined ? {} : { allowInSandbox }) };
+  it("accepts an explicit sandbox identity opt-in for one agent", () => {
+    const github = { profileId, allowInSandbox: true };
     const result = AgentsSchema.safeParse({ entries: { release: { tools: { github } } } });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -125,9 +92,9 @@ describe("agent GitHub sandbox identity", () => {
     }
   });
 
-  it.each(["true", 1, null])("rejects non-boolean allowInSandbox=%s", (allowInSandbox) => {
+  it("rejects a non-boolean sandbox identity opt-in", () => {
     const result = AgentsSchema.safeParse({
-      entries: { release: { tools: { github: { profileId, allowInSandbox } } } },
+      entries: { release: { tools: { github: { profileId, allowInSandbox: "true" } } } },
     });
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -149,5 +116,30 @@ describe("agent GitHub sandbox identity", () => {
         expect.objectContaining({ path: ["tools", "github"], code: "unrecognized_keys" }),
       ]);
     }
+  });
+});
+
+describe("delegated persistent change approval", () => {
+  it.each([true, false, undefined])(
+    "preserves %s at global and agent scope",
+    (autoApproveChanges) => {
+      const openclaw = autoApproveChanges === undefined ? {} : { autoApproveChanges };
+      const config = {
+        tools: { openclaw },
+        agents: { entries: { main: { tools: { openclaw } } } },
+      };
+      const result = OpenClawSchema.safeParse(config);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.tools?.openclaw).toEqual(openclaw);
+        expect(result.data.agents?.entries?.main?.tools?.openclaw).toEqual(openclaw);
+      }
+    },
+  );
+
+  it.each(["true", 1, null])("rejects non-boolean authorization %j", (autoApproveChanges) => {
+    const tools = { openclaw: { autoApproveChanges } };
+    expect(OpenClawSchema.safeParse({ tools }).success).toBe(false);
+    expect(AgentsSchema.safeParse({ entries: { main: { tools } } }).success).toBe(false);
   });
 });

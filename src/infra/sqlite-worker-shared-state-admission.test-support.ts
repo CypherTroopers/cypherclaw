@@ -21,6 +21,7 @@ import { acquireGatewayStateOwner } from "./gateway-state-owner.js";
 import { openNodeSqliteDatabase } from "./node-sqlite.js";
 import { runtimeProcessEntrypoints } from "./runtime-process-entrypoints.js";
 import { resolveRuntimeWorkerUrl } from "./runtime-worker-url.js";
+import type { SqliteWorkerRequest } from "./sqlite-worker-contract.js";
 import { createSqliteWorkerOperationAdmission } from "./sqlite-worker-operation-admission.js";
 import {
   openSharedStateSqliteWorkerStore,
@@ -32,6 +33,12 @@ export function registerSharedStateWorkerAdmissionTests(
 ): void {
   it("requires the exact live maintenance owner through the worker commit grant", async () => {
     const captured = createContext();
+    captured.gatewayServiceInstallation = {
+      root: "/fixture/old",
+      version: "2026.10.3",
+      cliVersion: "2026.11.4",
+      databasePath: captured.admission.databasePath,
+    };
     await executeOpenClawStateWorker(captured, { type: "deviceAuth.prepare", input: undefined });
     const store = await openSharedStateSqliteWorkerStore<OpenClawStateWorkerOperations>(
       {
@@ -73,7 +80,8 @@ export function registerSharedStateWorkerAdmissionTests(
             type: "deviceAuth.store",
             input: { deviceId, role: "operator", token: "synthetic-owner-token" },
           }),
-        captured,
+        // Environment-only maintenance calls retain the prepared actor's service facts.
+        { ...captured, gatewayServiceInstallation: undefined },
         () => captured.admission.assertCurrent(),
         () => ({
           nativeLocations: [database.path],
@@ -87,7 +95,9 @@ export function registerSharedStateWorkerAdmissionTests(
         }),
       );
     try {
-      expect(() => openOpenClawStateDatabase(options)).toThrow("offline maintenance");
+      expect(() => openOpenClawStateDatabase(options)).toThrow(
+        "without an active schema lease or maintenance scope",
+      );
       expect(() =>
         runOpenClawStateWriteTransaction(
           ({ db }) =>
@@ -98,8 +108,10 @@ export function registerSharedStateWorkerAdmissionTests(
             }),
           options,
         ),
-      ).toThrow("offline maintenance");
-      await expect(write("unrelated")).rejects.toThrow("offline maintenance");
+      ).toThrow("without an active schema lease or maintenance scope");
+      await expect(write("unrelated")).rejects.toThrow(
+        "without an active schema lease or maintenance scope",
+      );
       await expect(wrongOwner.run(() => write("wrong-owner"))).rejects.toThrow("does not own");
       await expect(unbound.run(() => write("unbound"))).rejects.toThrow("does not own");
       expect(stages).toEqual([]);
@@ -113,7 +125,7 @@ export function registerSharedStateWorkerAdmissionTests(
         write("late-maintenance", () => {
           lateOwner = acquireGatewayStateOwner({ databasePath: database.path });
         }),
-      ).rejects.toThrow("offline maintenance");
+      ).rejects.toThrow("without an active schema lease or maintenance scope");
       lateOwner?.release();
       expect(stages).toEqual([
         "accepted:transaction",
@@ -357,7 +369,29 @@ export function registerSharedStateWorkerAdmissionTests(
     const foreign = holdForeignWriter(captured);
     const canceled = new AbortController();
     const stopped = new Error("synthetic queued write canceled");
-    const posts = vi.spyOn(Worker.prototype, "postMessage");
+    const dispatched: number[] = [];
+    // oxlint-disable-next-line typescript/unbound-method -- call supplies the intercepted worker receiver.
+    const nativePost = Worker.prototype.postMessage;
+    const posts = vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (
+      this: Worker,
+      request: SqliteWorkerRequest,
+      transferList,
+    ) {
+      let pid: number | undefined;
+      if (request.type === "execute") {
+        const command = deserialize(request.input) as {
+          type: string;
+          input: { record: NativeHookRelayBridgeRecord };
+        };
+        if (command.type === "nativeHookRelay.write") {
+          pid = command.input.record.pid;
+        }
+      }
+      nativePost.call(this, request, transferList);
+      if (pid !== undefined) {
+        dispatched.push(pid);
+      }
+    });
     let factories = 0;
     try {
       await runOpenClawStateWorkerOperation(
@@ -428,16 +462,6 @@ export function registerSharedStateWorkerAdmissionTests(
           },
         },
       );
-      const dispatched = posts.mock.calls.flatMap(([request]) => {
-        if (request.type !== "execute") {
-          return [];
-        }
-        const command = deserialize(request.input) as {
-          type: string;
-          input: { record: NativeHookRelayBridgeRecord };
-        };
-        return command.type === "nativeHookRelay.write" ? [command.input.record.pid] : [];
-      });
       expect(dispatched).toEqual([0, ...Array.from({ length: 255 }, (_, index) => index + 2)]);
       expect(factories).toBe(256);
       expect(

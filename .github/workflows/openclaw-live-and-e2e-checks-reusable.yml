@@ -740,7 +740,7 @@ jobs:
       - name: Upload Bun test runtime
         id: test_bun_artifact
         if: inputs.test_runtime == 'bun' && !inputs.prepare_only
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-bun-${{ github.run_id }}-${{ github.run_attempt }}-${{ job.check_run_id }}
           path: ${{ runner.temp }}/test-bun.tar.gz
@@ -1192,7 +1192,7 @@ jobs:
           printf 'fs_safe_native_contract=%s\n' "$(jq -r '[.evaluations[].contracts[] | select(.consumer == "fs-safe-native") | .mode][0] // "required"' "$RUNNER_TEMP/frozen-admission.json")" >> "$GITHUB_OUTPUT"
 
       - name: Upload frozen admission diagnostic
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frozen-source-admission-reusable-${{ inputs.shared_image_artifact_namespace }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/frozen-admission.json
@@ -1271,10 +1271,11 @@ jobs:
     needs: validate_selected_ref
     if: (!inputs.prepare_only) && inputs.include_live_suites && !inputs.live_models_only && (inputs.live_suite_filter == '' || inputs.live_suite_filter == 'live-cache')
     runs-on: ${{ inputs.runner_group != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(inputs.runner_group), toJSON(inputs.use_github_hosted_runners && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404'))) || (inputs.use_github_hosted_runners && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404') }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       OPENCLAW_LIVE_CACHE_TEST: "1"
       OPENCLAW_LIVE_TEST: "1"
     steps:
@@ -1307,7 +1308,7 @@ jobs:
         name: Download Bun test runtime
         id: test_bun_download
         if: inputs.test_runtime == 'bun'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ needs.validate_selected_ref.outputs.test_bun_artifact_id }}
           path: ${{ runner.temp }}/test-bun-runtime
@@ -1329,7 +1330,43 @@ jobs:
           OPENCLAW_VITEST_RUNTIME: ${{ inputs.test_runtime }}
         run: |
           set -euo pipefail
-          timeout --foreground --kill-after=30s 8m pnpm test:live:cache
+          mkdir -p .artifacts/live-cache
+          timeout --foreground --kill-after=30s 8m pnpm test:live:cache -- \
+            --reporter=default \
+            --reporter=json \
+            --outputFile.json=.artifacts/live-cache/cache-floors.vitest.json \
+            2>&1 | tee .artifacts/live-cache/cache-floors.log
+
+      - name: Verify live prompt prefix reuse
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/live-cache
+          timeout --foreground --kill-after=30s 8m node --import ./scripts/tsx.mjs scripts/e2e/anthropic-cache-live.mts \
+            2>&1 | tee .artifacts/live-cache/prefix-reuse.log
+
+      - name: Verify live agent prompt prefix reuse
+        env:
+          OPENCLAW_LIVE_ANTHROPIC_CACHE_MODEL: claude-sonnet-5
+          OPENCLAW_VITEST_RUNTIME: ${{ inputs.test_runtime }}
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/live-cache
+          timeout --foreground --kill-after=30s 8m pnpm test:live \
+            src/agents/embedded-agent-runner.cache.live.test.ts \
+            --testNamePattern 'release prompt-prefix gate' \
+            --reporter=default \
+            --reporter=json \
+            --outputFile.json=.artifacts/live-cache/agent-prefix-reuse.vitest.json \
+            2>&1 | tee .artifacts/live-cache/agent-prefix-reuse.log
+
+      - name: Upload live cache diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-cache-${{ needs.validate_selected_ref.outputs.selected_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/live-cache/
+          retention-days: 14
+          if-no-files-found: warn
 
   validate_repo_e2e_gateway:
     name: Gateway E2E${{ inputs.test_runtime == 'bun' && ' (Bun advisory)' || '' }}
@@ -1666,7 +1703,7 @@ jobs:
           always() && inputs.include_repo_e2e &&
           (inputs.live_suite_filter == '' || inputs.live_suite_filter == matrix.suite_id) &&
           matrix.suite_id == 'openshell-e2e'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: openshell-gateway-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/openshell-e2e-${{ github.run_id }}-${{ github.run_attempt }}.log
@@ -1762,6 +1799,17 @@ jobs:
           ref: ${{ needs.validate_selected_ref.outputs.selected_sha }}
           fetch-depth: 1
 
+      # Hosted release workers have exhausted disk during dependency/image setup.
+      # Reclaim unused toolchains before the checkouts and installs grow further.
+      - name: Reclaim hosted runner disk
+        if: contains(matrix.profiles, inputs.release_test_profile) && runner.environment == 'github-hosted' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h /
+
       - name: Checkout trusted release harness
         if: contains(matrix.profiles, inputs.release_test_profile)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1825,7 +1873,7 @@ jobs:
 
       - name: Download OpenClaw Docker E2E package
         if: contains(matrix.profiles, inputs.release_test_profile) && steps.plan.outputs.needs_package == '1'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ needs.prepare_docker_e2e_image.outputs.package_artifact_id }}
           path: .artifacts/docker-e2e-package
@@ -1852,7 +1900,7 @@ jobs:
 
       - name: Download prerelease plugin registry artifact
         if: steps.plan.outputs.needs_package == '1' && needs.prepare_docker_e2e_image.outputs.prepublish_plugin_registry_artifact_id != ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: &prerelease_registry_download_with
           artifact-ids: ${{ needs.prepare_docker_e2e_image.outputs.prepublish_plugin_registry_artifact_id }}
           path: .artifacts/prepublish-plugin-registry
@@ -1895,7 +1943,7 @@ jobs:
 
       - name: Download Docker E2E image artifact
         if: contains(matrix.profiles, inputs.release_test_profile) && inputs.shared_image_policy == 'no-push-artifact' && needs.prepare_docker_e2e_image.outputs.needs_e2e_image == '1'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: &docker_e2e_image_download_with
           artifact-ids: ${{ needs.prepare_docker_e2e_image.outputs.image_artifact_id }}
           path: .artifacts/docker-e2e-images
@@ -2027,7 +2075,7 @@ jobs:
 
       - name: Upload Docker E2E chunk artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: docker-e2e-${{ matrix.shard_id || matrix.chunk_id }}
           path: .artifacts/docker-tests/
@@ -2077,7 +2125,7 @@ jobs:
 
       - name: Upload published baseline evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.groups.outputs.artifact_name }}
           path: .artifacts/upgrade-baseline-checks/
@@ -2171,6 +2219,17 @@ jobs:
           ref: ${{ needs.validate_selected_ref.outputs.selected_sha }}
           fetch-depth: 1
 
+      # Hosted release workers have exhausted disk during dependency/image setup.
+      # Reclaim unused toolchains before the checkouts and installs grow further.
+      - name: Reclaim hosted runner disk
+        if: runner.environment == 'github-hosted' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h /
+
       - name: Checkout trusted release harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -2233,7 +2292,7 @@ jobs:
 
       - name: Download OpenClaw Docker E2E package
         if: steps.plan.outputs.needs_package == '1'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ needs.prepare_docker_e2e_image.outputs.package_artifact_id }}
           path: .artifacts/docker-e2e-package
@@ -2248,7 +2307,7 @@ jobs:
 
       - name: Download targeted prerelease plugin registry artifact
         if: steps.plan.outputs.needs_package == '1' && needs.prepare_docker_e2e_image.outputs.prepublish_plugin_registry_artifact_id != ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: *prerelease_registry_download_with
 
       - name: Validate targeted prerelease plugin registry contents
@@ -2267,7 +2326,7 @@ jobs:
       - &docker_e2e_image_download_step
         name: Download Docker E2E image artifact
         if: inputs.shared_image_policy == 'no-push-artifact' && needs.prepare_docker_e2e_image.outputs.needs_e2e_image == '1'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: *docker_e2e_image_download_with
 
       - &docker_e2e_image_load_step
@@ -2376,7 +2435,7 @@ jobs:
 
       - name: Upload targeted Docker E2E artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: docker-e2e-${{ steps.plan.outputs.artifact_suffix }}
           path: .artifacts/docker-tests/
@@ -2463,7 +2522,7 @@ jobs:
 
       - name: Download OpenClaw Docker E2E package
         if: steps.plan.outputs.needs_package == '1'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ needs.prepare_docker_e2e_image.outputs.package_artifact_id }}
           path: .artifacts/docker-e2e-package
@@ -2523,7 +2582,7 @@ jobs:
 
       - name: Upload Open WebUI Docker E2E artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: docker-e2e-openwebui
           path: .artifacts/docker-tests/
@@ -2891,7 +2950,7 @@ jobs:
 
       - name: Download current-run OpenClaw Docker E2E package
         if: steps.plan.outputs.needs_package == '1' && needs.validate_selected_ref.outputs.package_artifact_present == 'true' && inputs.package_artifact_run_id == github.run_id
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ inputs.package_artifact_id }}
           path: .artifacts/docker-e2e-package
@@ -2900,7 +2959,7 @@ jobs:
 
       - name: Download previous-run OpenClaw Docker E2E package
         if: steps.plan.outputs.needs_package == '1' && needs.validate_selected_ref.outputs.package_artifact_present == 'true' && inputs.package_artifact_run_id != github.run_id
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ inputs.package_artifact_id }}
           path: .artifacts/docker-e2e-package
@@ -3043,6 +3102,24 @@ jobs:
                 }
             fi
           fi
+          metadata=".artifacts/docker-e2e-package/package-candidate.json"
+          if [[ ! -f "$metadata" ]]; then
+            jq -n \
+              --arg name "$name" \
+              --arg packageSourceSha "$package_source_sha" \
+              --arg sha256 "$digest" \
+              --arg version "$version" \
+              '{
+                name: $name,
+                packageSourceSha: $packageSourceSha,
+                sha256: $sha256,
+                version: $version
+              }' > "$metadata"
+          fi
+          [[ -s "$metadata" ]] || {
+            echo "Docker E2E package metadata was not created." >&2
+            exit 1
+          }
           tag="pkg-${digest:0:32}"
           echo "sha256=$digest" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -3057,10 +3134,12 @@ jobs:
       - name: Upload OpenClaw Docker E2E package
         id: upload_package
         if: steps.plan.outputs.needs_package == '1' && needs.validate_selected_ref.outputs.package_artifact_present != 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: docker-e2e-package-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .artifacts/docker-e2e-package/openclaw-current.tgz
+          path: |
+            .artifacts/docker-e2e-package/openclaw-current.tgz
+            .artifacts/docker-e2e-package/package-candidate.json
           if-no-files-found: error
 
       - name: Validate prerelease plugin registry artifact identity
@@ -3082,7 +3161,7 @@ jobs:
 
       - name: Download prerelease plugin registry artifact
         if: steps.plan.outputs.needs_package == '1' && inputs.prepublish_plugin_registry_artifact_id != ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ inputs.prepublish_plugin_registry_artifact_id }}
           path: .artifacts/prepublish-plugin-registry
@@ -3142,7 +3221,7 @@ jobs:
       - name: Upload prerelease plugin registry artifact
         id: upload_prepublish_plugin_registry
         if: steps.create_prepublish_plugin_registry.outputs.manifest_sha256 != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: docker-e2e-prepublish-plugin-registry-${{ github.run_id }}-${{ github.run_attempt }}
           path: .artifacts/prepublish-plugin-registry/
@@ -3330,7 +3409,7 @@ jobs:
       - name: Upload Docker E2E image artifact
         id: upload_image_artifact
         if: inputs.shared_image_policy == 'no-push-artifact' && steps.plan.outputs.needs_e2e_image == '1' && inputs.shared_image_artifact_id == ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.image_artifact.outputs.artifact_name }}
           path: ${{ steps.image_artifact.outputs.artifact_path }}
@@ -3508,6 +3587,7 @@ jobs:
           fetch-depth: 1
           path: .release-harness
           persist-credentials: false
+          sparse-checkout: scripts
 
       - name: Restore exact trusted workflow revision
         env:
@@ -3551,11 +3631,6 @@ jobs:
             throw new Error("trusted harness checkout did not resolve to the authenticated workflow SHA");
           }
           NODE
-
-      - name: Setup trusted release harness
-        uses: ./.release-harness/.github/actions/setup-release-harness
-        with:
-          node-version: ${{ env.NODE_VERSION }}
 
       - name: Create full release candidate evidence
         id: candidate_evidence
@@ -3619,21 +3694,13 @@ jobs:
             local digest="$4"
             local run_id="$5"
             local run_attempt="$6"
-            bash .release-harness/scripts/docker/shared-image-artifact.sh \
-              verify-upload "$label" "$id" "$name" "$digest" "$run_id" "$run_attempt"
-            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" |
-              jq -er \
-                --arg id "$id" \
-                --arg name "$name" \
-                --arg digest "sha256:${digest}" \
-                --arg run_id "$run_id" \
-                'select(
-                  (.id | tostring) == $id and
-                  .name == $name and
-                  .digest == $digest and
-                  .expired == false and
-                  (.workflow_run.id | tostring) == $run_id
-                ) | .expires_at'
+            local artifact_json
+            # Bash clears errexit inside this substitution; preserve verifier failures explicitly.
+            artifact_json="$(
+              bash .release-harness/scripts/docker/shared-image-artifact.sh \
+                verify-upload "$label" "$id" "$name" "$digest" "$run_id" "$run_attempt" --json
+            )" || return
+            jq -er '.expires_at' <<< "$artifact_json"
           }
           package_expiry="$(
             artifact_expiry \
@@ -3760,7 +3827,7 @@ jobs:
 
       - name: Upload full release candidate evidence
         id: upload_candidate_evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-candidate-v2-${{ needs.prepare_docker_e2e_image.outputs.candidate_request_sha256 }}
           path: ${{ runner.temp }}/full-release-candidate/full-release-candidate.json
@@ -3964,7 +4031,7 @@ jobs:
       - name: Upload live-test image artifact
         id: upload_image_artifact
         if: inputs.shared_image_policy == 'no-push-artifact'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.image_artifact.outputs.artifact_name }}
           path: ${{ steps.image_artifact.outputs.artifact_path }}
@@ -4063,7 +4130,7 @@ jobs:
 
       - name: Download live-test image artifact
         if: contains(matrix.profiles, inputs.release_test_profile) && inputs.shared_image_policy == 'no-push-artifact'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: &live_test_image_download_with
           artifact-ids: ${{ needs.prepare_live_test_image.outputs.image_artifact_id }}
           path: .artifacts/live-test-image
@@ -4227,7 +4294,7 @@ jobs:
 
       - name: Download live-test image artifact
         if: inputs.shared_image_policy == 'no-push-artifact'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: *live_test_image_download_with
 
       - name: Setup supported Node runtime
@@ -4486,9 +4553,9 @@ jobs:
             # Pinned while the release OpenCode workspace lacks Global regions: deepseek-v4.1-flash
             # returns 400 "requires Global regions", and upstream metadata deprecated the V4 Flash
             # routes. Restore dynamic selection (drop OPENCLAW_LIVE_GATEWAY_MODELS) once the
-            # workspace enables Global. Release-workspace discovery stopped listing glm-5.3 on
-            # 2026-10-18, so the smoke pins glm-5.2.
-            command: OPENCLAW_LIVE_GATEWAY_PROVIDERS=opencode-go OPENCLAW_LIVE_GATEWAY_MODELS=opencode-go/glm-5.2 OPENCLAW_LIVE_GATEWAY_SMOKE=1 OPENCLAW_LIVE_GATEWAY_MAX_MODELS=1 node .release-harness/scripts/test-live-shard.mjs native-live-src-gateway-profiles
+            # workspace enables Global. Explicit live selection resolves through the bundled
+            # seed catalog, so keep the stable smoke on its current GPT-5.6 Luna route.
+            command: OPENCLAW_LIVE_GATEWAY_PROVIDERS=opencode-go OPENCLAW_LIVE_GATEWAY_MODELS=opencode-go/gpt-5.6-luna OPENCLAW_LIVE_GATEWAY_SMOKE=1 OPENCLAW_LIVE_GATEWAY_MAX_MODELS=1 node .release-harness/scripts/test-live-shard.mjs native-live-src-gateway-profiles
             timeout_minutes: 45
             profile_env_only: false
             profiles: stable
@@ -4618,6 +4685,17 @@ jobs:
         if: contains(matrix.profiles, inputs.release_test_profile) && (inputs.live_suite_filter == '' || inputs.live_suite_filter == matrix.suite_id || (inputs.live_suite_filter == 'native-live-src-gateway-profiles-anthropic' && startsWith(matrix.suite_id, 'native-live-src-gateway-profiles-anthropic-')) || (inputs.live_suite_filter == 'native-live-src-gateway-profiles-opencode-go' && startsWith(matrix.suite_id, 'native-live-src-gateway-profiles-opencode-go-')))
         run: echo "run=true" >> "$GITHUB_OUTPUT"
 
+      # Hosted release workers have exhausted disk during dependency/image setup.
+      # Reclaim unused toolchains before the checkouts and installs grow further.
+      - name: Reclaim hosted runner disk
+        if: steps.selection.outputs.run == 'true' && runner.environment == 'github-hosted' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h /
+
       - name: Checkout selected ref
         if: steps.selection.outputs.run == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -4712,7 +4790,7 @@ jobs:
       - name: Download Bun test runtime
         id: test_bun_download
         if: inputs.test_runtime == 'bun' && steps.selection.outputs.run == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ needs.validate_selected_ref.outputs.test_bun_artifact_id }}
           path: ${{ runner.temp }}/test-bun-runtime
@@ -4725,7 +4803,21 @@ jobs:
           OPENCLAW_VITEST_RUNTIME: ${{ inputs.test_runtime }}
           OPENCLAW_LIVE_COMMAND: ${{ matrix.command }}
         shell: bash
-        run: bash -o pipefail -c "$OPENCLAW_LIVE_COMMAND"
+        run: |
+          mkdir -p .artifacts/live-shards .artifacts/qa-e2e
+          bash -o pipefail -c "$OPENCLAW_LIVE_COMMAND" \
+            2>&1 | tee ".artifacts/live-shards/${{ matrix.suite_id }}.log"
+
+      - name: Upload native live diagnostics
+        if: always() && steps.selection.outputs.run == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-live-${{ matrix.suite_id }}-${{ needs.validate_selected_ref.outputs.selected_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/live-shards/
+            .artifacts/qa-e2e/
+          retention-days: 14
+          if-no-files-found: warn
 
   validate_live_docker_provider_suites:
     name: Docker live suites (${{ matrix.label }})
@@ -4801,6 +4893,17 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      # Hosted release workers have exhausted disk during dependency/image setup.
+      # Reclaim unused toolchains before the checkouts and installs grow further.
+      - name: Reclaim hosted runner disk
+        if: contains(matrix.profiles, inputs.release_test_profile) && (inputs.live_suite_filter == '' || inputs.live_suite_filter == matrix.suite_id || inputs.live_suite_filter == matrix.suite_group) && runner.environment == 'github-hosted' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h /
+
       - name: Checkout trusted live shard harness
         if: contains(matrix.profiles, inputs.release_test_profile) && (inputs.live_suite_filter == '' || inputs.live_suite_filter == matrix.suite_id || inputs.live_suite_filter == matrix.suite_group)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -4836,7 +4939,7 @@ jobs:
 
       - name: Download live-test image artifact
         if: steps.codex_compat.outputs.run_lane != 'false' && contains(matrix.profiles, inputs.release_test_profile) && (inputs.live_suite_filter == '' || inputs.live_suite_filter == matrix.suite_id || inputs.live_suite_filter == matrix.suite_group) && inputs.shared_image_policy == 'no-push-artifact'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: *live_test_image_download_with
 
       - name: Verify and load live-test image artifact
@@ -5117,7 +5220,7 @@ jobs:
       - name: Download Bun test runtime
         id: test_bun_download
         if: inputs.test_runtime == 'bun' && contains(matrix.profiles, inputs.release_test_profile) && (inputs.live_suite_filter == '' || inputs.live_suite_filter == matrix.suite_id || (inputs.live_suite_filter == 'native-live-extensions-media-video' && startsWith(matrix.suite_id, 'native-live-extensions-media-video-')))
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ needs.validate_selected_ref.outputs.test_bun_artifact_id }}
           path: ${{ runner.temp }}/test-bun-runtime

@@ -41,6 +41,7 @@ export function registerCliMcpPreparationTests({
     const transferMcpLoopbackClientGrant = vi.fn(() => true);
     const mintMcpLoopbackClientGrant = vi.fn(createTestMcpLoopbackClientGrant);
     const revokeMcpLoopbackClientGrant = vi.fn(() => true);
+    const revokeMintedMcpLoopbackClientGrant = vi.fn(() => true);
     const resolveMcpLoopbackScopedTools = vi.fn(() => ({
       agentId: "main",
       tools: [
@@ -60,6 +61,7 @@ export function registerCliMcpPreparationTests({
       transferMcpLoopbackClientGrant,
       mintMcpLoopbackClientGrant,
       revokeMcpLoopbackClientGrant,
+      revokeMintedMcpLoopbackClientGrant,
       resolveMcpLoopbackScopedTools,
     });
     setRawCliBackendForPrepareTest({
@@ -144,6 +146,7 @@ export function registerCliMcpPreparationTests({
         modelProvider: "anthropic",
         modelId: "test-model",
         messageProvider: "telegram",
+        requester: { channel: "telegram", senderId: "canonical-sender" },
         clientCaps: ["tool-events", "inline-widgets"],
         pinnedWidgetAuthoring: true,
         currentChannelId: "telegram:-100123:topic:42",
@@ -230,8 +233,13 @@ export function registerCliMcpPreparationTests({
     );
     expect(context.systemPrompt).not.toContain("current source is default target");
     await context.preparedBackend.cleanup?.();
-    expect(revokeMcpLoopbackClientGrant).toHaveBeenCalledTimes(2);
-    expect(revokeMcpLoopbackClientGrant).toHaveBeenLastCalledWith("loopback-token");
+    // Turn cleanup owns the exact minted grant, not a reusable process bearer.
+    const mintedGrant = mintMcpLoopbackClientGrant.mock.results[0]?.value;
+    expect(mintedGrant).toBeDefined();
+    expect(revokeMintedMcpLoopbackClientGrant).toHaveBeenCalledExactlyOnceWith(mintedGrant);
+    expect(revokeMcpLoopbackClientGrant).toHaveBeenCalledExactlyOnceWith("stable-loopback-token");
+    await context.preparedBackend.cleanup?.();
+    expect(revokeMintedMcpLoopbackClientGrant).toHaveBeenCalledExactlyOnceWith(mintedGrant);
   });
 
   it.each<{

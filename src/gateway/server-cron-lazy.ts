@@ -1,7 +1,6 @@
 // Gateway cron lazy loader.
 // Defers scheduler startup until cron is touched by runtime or API handlers.
 import { DEFAULT_CRON_ENABLED } from "../config/cron-limits.js";
-import { resolveCronJobsStorePathFromConfig } from "../cron/store.js";
 import { captureSqliteReadOnlyWorkerScope } from "../infra/sqlite-readonly-worker-context.js";
 import { getSpawnBroker, runWithSpawnBroker } from "../process/spawn-broker/context.js";
 import { createLazyPromiseLoader, createLazyRuntimeMethodBinder } from "../shared/lazy-runtime.js";
@@ -11,6 +10,10 @@ import type {
   GatewayCronExitWatcherHandoff,
   GatewayCronState,
 } from "./server-cron.js";
+import {
+  expectSessionAutomationSource,
+  markSessionAutomationSourceUnavailable,
+} from "./session-automation-index.js";
 
 type LoadedGatewayCronState = {
   state: GatewayCronState;
@@ -28,9 +31,10 @@ export function createLazyGatewayCronState(
   const spawnBroker = getSpawnBroker();
   const runWithReadOnlyWorkers = captureSqliteReadOnlyWorkerScope();
   const env = params.env ?? process.env;
-  const storePath = resolveCronJobsStorePathFromConfig(params.cfg, env);
+  const storePath = params.storePath;
   const cronEnabled =
     env.OPENCLAW_SKIP_CRON !== "1" && (params.cfg.cron?.enabled ?? DEFAULT_CRON_ENABLED);
+  const automationEpoch = expectSessionAutomationSource(params.cfg, cronEnabled);
   let loaded: LoadedGatewayCronState | null = null;
   let stopped = false;
   let exitWatcherHandoff: GatewayCronExitWatcherHandoff | undefined;
@@ -58,7 +62,7 @@ export function createLazyGatewayCronState(
       import("./server-cron.js").then(({ buildGatewayCronService }) => {
         loaded = {
           state: runWithSpawnBroker(spawnBroker, () =>
-            runWithReadOnlyWorkers(() => buildGatewayCronService(params)),
+            runWithReadOnlyWorkers(() => buildGatewayCronService({ ...params, automationEpoch })),
           ),
           phase: "idle",
           startPromise: null,
@@ -84,6 +88,14 @@ export function createLazyGatewayCronState(
     return await cronStateLoader.load();
   };
   const bindCron = createLazyRuntimeMethodBinder(load);
+  const bindStartedCron = createLazyRuntimeMethodBinder(async () => {
+    const resolved = await load();
+    // Startup recovery must finish before a new receipt can become running.
+    if (!stopped) {
+      await cron.start();
+    }
+    return resolved;
+  });
 
   const stopResolvedCron = async (resolved: LoadedGatewayCronState): Promise<void> => {
     resolved.phase = "stopped";
@@ -261,9 +273,11 @@ export function createLazyGatewayCronState(
       return await (await load()).state.cron.removeAgentJobsTransactional(agentId, commit);
     },
     quiesceJobs: bindCron(({ state }) => state.cron.quiesceJobs.bind(state.cron)),
-    run: bindCron(({ state }) => state.cron.run.bind(state.cron)),
-    enqueueRun: bindCron(({ state }) => state.cron.enqueueRun.bind(state.cron)),
+    run: bindStartedCron(({ state }) => state.cron.run.bind(state.cron)),
+    enqueueRun: bindStartedCron(({ state }) => state.cron.enqueueRun.bind(state.cron)),
     waitForManualRun: bindCron(({ state }) => state.cron.waitForManualRun.bind(state.cron)),
+    readEventSources: bindCron(({ state }) => state.cron.readEventSources.bind(state.cron)),
+    runEvent: bindCron(({ state }) => state.cron.runEvent.bind(state.cron)),
     getJob(id) {
       return loaded?.state.cron.getJob(id);
     },
@@ -281,7 +295,7 @@ export function createLazyGatewayCronState(
     async prepareWake() {
       await load();
     },
-    wake(opts) {
+    async wake(opts) {
       if (!loaded) {
         // A wake should kick off lazy loading but cannot claim success before
         // cron exists and knows whether the target job is wakeable.
@@ -296,6 +310,7 @@ export function createLazyGatewayCronState(
     cron,
     storePath,
     cronEnabled,
+    markAutomationUnavailable: () => markSessionAutomationSourceUnavailable(automationEpoch),
     prepareExitWatcherHandoff: async (): Promise<GatewayCronExitWatcherHandoff | undefined> => {
       const loading = cronStateLoader.peek();
       const resolved = loaded ?? (loading ? await loading : null);

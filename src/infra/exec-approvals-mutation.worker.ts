@@ -2,15 +2,14 @@ import type { WorkerWriteOperationContext } from "../state/worker-operation-regi
 import {
   generateToken,
   normalizeExecApprovalsInternal,
-  resolveExecApprovalsDisplayPath,
   resolveExecApprovalsSocketPath,
 } from "./exec-approvals-config.js";
 import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./exec-approvals-core.js";
-import { assertNoPendingLegacyExecApprovals } from "./exec-approvals-migration-gate.js";
 import {
   applyExecApprovalsUpdate,
   type ExecApprovalsUpdate,
 } from "./exec-approvals-mutation.kernel.js";
+import { execApprovalsPublication } from "./exec-approvals-publication.js";
 import {
   assertExecApprovalsMutationAllowed,
   deleteExecApprovalsConfigRow,
@@ -38,38 +37,40 @@ function mutate<T>(
   },
 ): T {
   const options = context.stateOptions();
-  assertNoPendingLegacyExecApprovals({ env: options.env });
   return context.write(
     ({ db }) => {
       requestSqliteWorkerOperationAdmission({ stage: "transaction", facts: undefined });
-      const current = snapshotFromExecApprovalsDatabase(
-        db,
-        resolveExecApprovalsDisplayPath(options.env),
-      );
-      const edit = operation(current, db);
-      let snapshot = current;
-      if (edit.next !== null) {
-        const raw = edit.raw ?? serializeExecApprovals(edit.next);
-        if (edit.remove || !current.exists || current.raw !== raw) {
-          if (edit.remove) {
-            deleteExecApprovalsConfigRow(db);
-            snapshot = snapshotFromExecApprovalsRow({ path: current.path });
-          } else {
-            const persisted = writeExecApprovalsConfigRow({ db, file: edit.next, raw: edit.raw });
-            snapshot = snapshotFromExecApprovalsRow({
-              path: current.path,
-              row: { raw_json: persisted },
-            });
+      const captured = execApprovalsPublication.capture(db, () => {
+        const current = snapshotFromExecApprovalsDatabase(db, options.env);
+        const edit = operation(current, db);
+        let snapshot = current;
+        if (edit.next !== null) {
+          const raw = edit.raw ?? serializeExecApprovals(edit.next);
+          if (edit.remove || !current.exists || current.raw !== raw) {
+            if (edit.remove) {
+              deleteExecApprovalsConfigRow(db);
+              snapshot = snapshotFromExecApprovalsRow({ path: current.path, env: options.env });
+            } else {
+              const persisted = writeExecApprovalsConfigRow({ db, file: edit.next, raw: edit.raw });
+              snapshot = snapshotFromExecApprovalsRow({
+                path: current.path,
+                row: { raw_json: persisted },
+              });
+            }
           }
         }
-      }
-      const changed = snapshot.raw !== current.raw;
-      const facts = changed ? { kind: "exec-policy-publication", file: snapshot.file } : undefined;
+        const changed = snapshot.raw !== current.raw;
+        return { changed, snapshot, result: edit.result(snapshot) };
+      });
+      const { changed, snapshot, result } = captured.result;
+      const facts = {
+        kind: "exec-policy-publication",
+        file: snapshot.file,
+        execFacts: execApprovalsPublication.bound(captured.receipt),
+      };
       requestSqliteWorkerOperationAdmission({ stage: "commit", facts });
-      if (changed) {
-        deferSqliteWorkerCommitReceipt(db, facts);
-      }
-      return edit.result(snapshot);
+      deferSqliteWorkerCommitReceipt(db, facts, changed ? "commit" : "settlement");
+      return result;
     },
     { operationLabel: label },
   );
@@ -108,11 +109,7 @@ export const execPolicyMutationOperations = {
     }),
   "execApprovals.ensureSnapshot": (_input: undefined, context: WorkerWriteOperationContext) => {
     const options = context.stateOptions();
-    assertNoPendingLegacyExecApprovals({ env: options.env });
-    const snapshot = snapshotFromExecApprovalsDatabase(
-      context.open().db,
-      resolveExecApprovalsDisplayPath(options.env),
-    );
+    const snapshot = snapshotFromExecApprovalsDatabase(context.open().db, options.env);
     const socketPath = resolveExecApprovalsSocketPath(options.env);
     const ensureSocket = (file: ExecApprovalsFile): ExecApprovalsFile => {
       const next = normalizeExecApprovalsInternal(file);

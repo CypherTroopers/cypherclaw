@@ -1,11 +1,9 @@
-import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it, vi } from "vitest";
 import { sanitizeTriageUpdateFailure } from "../commands/triage-update.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveGatewayTaskScriptPath } from "../daemon/paths.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import type { UpdateDoctorConfigChange } from "../infra/update-doctor-config.js";
@@ -54,7 +52,6 @@ import {
   ExitError,
   getUpdateRun,
   invokeUpdateCli,
-  readConfigFileSnapshot,
   resolveGatewayInstallEntrypoint,
   runCommandWithTimeout,
   runDaemonRestart,
@@ -70,7 +67,6 @@ await vi.hoisted(() => import("./update-cli-mocks.test-support.js"));
 describe("update-cli", () => {
   const nodeExecutable = resolveTestNodeExecPath();
   const {
-    configSnapshot,
     mockCurrentProcessFreshDoctor,
     mockFileBackedPathExists,
     mockNpmGlobalCommands,
@@ -88,7 +84,7 @@ describe("update-cli", () => {
     tempDirs,
   } = createUpdateCliFixture();
 
-  it.each(["config-change", "legacy-config-change", "live-config-change", "invalid"] as const)(
+  it.each(["config-change", "legacy-config-change", "invalid"] as const)(
     "validates the staged candidate without inference while the previous gateway serves (%s)",
     async (outcome) => {
       const valid = outcome !== "invalid";
@@ -125,20 +121,6 @@ describe("update-cli", () => {
             });
           }
           return runCommand(argv, options);
-        });
-      }
-      let liveConfigPath: string | undefined;
-      if (outcome === "live-config-change") {
-        liveConfigPath = path.join(tempDirs.make("openclaw-update-live-config-"), "openclaw.json");
-        await fs.writeFile(liveConfigPath, "{}\n");
-        vi.mocked(readConfigFileSnapshot).mockImplementation(async () => {
-          const configPath = requireValue(liveConfigPath, "live config path");
-          const raw = await fs.readFile(configPath, "utf8");
-          return configSnapshot(JSON.parse(raw) as OpenClawConfig, {
-            path: configPath,
-            raw,
-            hash: createHash("sha256").update(raw).digest("hex"),
-          });
         });
       }
       const events: string[] = [];
@@ -199,12 +181,6 @@ describe("update-cli", () => {
         ).toMatchObject({
           version: "1.0.0",
         });
-        if (outcome === "live-config-change") {
-          await fs.writeFile(
-            requireValue(liveConfigPath, "live config path"),
-            JSON.stringify({ logging: { level: "debug" } }),
-          );
-        }
         return reportCandidateSteps(options, {
           status: valid ? "ok" : "error",
           durationMs: 1,
@@ -246,14 +222,14 @@ describe("update-cli", () => {
       });
 
       if (succeeds) {
-        await updateCommand({ yes: true, json: true }).catch((cause: unknown) => {
-          throw new Error(`${getErrorOutput()}\n${JSON.stringify(lastWriteJsonCall())}`, { cause });
-        });
-        expect(events).toEqual(
-          outcome === "live-config-change"
-            ? ["validate", "validate", "stop", "plugins"]
-            : ["validate", "stop", "plugins"],
+        await updateCommand({ channel: "stable", yes: true, json: true }).catch(
+          (cause: unknown) => {
+            throw new Error(`${getErrorOutput()}\n${JSON.stringify(lastWriteJsonCall())}`, {
+              cause,
+            });
+          },
         );
+        expect(events).toEqual(["validate", "stop", "plugins"]);
         expect(spawn).toHaveBeenCalledOnce();
         expect(runExec).toHaveBeenCalledWith(
           expect.any(String),
@@ -269,7 +245,9 @@ describe("update-cli", () => {
           verification: { readyz: true, serviceRunning: true },
         });
       } else {
-        await expect(updateCommand({ yes: true, json: true })).rejects.toEqual(new ExitError(1));
+        await expect(updateCommand({ channel: "stable", yes: true, json: true })).rejects.toEqual(
+          new ExitError(1),
+        );
         expect(events).toEqual(["validate"]);
         expectNoSideEffects(serviceStop, serviceStart, serviceRestart);
         expect(freshRestartCalls()).toHaveLength(0);
@@ -296,18 +274,6 @@ describe("update-cli", () => {
         expect(
           record?.steps.flatMap((step) => (step.configChange ? [step.configChange] : [])),
         ).toEqual(doctorChanges);
-      }
-      if (outcome === "live-config-change") {
-        expect(record?.reason).toBeNull();
-        expect(
-          candidateValidation.mock.calls.map(([options]) => options.config.logging?.level),
-        ).toEqual([undefined, "debug"]);
-        expect(getErrorOutput()).toContain(
-          "Configuration changed during update checks; validating the current configuration before activation.",
-        );
-        expect(
-          JSON.parse(await fs.readFile(requireValue(liveConfigPath, "live config path"), "utf8")),
-        ).toEqual({ logging: { level: "debug" } });
       }
       if (legacyConfigChange) {
         const warning =
@@ -342,6 +308,7 @@ describe("update-cli", () => {
         "run",
       ]);
       await invokeUpdateCli({
+        channel: "stable",
         yes: true,
         json: true,
         restart: mode !== "no-restart",
@@ -384,7 +351,7 @@ describe("update-cli", () => {
         ],
       });
     });
-    await expect(updateCommand({ yes: true, json: true })).rejects.toThrow();
+    await expect(updateCommand({ channel: "stable", yes: true, json: true })).rejects.toThrow();
     expect(await fs.readFile(path.join(root, "package.json"))).toEqual(before);
     expect(doctorCommandCall()).toBeUndefined();
     expect(serviceStop).not.toHaveBeenCalled();
@@ -416,7 +383,9 @@ describe("update-cli", () => {
       }),
     );
 
-    await expect(updateCommand({ yes: true, json: true })).rejects.toEqual(new ExitError(1));
+    await expect(updateCommand({ channel: "stable", yes: true, json: true })).rejects.toEqual(
+      new ExitError(1),
+    );
 
     expect(doctorCommandCall()).toBeDefined();
     expectNoSideEffects(serviceStart, serviceRestart, runDaemonRestart);
@@ -452,7 +421,7 @@ describe("update-cli", () => {
     serviceDefinitionMutationCapability.mockResolvedValue({ kind: "sealed", detail: "fixture" });
     mockFileBackedPathExists();
 
-    await updateCommand({ yes: true }).catch((cause: unknown) => {
+    await updateCommand({ channel: "stable", yes: true }).catch((cause: unknown) => {
       throw new Error(`${getErrorOutput()}\n${getLogOutput()}`, { cause });
     });
     platformSpy.mockRestore();
@@ -564,7 +533,7 @@ describe("update-cli", () => {
 
       try {
         await withEnvAsync({ OPENCLAW_UPDATE_RUN_HANDOFF: handoff }, async () => {
-          const updatePromise = updateCommand({ yes: true });
+          const updatePromise = updateCommand({ channel: "stable", yes: true });
           const firstOutcome = await Promise.race([
             stopStarted.then(() => "stop" as const),
             updatePromise.then(() => "update" as const),
@@ -621,7 +590,7 @@ describe("update-cli", () => {
 
     try {
       await withEnvAsync({ OPENCLAW_UPDATE_RUN_HANDOFF: undefined }, async () => {
-        await updateCommand({ yes: true });
+        await updateCommand({ channel: "stable", yes: true });
       });
     } finally {
       platformSpy.mockRestore();
@@ -652,7 +621,9 @@ describe("update-cli", () => {
 
     try {
       await withEnvAsync({ OPENCLAW_GATEWAY_PORT: "19999" }, async () => {
-        await expect(updateCommand({ yes: true, timeout: "17" })).rejects.toEqual(new ExitError(1));
+        await expect(
+          updateCommand({ channel: "stable", yes: true, timeout: "17" }),
+        ).rejects.toEqual(new ExitError(1));
       });
     } finally {
       platformSpy.mockRestore();
@@ -669,7 +640,7 @@ describe("update-cli", () => {
   });
 
   it.each([{ json: false, handoff: undefined, expectedExitCode: 1 }])(
-    "leaves the stopped Gateway down when Git mutation throws without a recovery verdict (json=$json)",
+    "attempts recovery after Git mutation throws and preserves failed readiness (json=$json)",
     async ({ json, handoff, expectedExitCode }) => {
       mockStoppedManagedGitGateway();
       setTty(true);
@@ -700,7 +671,7 @@ describe("update-cli", () => {
         withEnvAsync({ OPENCLAW_UPDATE_RUN_HANDOFF: handoff }, () => updateCommand({ json })),
       ).rejects.toEqual(new ExitError(expectedExitCode));
       expect(serviceStop).toHaveBeenCalledOnce();
-      expect(freshRestartCalls()).toHaveLength(0);
+      expect(freshRestartCalls()).toHaveLength(1);
       expectNoSideEffects(serviceStart, serviceRestart);
       expect(defaultRuntime.exit).not.toHaveBeenCalled();
       expect(triageCommand).toHaveBeenCalledTimes(json ? 0 : 1);
@@ -715,17 +686,22 @@ describe("update-cli", () => {
           recovery: { serviceRestartSafe: false, reason: "runtime-verification-failed" },
           verification: { serviceRunning: false, readyz: false, settled: false },
           steps: [
+            expect.objectContaining({ name: "updater-runtime-retention", exitCode: 0 }),
             expect.objectContaining({ exitCode: 1, stderrTail: formatErrorMessage(failure) }),
+            expect.objectContaining({ name: "post-stop-checks", exitCode: 0 }),
             recoveryVerificationStep([
               {
-                check: "settled",
-                code: "timeout",
-                message: "Gateway remains stopped after interrupted mutation.",
+                check: "gateway-recovery",
+                code: "gateway-probe-failed",
+                message:
+                  "Failed to restart managed gateway service after failed update: Error: Service runtime: status=stopped, state=stopped",
               },
             ]),
           ],
         },
       });
+      expect(getLogOutput()).not.toMatch(/keep the gateway stopped/i);
+      expect(getLogOutput()).toContain("openclaw update repair");
       if (!json) {
         const recovery = expectDefined(
           triageCommand.mock.calls[0]?.[1]?.recovery,

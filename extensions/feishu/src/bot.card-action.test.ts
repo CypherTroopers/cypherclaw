@@ -9,8 +9,8 @@ import {
   type FeishuCardInteractionEnvelope,
 } from "./card-interaction.js";
 import {
+  expectFeishuCardButtonRow,
   expectFirstSentCardUsesFillWidthOnly,
-  expectSentCardHasP2pAction,
 } from "./card-test-helpers.js";
 import {
   FEISHU_APPROVAL_CANCEL_ACTION,
@@ -103,40 +103,54 @@ describe("Feishu Card Action Handler", () => {
   it("opens approval cards with resolved DM type and preserved interaction context", async () => {
     getChat.mockResolvedValueOnce({ code: 0, data: { chat_mode: "p2p" } });
     await dispatch(cardEvent(approvalAction()), { accountId: "main" });
-    expect(sendCardFeishuMock.mock.calls[0]?.[0]).toMatchObject({
+    const expected = {
+      u: "u123",
+      h: "chat1",
+      t: "p2p",
+      s: "agent:codex:feishu:chat:chat1",
+      e: expect.any(Number),
+    };
+    const sent = sendCardFeishuMock.mock.calls[0]?.[0];
+    expect(sent).toMatchObject({
       to: "chat:chat1",
       accountId: "main",
-      card: {
-        config: { width_mode: "fill" },
-        header: { title: { content: "Confirm action" } },
-        body: {
-          elements: expect.arrayContaining([
-            {
-              tag: "action",
-              actions: [
-                expect.objectContaining({
-                  value: expect.objectContaining({
-                    c: {
-                      u: "u123",
-                      h: "chat1",
-                      t: "p2p",
-                      s: "agent:codex:feishu:chat:chat1",
-                      e: expect.any(Number),
-                    },
-                  }),
-                }),
-                expect.anything(),
-              ],
-            },
-          ]),
-        },
-      },
+      card: { header: { title: { content: "Confirm action" } } },
     });
+    const buttons = expectFeishuCardButtonRow(sent?.card);
+    expect(buttons.map((button) => button.value)).toEqual([
+      expect.objectContaining({ a: FEISHU_APPROVAL_CONFIRM_ACTION, q: "/new", c: expected }),
+      expect.objectContaining({ a: FEISHU_APPROVAL_CANCEL_ACTION, c: expected }),
+    ]);
     expectFirstSentCardUsesFillWidthOnly(sendCardFeishuMock);
-    expectSentCardHasP2pAction(sendCardFeishuMock);
     expect(createFeishuClientMock).toHaveBeenCalledTimes(1);
     expect(handleFeishuMessage).not.toHaveBeenCalled();
   });
+
+  it.each(["confirm", "cancel"] as const)(
+    "dispatches the emitted approval %s button",
+    async (action) => {
+      await dispatch(cardEvent(approvalAction()));
+      const buttons = expectFeishuCardButtonRow(sendCardFeishuMock.mock.calls[0]?.[0]?.card);
+      const button = buttons[action === "confirm" ? 0 : 1];
+      const event = cardEvent(button?.value as Record<string, unknown>, {
+        token: "approval-callback",
+      });
+      await dispatch(event, { botOpenId: "ou_bot" });
+      await dispatch(event, { botOpenId: "ou_bot" });
+      if (action === "confirm") {
+        expect(message()).toMatchObject({
+          chat_id: "chat1",
+          chat_type: "group",
+          content: '{"text":"/new"}',
+        });
+        expect(handleFeishuMessage).toHaveBeenCalledTimes(1);
+      } else {
+        expect(notice()).toMatchObject({ to: "chat:chat1", text: "Cancelled." });
+        expect(sendMessageFeishuMock).toHaveBeenCalledTimes(1);
+        expect(handleFeishuMessage).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it("does not open approval cards when the expiry would exceed a valid Date", async () => {
     vi.useFakeTimers();
@@ -199,13 +213,15 @@ describe("Feishu Card Action Handler", () => {
     expect(notice()).toMatchObject({ to: "chat:chat1", text: "Cancelled." });
   });
 
-  it("preserves p2p callbacks for DM quick actions", async () => {
+  it("preserves p2p callbacks for DM quick actions during lookup outages", async () => {
+    getChat.mockRejectedValueOnce(new Error("lookup unavailable"));
     const event = cardEvent(quickAction({ c: { ...context(), h: "p2p-chat-1", t: "p2p" } }), {
       context: { chat_id: "p2p-chat-1" },
     });
     await dispatch(event, { botOpenId: "ou_bot" });
     expect(message()).toMatchObject({ chat_id: "p2p-chat-1", chat_type: "p2p" });
     expect(message()?.mentions).toBeUndefined();
+    expect(getChat).not.toHaveBeenCalled();
   });
 
   it("does not cache resolved chat type when expiry would exceed a valid Date", async () => {
@@ -221,21 +237,26 @@ describe("Feishu Card Action Handler", () => {
     expect(message()).toMatchObject({ chat_id: "oc_dm_chat_boundary", chat_type: "p2p" });
   });
 
-  it("keeps Feishu chat lookup error logs UTF-16 safe at the truncation boundary", async () => {
-    const log = vi.fn();
-    getChat.mockResolvedValueOnce({ code: 99, msg: `${"x".repeat(499)}😀tail` });
-    await dispatch(cardEvent({ text: "/help" }), { runtime: { ...runtime, log } });
-    expect(message()?.chat_type).toBe("p2p");
-    expect(log).toHaveBeenCalledWith(
-      `feishu[mock-account]: failed to resolve chat type: ${"x".repeat(499)}; defaulting to p2p`,
-    );
-  });
-
-  it("falls back to p2p when Feishu chat API throws", async () => {
-    getChat.mockRejectedValueOnce(new Error("network failure"));
-    await dispatch(cardEvent({ text: "/help" }));
-    expect(message()?.chat_type).toBe("p2p");
-  });
+  it.each(["response", "exception", "missing"])(
+    "refuses actions after chat lookup %s",
+    async (failure) => {
+      const log = vi.fn();
+      const detail = "private-card-provider-detail";
+      if (failure === "response") {
+        getChat.mockResolvedValueOnce({ code: 99, msg: detail });
+      } else if (failure === "exception") {
+        getChat.mockRejectedValueOnce(new Error(detail));
+      } else {
+        getChat.mockResolvedValueOnce({ code: 0, data: {} });
+      }
+      await dispatch(cardEvent({ text: "/help", chat_type: "p2p" }), {
+        runtime: { ...runtime, log },
+      });
+      expect(handleFeishuMessage).not.toHaveBeenCalled();
+      expect(notice()?.text).toContain("action was not run");
+      expect(log.mock.calls.flat().join("\n")).not.toContain(detail);
+    },
+  );
 
   it("does not log raw duplicate callback tokens", async () => {
     const log = vi.fn();

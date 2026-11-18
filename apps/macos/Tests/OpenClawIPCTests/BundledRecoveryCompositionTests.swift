@@ -73,7 +73,8 @@ struct BundledRecoveryCompositionTests {
             let command = try #require(GatewayLaunchAgentManager.launchdProgramArguments())
             #expect(command.contains("--no-install"))
             let inspected = try #require(GatewayLaunchAgentManager.installedServiceCLI())
-            #expect(inspected.prefix.first == runtime.bun.path)
+            #expect(inspected.prefix.first == runtime.serviceBun.path)
+            #expect(inspected.matchesBundledRuntime(runtime))
 
             // Same-version shell and app packages must not be interchangeable host-link owners.
             let wrongRoot = state.appendingPathComponent("other-install")
@@ -138,7 +139,7 @@ struct BundledRecoveryCompositionTests {
                 recordedAt: Date(),
                 notificationInFlight: true,
                 runtimeBuildID: Bundle.main.infoDictionary?["OpenClawRuntimeBuildID"] as? String)
-            let checkpoint = try PostAppUpdateReceiptStore.recordCoreUpdateDispatch(receipt: receipt, owner: .gateway)
+            let checkpoint = PostAppUpdateReceiptStore.recordCoreUpdateDispatch(receipt: receipt, owner: .gateway)
             #expect(!checkpoint.setupRecovery && checkpoint.coreUpdatePending)
             #expect(PostUpdateController.shared.startIfNeeded())
             let window = try await self.updateWindow()

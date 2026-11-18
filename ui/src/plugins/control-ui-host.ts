@@ -14,7 +14,7 @@ import {
 } from "../components/panel-toggle-contract.ts";
 import { rememberSessionPanelToggle } from "../components/session-panel-toggle-buffer.ts";
 import { i18n } from "../i18n/index.ts";
-import { redactToolPayloadText } from "../lib/browser-redact.ts";
+import { redactToolDetail } from "../lib/browser-redact.ts";
 import { openPreferredApplicationSession } from "../lib/sessions/route-navigation.ts";
 import {
   normalizeSessionKeyForUiComparison,
@@ -98,7 +98,7 @@ export function createControlUiPluginHost(
     get locale() {
       return i18n.getLocale();
     },
-    redact: redactToolPayloadText,
+    redact: redactToolDetail,
     components: createControlUiComponents({
       current,
       signal: owner.abort.signal,
@@ -203,7 +203,8 @@ export function createControlUiPluginHost(
       open({ sessionKey, agentId }) {
         openPreferredApplicationSession(current(), sessionKey, agentId);
       },
-      create: (params) => call((context) => context.sessions.create(params)),
+      create: (params) =>
+        call((context) => context.sessions.create(params, { signal: owner.abort.signal })),
       patch: ({ sessionKey, agentId }, patch) =>
         call(async (context) => {
           // A plugin query may target another global owner. Its mutation does not

@@ -1,6 +1,7 @@
 // Shared harness and fixtures for manager sync-ops startup catch-up tests.
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   resolveStateDir,
   type OpenClawConfig,
@@ -8,26 +9,20 @@ import {
 } from "openclaw/plugin-sdk/memory-core-host-engine-foundation";
 import {
   MEMORY_CHUNKING_VERSION,
+  ensureMemoryIndexSchema,
   type MemorySource,
   type MemorySyncParams,
   type MemorySyncProgressUpdate,
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import { MemoryIndexDatabase } from "./manager-database-context.js";
+import type { MemoryIndexEntry } from "./manager-index-preparation.js";
 import {
   MEMORY_INDEX_PROVENANCE_VERSION,
   resolveConfiguredScopeHash,
   type MemoryIndexMeta,
 } from "./manager-reindex-state.js";
+import { hasTargetedSessionSyncParams } from "./manager-sync-control.js";
 import { MemorySyncTestHarness } from "./manager-sync-ops.test-support.js";
-
-type MemoryIndexEntry = {
-  path: string;
-  absPath: string;
-  mtimeMs: number;
-  size: number;
-  hash: string;
-  content?: string;
-};
 
 type SyncParams = {
   reason?: string;
@@ -58,28 +53,17 @@ export const startupHarnessDatabases = new Set<MemoryIndexDatabase>();
 
 type SourceStateRow = { path: string; hash: string; mtime: number; size: number };
 
-function createStartupHarnessDatabase(sourceRows: SourceStateRow[]): MemoryIndexDatabase {
-  const database = MemoryIndexDatabase.openShadow(
+async function createStartupHarnessDatabase(
+  sourceRows: SourceStateRow[],
+): Promise<MemoryIndexDatabase> {
+  const database = await MemoryIndexDatabase.openShadow(
     path.join(resolveStateDir(), `startup-index-${randomUUID()}.sqlite`),
     false,
   );
   startupHarnessDatabases.add(database);
-  const db = database.db;
+  using db = new DatabaseSync(database.db.location()!);
+  ensureMemoryIndexSchema({ db, cacheEnabled: false, ftsEnabled: false });
   db.exec(`
-    CREATE TABLE memory_index_sources (
-      path TEXT NOT NULL,
-      source TEXT NOT NULL,
-      hash TEXT NOT NULL,
-      mtime REAL NOT NULL,
-      size INTEGER NOT NULL,
-      UNIQUE(path, source)
-    );
-    CREATE TABLE memory_index_chunks (
-      id TEXT PRIMARY KEY,
-      path TEXT NOT NULL,
-      source TEXT NOT NULL,
-      model TEXT NOT NULL
-    );
     CREATE TABLE memory_index_source_update_audit (path TEXT NOT NULL);
     CREATE TRIGGER memory_index_source_update_audit_trigger
     AFTER UPDATE ON memory_index_sources
@@ -103,10 +87,7 @@ export class SessionStartupCatchupHarness extends MemorySyncTestHarness {
   protected readonly createProvider = (): never => {
     throw new Error("Startup catch-up harness does not acquire embedding providers");
   };
-  protected releaseProvider(): never {
-    throw new Error("Startup catch-up harness does not own embedding providers");
-  }
-  protected readonly cfg = {} as OpenClawConfig;
+  protected readonly cfg: OpenClawConfig;
   protected readonly agentId = "main";
   protected readonly workspaceDir = "/tmp/openclaw-test-workspace";
   protected readonly settings = {
@@ -160,25 +141,38 @@ export class SessionStartupCatchupHarness extends MemorySyncTestHarness {
   private corpusListWork: Promise<void> = Promise.resolve();
   private pendingSyncWork: Promise<void> = Promise.resolve();
 
-  constructor(
-    sourceRows: SourceStateRow[],
+  private constructor(
+    database: MemoryIndexDatabase,
     private readonly indexSessionUpdates = false,
     private readonly subscribeToRealEvents = false,
-    private readonly deferSessionIndex = false,
-    database?: MemoryIndexDatabase,
+    cfg: OpenClawConfig = {},
   ) {
     super();
+    this.cfg = cfg;
     this.sources.add("sessions");
-    this.publishedDatabase = database ?? createStartupHarnessDatabase(sourceRows);
+    this.publishedDatabase = database;
+  }
+
+  static async create(
+    sourceRows: SourceStateRow[],
+    indexSessionUpdates = false,
+    subscribeToRealEvents = false,
+    cfg: OpenClawConfig = {},
+  ): Promise<SessionStartupCatchupHarness> {
+    return new SessionStartupCatchupHarness(
+      await createStartupHarnessDatabase(sourceRows),
+      indexSessionUpdates,
+      subscribeToRealEvents,
+      cfg,
+    );
   }
 
   restartForStartup(): SessionStartupCatchupHarness {
     return new SessionStartupCatchupHarness(
-      [],
+      this.publishedDatabase,
       this.indexSessionUpdates,
       false,
-      this.deferSessionIndex,
-      this.publishedDatabase,
+      this.cfg,
     );
   }
 
@@ -212,21 +206,11 @@ export class SessionStartupCatchupHarness extends MemorySyncTestHarness {
   async runArchiveSyncForTest(): Promise<void> {
     await this.syncArchiveFiles({
       needsFullReindex: false,
-      deferIndex: this.deferSessionIndex,
     });
-  }
-
-  async getCorpusPathsForTest(): Promise<string[]> {
-    const entries = await this.listSessionCorpusEntries();
-    return entries.map((entry) => this.sessionPathForCorpusEntry(entry));
   }
 
   getDirtyArchiveFiles(): string[] {
     return Array.from(this.sessionsDirtyFiles);
-  }
-
-  getPendingSessionTargets(): MemorySyncParams["sessions"] {
-    return Array.from(this.sessionPendingTargets.values());
   }
 
   getPendingArchiveFiles(): string[] {
@@ -263,11 +247,6 @@ export class SessionStartupCatchupHarness extends MemorySyncTestHarness {
 
   isSessionsDirty(): boolean {
     return this.sessionsDirty;
-  }
-
-  markFullSessionRetry(): void {
-    this.sessionsDirty = true;
-    this.sessionsFullRetryDirty = true;
   }
 
   startTranscriptListener(): void {
@@ -322,10 +301,11 @@ export class SessionStartupCatchupHarness extends MemorySyncTestHarness {
   protected async sync(params?: MemorySyncParams): Promise<void> {
     this.syncCalls.push(params ?? {});
     this.pendingSyncWork = this.indexSessionUpdates
-      ? this.syncArchiveFiles({
-          needsFullReindex: false,
-          deferIndex: this.deferSessionIndex,
-        }).then(() => undefined)
+      ? hasTargetedSessionSyncParams(params)
+        ? this.runSync(params).then(() => undefined)
+        : this.syncArchiveFiles({
+            needsFullReindex: false,
+          }).then(() => undefined)
       : Promise.resolve();
     await this.pendingSyncWork;
   }
@@ -342,8 +322,10 @@ export class SessionStartupCatchupHarness extends MemorySyncTestHarness {
     return 1;
   }
 
-  protected override listSessionCorpusEntries() {
-    const work = super.listSessionCorpusEntries().then(async (entries) => {
+  protected override listSessionCorpusEntries(
+    targets?: Pick<MemorySyncParams, "sessions" | "archiveFiles">,
+  ) {
+    const work = super.listSessionCorpusEntries(targets).then(async (entries) => {
       this.corpusListCalls += 1;
       const callback = this.afterNextCorpusList;
       this.afterNextCorpusList = null;
@@ -354,11 +336,7 @@ export class SessionStartupCatchupHarness extends MemorySyncTestHarness {
     return work;
   }
 
-  embeddingCachePrunes = 0;
-
-  protected async pruneEmbeddingCacheIfNeeded(): Promise<void> {
-    this.embeddingCachePrunes += 1;
-  }
+  protected async pruneEmbeddingCacheIfNeeded(): Promise<void> {}
 
   protected resetProviderInitializationForRetry(): void {}
 
@@ -366,7 +344,16 @@ export class SessionStartupCatchupHarness extends MemorySyncTestHarness {
 
   protected async indexFile(entry: MemoryIndexEntry, _source: MemorySource): Promise<void> {
     this.indexedPaths.push(entry.path);
-    this.indexedContents.push(entry.content ?? "");
+    const lines: string[] = [];
+    await entry.streamSessionExport?.({
+      onPage: (page) => {
+        lines.push(...page.lines);
+      },
+      onReset: () => {
+        lines.length = 0;
+      },
+    });
+    this.indexedContents.push(lines.join("\n"));
   }
 
   protected override async deleteIndexedFile(
@@ -377,7 +364,8 @@ export class SessionStartupCatchupHarness extends MemorySyncTestHarness {
     // This harness tests corpus selection. File-owned publication,
     // workspace locking and conditional deletion have separate integration tests.
     this.deletedSources.push({ path: pathname, source, expectedHash });
-    this.db
+    using writer = new DatabaseSync(this.db.location()!);
+    writer
       .prepare("DELETE FROM memory_index_sources WHERE path = ? AND source = ? AND hash = ?")
       .run(pathname, source, expectedHash ?? null);
   }

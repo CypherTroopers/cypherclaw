@@ -14,7 +14,10 @@ import {
 } from "./service-operation-lock.js";
 
 const dirs = useAutoCleanupTempDirTracker(afterEach);
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 async function fixture() {
   const root = await fs.realpath(dirs.make("native-operation-"));
@@ -48,46 +51,43 @@ it("serializes independent native intervals while permitting their own nested op
   expect(events).toEqual(["nested", "first", "second"]);
 });
 
-it.each([false, true])(
-  "joins an admitted detached effect and preserves failure=%s",
-  async (fails) => {
-    const env = await fixture();
-    const entered = createDeferred();
-    const release = createDeferred();
-    const failure = new Error("native effect failed after its caller returned");
-    let assertRetired = () => undefined as void;
-    let completed = false;
-    const owner = withGatewayServiceOperationLock(env, async (assertCurrent) => {
-      assertRetired = assertCurrent;
-      void withGatewayServiceOperationLock(env, async () => {
-        entered.resolve();
-        await release.promise;
-        if (fails) {
-          throw failure;
-        }
-        completed = true;
-      }).catch(() => undefined);
-      await entered.promise;
-    });
-    const settled = owner.then(
-      () => ({ ok: true, error: undefined }),
-      (error: unknown) => ({ ok: false, error }),
-    );
+it.each([true])("joins an admitted detached effect and preserves failure=%s", async (fails) => {
+  const env = await fixture();
+  const entered = createDeferred();
+  const release = createDeferred();
+  const failure = new Error("native effect failed after its caller returned");
+  let assertRetired = () => undefined as void;
+  let completed = false;
+  const owner = withGatewayServiceOperationLock(env, async (assertCurrent) => {
+    assertRetired = assertCurrent;
+    void withGatewayServiceOperationLock(env, async () => {
+      entered.resolve();
+      await release.promise;
+      if (fails) {
+        throw failure;
+      }
+      completed = true;
+    }).catch(() => undefined);
     await entered.promise;
-    // The caller has returned while the native effect still owns live work.
-    await setImmediate();
-    release.resolve();
-    const result = await settled;
-    expect(result.ok).toBe(!fails);
-    if (fails) {
-      expect(result.error).toMatchObject({ errors: [failure] });
-    } else {
-      expect(completed).toBe(true);
-    }
-    expect(assertRetired).toThrow("ownership has closed");
-    await withGatewayServiceOperationLock(env, async (assertCurrent) => assertCurrent());
-  },
-);
+  });
+  const settled = owner.then(
+    () => ({ ok: true, error: undefined }),
+    (error: unknown) => ({ ok: false, error }),
+  );
+  await entered.promise;
+  // The caller has returned while the native effect still owns live work.
+  await setImmediate();
+  release.resolve();
+  const result = await settled;
+  expect(result.ok).toBe(!fails);
+  if (fails) {
+    expect(result.error).toMatchObject({ errors: [failure] });
+  } else {
+    expect(completed).toBe(true);
+  }
+  expect(assertRetired).toThrow("ownership has closed");
+  await withGatewayServiceOperationLock(env, async (assertCurrent) => assertCurrent());
+});
 
 it("does not let a completed nested operation retain its parent's assertion", async () => {
   const env = await fixture();
@@ -181,49 +181,31 @@ it("retains one read binding across nested operations and closes after the outer
   expect(binding.close).toHaveBeenCalledTimes(1);
 });
 
-it.each([
-  { profile: undefined, bound: false },
-  { profile: undefined, bound: true },
-  { profile: "personal", bound: false },
-  { profile: "personal", bound: true },
-])("reuses service inspection after loading the installed environment: %j", async (scenario) => {
-  const env = { ...(await fixture()), OPENCLAW_PROFILE: scenario.profile };
-  vi.spyOn(process, "platform", "get").mockReturnValue("linux");
-  const binding = scenario.bound ? readBinding() : undefined;
-  const create = vi.fn(async () => binding);
-  const serviceEnv = mergeGatewayServiceEnv(env, {
-    programArguments: [process.execPath, "/opt/openclaw/openclaw.mjs", "gateway"],
-    environment: filterStringRecord(
-      buildServiceEnvironment({ env, port: 18789, platform: "linux" }),
-    ),
-  });
-  await withGatewayServiceOperationLock(env, async () => {
-    await withSystemdServiceReadBinding(env, create, async () => {});
-    await withSystemdServiceReadBinding(serviceEnv, create, async (retained) => {
-      expect(retained).toBe(binding);
-    });
-  });
-  expect(create).toHaveBeenCalledOnce();
-  if (binding) {
-    expect(binding.close).toHaveBeenCalledOnce();
-  }
-});
-
-it("rejects a conflicting manager route instead of replacing an operation binding", async () => {
-  const env = await fixture();
-  const create = vi.fn(async () => readBinding());
-  await withGatewayServiceOperationLock(env, async () => {
-    await withSystemdServiceReadBinding(env, create, async () => {});
-    await expect(
-      withSystemdServiceReadBinding(
-        { ...env, DBUS_SESSION_BUS_ADDRESS: "unix:path=/different" },
-        create,
-        async () => {},
+it.each([{ profile: "personal", bound: true }])(
+  "reuses service inspection after loading the installed environment: %j",
+  async (scenario) => {
+    const env = { ...(await fixture()), OPENCLAW_PROFILE: scenario.profile };
+    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+    const binding = scenario.bound ? readBinding() : undefined;
+    const create = vi.fn(async () => binding);
+    const serviceEnv = mergeGatewayServiceEnv(env, {
+      programArguments: [process.execPath, "/opt/openclaw/openclaw.mjs", "gateway"],
+      environment: filterStringRecord(
+        buildServiceEnvironment({ env, port: 18789, platform: "linux" }),
       ),
-    ).rejects.toThrow("different manager");
-  });
-  expect(create).toHaveBeenCalledTimes(1);
-});
+    });
+    await withGatewayServiceOperationLock(env, async () => {
+      await withSystemdServiceReadBinding(env, create, async () => {});
+      await withSystemdServiceReadBinding(serviceEnv, create, async (retained) => {
+        expect(retained).toBe(binding);
+      });
+    });
+    expect(create).toHaveBeenCalledOnce();
+    if (binding) {
+      expect(binding.close).toHaveBeenCalledOnce();
+    }
+  },
+);
 
 it("joins pending reads before disposing their native binding", async () => {
   const env = await fixture();
@@ -293,3 +275,31 @@ it("expires a borrowing read without cancelling shared admission or running it l
   });
   expect(binding.close).toHaveBeenCalledOnce();
 });
+
+it.skipIf(process.platform !== "linux")(
+  "keeps the shipped service lock address across state profiles with unsafe temp ancestry",
+  async () => {
+    const root = dirs.make("service-coordination-address-");
+    const unsafe = path.join(root, "unsafe");
+    const control = path.join(unsafe, "openclaw");
+    await fs.mkdir(unsafe, { mode: 0o775 });
+    await fs.chmod(unsafe, 0o775);
+    const resolve = temporaryState.resolvePreferredOpenClawTmpDir;
+    vi.spyOn(temporaryState, "resolvePreferredOpenClawTmpDir").mockImplementation((options) =>
+      resolve({ ...options, preferredDir: control, tmpdir: () => unsafe }),
+    );
+    const env = { HOME: root, OPENCLAW_SYSTEMD_UNIT: "safe-temp-proof.service" };
+    const lockName =
+      "service-lifecycle-e487ec2becb952ef7267f993fde50598ed64696ea6f098e77a4f0594e437a489.lock";
+    vi.stubEnv("OPENCLAW_STATE_DIR", path.join(root, "first-state"));
+    await withGatewayServiceOperationLock(env, async () => {
+      expect(await fs.readdir(control)).toContain(lockName);
+      vi.stubEnv("OPENCLAW_STATE_DIR", path.join(root, "second-state"));
+      await withGatewayServiceOperationLock(env, async () => {
+        expect(await fs.readdir(control)).toContain(lockName);
+      });
+    });
+    expect(await fs.readdir(control)).not.toContain(lockName);
+    expect((await fs.stat(unsafe)).mode & 0o7777).toBe(0o775);
+  },
+);

@@ -2,12 +2,14 @@ import { SESSION_WORK_ADMISSION_DRAIN_TIMEOUT_MS } from "../sessions/session-lif
 import { waitForChatAbortControllerRemoval } from "./chat-abort-lifecycle-internal.js";
 import { createChatAbortOps } from "./chat-abort-ops.js";
 import { abortChatRunsForSessionKeyWithPartials } from "./server-methods/chat-abort-runtime.js";
+import type { ChatAbortSessionSnapshot } from "./server-methods/chat-aborted-partial.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
 
 export type WorkerPlacementSessionWorkCancellation = (request: {
   sessionId: string;
   sessionKeys: readonly string[];
   agentId: string;
+  session?: ChatAbortSessionSnapshot;
   assertCurrent: () => void;
   onCancellationStarted?: () => void;
 }) => Promise<void>;
@@ -22,6 +24,7 @@ export async function cancelGatewayWorkerSessionWork(
     context,
     ops: createChatAbortOps(context),
     sessionId: request.sessionId,
+    session: request.session,
     sessionKey: request.sessionKeys[0]!,
     sessionKeyAliases: request.sessionKeys.slice(1),
     agentId: request.agentId,
@@ -31,6 +34,7 @@ export async function cancelGatewayWorkerSessionWork(
     includeProtectedRuns: true,
     abortOrigin: "rpc",
     stopReason: "rpc",
+    assertCurrent: request.assertCurrent,
     onCancellationStarted: request.onCancellationStarted,
     onControllerTargets: (targets) => {
       controllerDrain = waitForChatAbortControllerRemoval({

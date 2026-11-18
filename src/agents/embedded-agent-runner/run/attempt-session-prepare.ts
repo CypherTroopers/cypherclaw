@@ -5,6 +5,7 @@ import { getOwnedSessionTranscriptReader } from "../../../config/sessions/transc
 import { OPENCLAW_EMBEDDED_CONTEXT_ENGINE_HOST } from "../../../context-engine/host-compat.js";
 import type { ContextEngine } from "../../../context-engine/types.js";
 import {
+  applyRunHydrationSuppression,
   attachRuntimePromptMediaFacts,
   readPersistedMediaFacts,
 } from "../../../media/media-facts.js";
@@ -36,8 +37,8 @@ import {
 } from "../../sessions/index.js";
 import { DefaultResourceLoader } from "../../sessions/resource-loader.js";
 import { createAgentSession } from "../../sessions/sdk.js";
+import { withSessionManagerAppend } from "../../sessions/session-manager-append-admission.js";
 import { sessionManagerOpenTranscriptCohort } from "../../sessions/session-manager-core.js";
-import { withSessionManagerWrite } from "../../sessions/session-manager-write-admission.js";
 import { wrapToolDefinition } from "../../sessions/tools/tool-definition-wrapper.js";
 import { resolveToolSearchCatalogTool } from "../../tool-search.js";
 import { runContextEngineMaintenance } from "../context-engine-maintenance.js";
@@ -59,13 +60,12 @@ import {
   type SystemPromptUpdatePreparation,
 } from "./attempt-permission-prompt.js";
 import { buildAfterTurnRuntimeContext } from "./attempt-prompt-helpers.js";
+import type { EmbeddedAttemptSessionPreparationInput } from "./attempt-session-prepare-input.js";
+import { openSessionAfterProjectionRecovery } from "./attempt-session-projection-recovery.js";
 import { resolveExistingAttemptTranscriptState } from "./attempt-transcript-helpers.js";
 import type { EmbeddedAttemptTranscriptLifecycle } from "./attempt-transcript-lifecycle.js";
 import { createUserTranscriptContextRegistry } from "./attempt-user-transcript-context-registry.js";
-import {
-  installMessageToolOnlyTerminalHook,
-  installToolAuthoredSourceReplyTerminalHook,
-} from "./message-tool-terminal.js";
+import { installMessageToolTerminalHook } from "./message-tool-terminal.js";
 import {
   type InitialUserTurnReplayPreparation,
   prepareInitialPersistedUserTurnCohort,
@@ -85,19 +85,12 @@ import {
 } from "./tool-loop-recovery.js";
 import type { EmbeddedRunAttemptParams } from "./types.js";
 
-type ClientToolPreparation = Omit<
-  Parameters<typeof prepareEmbeddedAttemptClientTools>[0],
-  "attempt"
->;
-
-type AttemptSessionManager = ReturnType<typeof guardSessionManager>;
-
 export async function prepareEmbeddedAttemptAgentSession(input: {
   attempt: EmbeddedRunAttemptParams;
   activeContextEngineInfo?: ContextEngine["info"];
   agentCoreThinkingLevel: CreateAgentSessionOptions["thinkingLevel"];
   agentDir: string;
-  clientToolPreparation: ClientToolPreparation;
+  clientToolPreparation: Omit<Parameters<typeof prepareEmbeddedAttemptClientTools>[0], "attempt">;
   effectiveCwd: string;
   effectiveWorkspace: string;
   getCurrentAttemptPluginMetadataSnapshot: () => PluginMetadataSnapshot | undefined;
@@ -108,18 +101,21 @@ export async function prepareEmbeddedAttemptAgentSession(input: {
   runAbortSignal: AbortSignal;
   sessionAgentId: string;
   transcriptLifecycle: EmbeddedAttemptTranscriptLifecycle;
-  sessionManager: AttemptSessionManager;
+  sessionManager: ReturnType<typeof guardSessionManager>;
   prepareInitialUserTurnReplay?: InitialUserTurnReplayPreparation;
   prepareSystemPromptUpdate?: SystemPromptUpdatePreparation;
 }) {
   const { attempt, prepareSystemPromptUpdate } = input;
   const settingsManager = createPreparedEmbeddedAgentSettingsManager({
+    sessionId: attempt.sessionId,
     cwd: input.effectiveCwd,
     agentDir: input.agentDir,
     cfg: attempt.config,
     pluginMetadataSnapshot: input.getCurrentAttemptPluginMetadataSnapshot(),
     contextTokenBudget: attempt.contextTokenBudget,
   });
+  // Preserve the actual user setting before the SDK guard transfers ownership.
+  const compactionEnabled = settingsManager.getCompactionEnabled();
   applyAgentAutoCompactionGuard({
     settingsManager,
     contextEngineInfo: input.activeContextEngineInfo,
@@ -161,11 +157,12 @@ export async function prepareEmbeddedAttemptAgentSession(input: {
   const { allCustomTools, sessionToolAllowlist, ...clientToolRuntime } = preparedClientTools;
 
   const { session: activeSession } = await createAgentSession({
-    systemPrompt: input.initialSystemPrompt,
+    systemPrompt: input.initialSystemPrompt.trim(),
     cwd: input.effectiveCwd,
     modelRegistry: attempt.modelRegistry,
     model: attempt.model,
     thinkingLevel: input.agentCoreThinkingLevel,
+    thinkingExplicit: attempt.thinkingExplicit,
     tools: sessionToolAllowlist,
     customTools: allCustomTools,
     sessionManager: input.sessionManager,
@@ -221,10 +218,9 @@ export async function prepareEmbeddedAttemptAgentSession(input: {
       : undefined,
   });
   // Publish ownership before post-construction hooks. Outer cleanup must dispose
-  // the session if tool activation or terminal-hook installation fails.
+  // the session if prompt or terminal-hook installation fails.
   input.onSessionCreated(activeSession);
   installToolLoopRecoveryCleanup({ agent: activeSession.agent, runId: attempt.runId });
-  activeSession.setActiveToolsByName(sessionToolAllowlist);
   const setActiveSessionSystemPrompt = (nextSystemPrompt: string) => {
     input.onSystemPromptChanged(nextSystemPrompt);
     activeSession.setBaseSystemPrompt(nextSystemPrompt.trim());
@@ -238,12 +234,12 @@ export async function prepareEmbeddedAttemptAgentSession(input: {
     prepareInitialUserTurnReplay: input.prepareInitialUserTurnReplay,
     prepareSystemPromptUpdate,
   });
-  setActiveSessionSystemPrompt(input.initialSystemPrompt);
+  input.onSystemPromptChanged(input.initialSystemPrompt);
   let didDeliverSourceReplyViaMessageTool = false;
   const markSourceReplyDelivered = () => {
     didDeliverSourceReplyViaMessageTool = true;
   };
-  installMessageToolOnlyTerminalHook({
+  installMessageToolTerminalHook({
     agent: activeSession.agent,
     sourceReplyDeliveryMode: attempt.sourceReplyDeliveryMode,
     onDeliveredSourceReply: markSourceReplyDelivered,
@@ -258,14 +254,11 @@ export async function prepareEmbeddedAttemptAgentSession(input: {
     hasRepliedRef: attempt.hasRepliedRef,
     sessionKey: attempt.sessionKey,
   });
-  installToolAuthoredSourceReplyTerminalHook({
-    agent: activeSession.agent,
-    sourceReplyCapableToolNames: clientToolRuntime.sourceReplyCapableToolNames,
-  });
   input.markStage("agent-session");
 
   return {
     activeSession,
+    compactionEnabled,
     allCustomTools,
     ...clientToolRuntime,
     hasDeliveredSourceReply: () => didDeliverSourceReplyViaMessageTool,
@@ -333,7 +326,7 @@ export async function prepareEmbeddedAttemptSessionBoundary(input: {
   let repairedTarget: ReturnType<typeof sessionManager.getSessionTarget>;
   const orphanRepair = preserveExactPrompt
     ? undefined
-    : await withSessionManagerWrite(sessionManager, async () => {
+    : await withSessionManagerAppend(sessionManager, async () => {
         input.abortSignal?.throwIfAborted();
         const target = sessionManager.getSessionTarget();
         const reader = target && getOwnedSessionTranscriptReader(target);
@@ -378,8 +371,11 @@ export async function prepareEmbeddedAttemptSessionBoundary(input: {
           candidate?.messageEntry.message.provenance,
         );
         // Keep unanswered user input in history through failed internal continuations.
+        // A restart adds a separate system input to this same conversation.
         const preserveUnansweredUser =
-          shouldPreserveUserFacingSessionStateForInputProvenance(attempt.inputProvenance) &&
+          ((attempt.inputProvenance?.kind === "internal_system" &&
+            attempt.inputProvenance.sourceTool === "restart") ||
+            shouldPreserveUserFacingSessionStateForInputProvenance(attempt.inputProvenance)) &&
           (!orphanProvenance || orphanProvenance.kind === "external_user");
         if (reconciledCurrentUser || preserveUnansweredUser) {
           return undefined;
@@ -486,19 +482,9 @@ export async function prepareEmbeddedAttemptSessionBoundary(input: {
   };
 }
 
-type WithOwnedTranscriptWrite = <T>(operation: () => Promise<T> | T) => Promise<T>;
-export async function prepareEmbeddedAttemptSessionManager(input: {
-  attempt: EmbeddedRunAttemptParams;
-  activeContextEngine?: ContextEngine;
-  agentDir: string;
-  effectiveCwd: string;
-  effectiveWorkspace: string;
-  onSessionManagerCreated: (sessionManager: AttemptSessionManager) => void;
-  replayAllowedToolNames: ReadonlySet<string>;
-  resolveActiveContextEnginePluginId: () => string | undefined;
-  sessionAgentId: string;
-  withOwnedTranscriptWrite: WithOwnedTranscriptWrite;
-}) {
+export async function prepareEmbeddedAttemptSessionManager(
+  input: EmbeddedAttemptSessionPreparationInput,
+) {
   const { attempt } = input;
   const transcriptStateParams = {
     sessionManager: attempt.sessionManager,
@@ -546,40 +532,58 @@ export async function prepareEmbeddedAttemptSessionManager(input: {
   let publishedSessionManager: SessionManager | undefined;
   let initialReplay: Parameters<typeof preparePersistedCurrentUserTurn>[0]["initial"];
   let messagePresence: boolean | undefined;
-  const unguardedSessionManager =
-    attempt.sessionManager ??
-    (attempt.sessionTarget
-      ? await input.withOwnedTranscriptWrite(async () => {
-          const target = attempt.sessionTarget as SessionTranscriptRuntimeTarget;
-          const limits = resolveEmbeddedSessionContextLimits(attempt.contextTokenBudget);
-          const initial = prepareInitialPersistedUserTurnCohort({
-            target,
-            message: preparedUserTurnMessage,
-            recorder: attempt.userTurnTranscriptRecorder,
-            runId: attempt.runId,
-          });
-          if (initial) {
-            const manager = await SessionManager[sessionManagerOpenTranscriptCohort](
-              target,
-              { ...limits, cwd: input.effectiveCwd, signal: attempt.abortSignal },
-              initial.selection,
-              (opened, prepared, assertView) => {
-                try {
-                  initial.consume(opened, prepared, assertView);
-                } finally {
-                  // Cleanup owns even a refused manager; publication cannot supply replay evidence.
-                  publishedSessionManager = opened;
-                  input.onSessionManagerCreated(opened);
-                }
-              },
-            );
-            initialReplay = initial.readInitial();
-            messagePresence = initial.readMessagePresence();
-            return manager;
-          }
-          return SessionManager.openAsync(target, input.effectiveCwd, limits, attempt.abortSignal);
+  const openSignal = attempt.abortSignal
+    ? AbortSignal.any([attempt.abortSignal, input.runAbortSignal])
+    : input.runAbortSignal;
+  const openSessionManager = (target: SessionTranscriptRuntimeTarget) =>
+    input.withOwnedTranscriptWrite(async () => {
+      const limits = resolveEmbeddedSessionContextLimits(attempt.contextTokenBudget);
+      const initial = prepareInitialPersistedUserTurnCohort({
+        target,
+        message: preparedUserTurnMessage,
+        recorder: attempt.userTurnTranscriptRecorder,
+        runId: attempt.runId,
+      });
+      if (initial || getOwnedSessionTranscriptReader(target)) {
+        const manager = await SessionManager[sessionManagerOpenTranscriptCohort](
+          target,
+          { ...limits, cwd: input.effectiveCwd, signal: openSignal },
+          initial?.selection ?? {
+            sessionKey: target.sessionKey,
+            entryIds: [],
+            includeMessagePresence: true,
+          },
+          (opened, prepared, assertView) => {
+            try {
+              initial?.consume(opened, prepared, assertView);
+              messagePresence =
+                prepared.kind === "bounded" ? prepared.transcript?.messagePresence : undefined;
+            } finally {
+              // Cleanup owns even a refused manager; publication cannot supply replay evidence.
+              publishedSessionManager = opened;
+              input.onSessionManagerCreated(opened);
+            }
+          },
+        );
+        initialReplay = initial?.readInitial();
+        return manager;
+      }
+      return SessionManager.openAsync(target, input.effectiveCwd, limits, openSignal);
+    });
+  const sessionTarget = attempt.sessionTarget as SessionTranscriptRuntimeTarget | undefined;
+  const openedSessionManager =
+    !attempt.sessionManager && sessionTarget
+      ? await openSessionAfterProjectionRecovery({
+          open: () => openSessionManager(sessionTarget),
+          target: sessionTarget,
+          timeoutMs: attempt.timeoutMs,
+          signal: openSignal,
+          assertCurrent: input.assertCurrent,
+          replyOperation: attempt.replyOperation,
         })
-      : SessionManager.inMemory(input.effectiveCwd));
+      : undefined;
+  const unguardedSessionManager =
+    attempt.sessionManager ?? openedSessionManager ?? SessionManager.inMemory(input.effectiveCwd);
   // Publish ownership before awaiting preparation; outer cleanup must receive
   // this same manager even when replay validation or bootstrap fails.
   if (publishedSessionManager !== unguardedSessionManager) {
@@ -636,7 +640,11 @@ export async function prepareEmbeddedAttemptSessionManager(input: {
       if (runtimeMessage) {
         const media = readPersistedMediaFacts(message);
         if (media?.length) {
-          attachRuntimePromptMediaFacts(runtimeMessage, media);
+          // The transcript keeps failed pre-reads retryable; only this run skips them.
+          attachRuntimePromptMediaFacts(
+            runtimeMessage,
+            applyRunHydrationSuppression(media, attempt.media),
+          );
         }
         userTranscriptContextRegistry.record(runtimeMessage, message);
       }
@@ -646,7 +654,10 @@ export async function prepareEmbeddedAttemptSessionManager(input: {
       latestRuntimeUserMessage = runtimeMessage;
       const media = runtimeMessage ? readPersistedMediaFacts(message) : undefined;
       if (runtimeMessage && media?.length) {
-        attachRuntimePromptMediaFacts(runtimeMessage, media);
+        attachRuntimePromptMediaFacts(
+          runtimeMessage,
+          applyRunHydrationSuppression(media, attempt.media),
+        );
       }
       // Replay suppresses the append of a user that is already durable. Report it
       // like an adopted append so retries and fallbacks do not append it again;

@@ -1,9 +1,6 @@
 import type { ProviderDefaultThinkingPolicyContext } from "openclaw/plugin-sdk/core";
 import type { ProviderNormalizeResolvedModelContext } from "openclaw/plugin-sdk/plugin-entry";
-import {
-  normalizeOpenAIServiceTier,
-  supportsOpenAIResponsesFastMode,
-} from "openclaw/plugin-sdk/provider-model-metadata";
+import { supportsOpenAIResponsesFastMode } from "openclaw/plugin-sdk/provider-model-metadata";
 import type {
   ModelApi,
   ModelProviderConfig,
@@ -48,7 +45,6 @@ export function resolveFastModeSupport(ctx: ProviderFastModePolicyContext): bool
   }
   return (
     (resolveOpenAIModelServiceTiers(ctx)?.includes("priority") ?? true) &&
-    normalizeOpenAIServiceTier(ctx.params?.serviceTier ?? ctx.params?.service_tier) === undefined &&
     supportsOpenAIResponsesFastMode(ctx)
   );
 }
@@ -73,11 +69,18 @@ export function normalizeModelCatalogId(params: ProviderNormalizeModelCatalogIdC
     : null;
 }
 
+// A dated id is a concrete release of its undated route, as the Responses transport reconciles it.
+const OPENAI_RELEASE_DATE_SUFFIX = /-(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
+
 export function isResponseModelEquivalent(params: ProviderResponseModelEquivalenceContext) {
+  if (params.provider.trim().toLowerCase() !== OPENAI_PROVIDER_ID) {
+    return false;
+  }
+  const responseRoute = params.responseModelId.replace(OPENAI_RELEASE_DATE_SUFFIX, "");
   return (
-    params.provider.trim().toLowerCase() === OPENAI_PROVIDER_ID &&
-    params.requestedModelId === OPENAI_GPT_56_MODEL_ID &&
-    params.responseModelId === OPENAI_GPT_56_SOL_MODEL_ID
+    responseRoute === params.requestedModelId ||
+    (params.requestedModelId === OPENAI_GPT_56_MODEL_ID &&
+      responseRoute === OPENAI_GPT_56_SOL_MODEL_ID)
   );
 }
 
@@ -305,11 +308,24 @@ function resolveSingleObservedModelRoute(
     };
   }
   const chatGPTApi = effectiveApi?.toLowerCase() === OPENAI_CHATGPT_RESPONSES_API;
+  const modelId = normalizeOpenAIModelRouteId(context.modelId);
+  const knownRouteContract =
+    isOpenAIDualRouteModelId(modelId) ||
+    isOpenAIPlatformOnlyRouteModelId(modelId) ||
+    isOpenAISubscriptionOnlyRouteModelId(modelId);
 
   // A custom endpoint owns its protocol contract. Subscription egress always
   // requires authored ChatGPT intent; observed Platform adapters remain safe
-  // API-key fallbacks for otherwise unspecified custom routes.
-  if (endpointKind === "custom") {
+  // API-key fallbacks for otherwise unspecified custom routes. A known model
+  // with no authored route keeps the official contract: a stale catalog row
+  // is not a relay and must not take the turn down.
+  const staleCustomChatGPTCatalog =
+    endpointKind === "custom" &&
+    chatGPTApi &&
+    !authored?.chatGPTApi &&
+    !configuredRoute &&
+    knownRouteContract;
+  if (endpointKind === "custom" && !staleCustomChatGPTCatalog) {
     if (chatGPTApi && !authored?.chatGPTApi) {
       return {
         kind: "incompatible",
@@ -371,7 +387,6 @@ function resolveSingleObservedModelRoute(
     };
   }
 
-  const modelId = normalizeOpenAIModelRouteId(context.modelId);
   // Retain Completions for API-key callers; older configs also used this
   // adapter while Codex selected subscription credentials independently.
   const platformApi =

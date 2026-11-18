@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { resolveReleaseCompatibilityVersion } from "../release-compatibility.mjs";
 import { resolveLoadedCommitHash } from "./infra/git-commit.js";
 
 const CORE_PACKAGE_NAME = "openclaw";
@@ -145,7 +146,7 @@ function resolveVersionFromRuntimeSources(params: {
 }
 
 export function resolveRuntimeServiceVersion(
-  env: RuntimeVersionEnv = process.env as RuntimeVersionEnv,
+  env: RuntimeVersionEnv = process.env,
   fallback = RUNTIME_SERVICE_VERSION_FALLBACK,
 ): string {
   return resolveVersionFromRuntimeSources({
@@ -169,20 +170,27 @@ export function resolveRuntimeServiceCommit(): string | null {
   return RUNTIME_SERVICE_COMMIT;
 }
 
-export function resolveCompatibilityHostVersion(
-  env: RuntimeVersionEnv = process.env as RuntimeVersionEnv,
+// Package cohorts retain the selected release identity, including post-core handoffs.
+export function resolveReleaseHostVersion(
+  env: RuntimeVersionEnv = process.env,
   fallback = RUNTIME_SERVICE_VERSION_FALLBACK,
 ): string {
-  const explicitCompatibilityVersion = firstNonEmpty(env.OPENCLAW_COMPATIBILITY_HOST_VERSION);
-  if (explicitCompatibilityVersion) {
-    return explicitCompatibilityVersion;
-  }
-  return resolveVersionFromRuntimeSources({
-    env,
-    runtimeVersion: resolveUsableRuntimeVersion(VERSION),
-    fallback,
-    preference: env === (process.env as RuntimeVersionEnv) ? "runtime-first" : "env-first",
-  });
+  return (
+    firstNonEmpty(env.OPENCLAW_COMPATIBILITY_HOST_VERSION) ??
+    resolveVersionFromRuntimeSources({
+      env,
+      runtimeVersion: resolveUsableRuntimeVersion(VERSION),
+      fallback,
+      preference: env === process.env ? "runtime-first" : "env-first",
+    })
+  );
+}
+
+export function resolveCompatibilityHostVersion(
+  env: RuntimeVersionEnv = process.env,
+  fallback = RUNTIME_SERVICE_VERSION_FALLBACK,
+): string {
+  return resolveReleaseCompatibilityVersion(resolveReleaseHostVersion(env, fallback));
 }
 
 // Single source of truth for the current OpenClaw version.

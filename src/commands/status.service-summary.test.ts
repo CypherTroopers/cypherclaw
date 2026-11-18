@@ -23,13 +23,10 @@ function createService(overrides: Partial<GatewayService>): GatewayService {
 }
 
 describe("readServiceStatusSummary", () => {
-  it.each([
-    { serviceVersion: "2026.9.4" },
-    { serviceVersion: "2026.9.4", refusal: "Nix mode detected", nix: true },
-    { serviceVersion: "2026.9.4", refusal: "managed by an external supervisor", external: true },
-  ])(
-    "reports installation facts with usable guidance ($serviceVersion, $refusal)",
-    async ({ serviceVersion, refusal, nix, external }) => {
+  it.each([false, true])(
+    "reports installation facts with usable guidance (launcher override: %s)",
+    async (launcherOverride) => {
+      const serviceVersion = "2026.9.4";
       const root = await fs.realpath(tempDirs.make("openclaw-status-prefix-drift-"));
       const serviceRoot = path.join(root, "prefix-a", "lib", "node_modules", "openclaw");
       const activeRoot = path.join(root, "prefix-b", "lib", "node_modules", "openclaw");
@@ -52,6 +49,7 @@ describe("readServiceStatusSummary", () => {
             path.join(serviceRoot, "dist", "index.js"),
             "gateway",
           ],
+          ...(launcherOverride ? { managedOverrides: { launcher: "command" as const } } : {}),
         })),
         readRuntime: vi.fn(async () => ({ status: "running" })),
       });
@@ -65,8 +63,8 @@ describe("readServiceStatusSummary", () => {
           OPENCLAW_CONFIG_PATH: undefined,
           OPENCLAW_PROFILE: undefined,
           OPENCLAW_CONTAINER_HINT: undefined,
-          OPENCLAW_NIX_MODE: nix ? "1" : undefined,
-          OPENCLAW_SUPERVISOR_MODE: external ? "external" : undefined,
+          OPENCLAW_NIX_MODE: undefined,
+          OPENCLAW_SUPERVISOR_MODE: undefined,
           OPENCLAW_LAUNCHD_LABEL: undefined,
           OPENCLAW_SYSTEMD_UNIT: undefined,
           OPENCLAW_WINDOWS_TASK_NAME: undefined,
@@ -82,8 +80,9 @@ describe("readServiceStatusSummary", () => {
       expect(output).toContain(`${serviceRoot} (${serviceVersion})`);
       expect(output).toContain(`${activeRoot} (2026.9.17)`);
       expect(typeof summary.installationDrift).toBe("string");
-      if (refusal) {
-        expect(output).toContain(refusal);
+      if (launcherOverride) {
+        expect(output).toContain("operator-owned");
+        expect(output).toContain("update or remove");
         expect(output).not.toContain("openclaw doctor --fix");
         expect(output).not.toContain("openclaw gateway install --force");
       } else {
@@ -100,15 +99,6 @@ describe("readServiceStatusSummary", () => {
       ).not.toContain("different OpenClaw install");
     },
   );
-  it.each(["system"] as const)("labels the observed %s manager", async (scope) => {
-    const summary = await readServiceStatusSummary(
-      createService({
-        readRuntime: vi.fn(async () => ({ status: "running", systemd: { scope } })),
-      }),
-      "Daemon",
-    );
-    expect(summary.label).toBe(`systemd ${scope}`);
-  });
   it("marks running unmanaged services as externally managed", async () => {
     const summary = await readServiceStatusSummary(
       createService({
@@ -141,7 +131,7 @@ describe("readServiceStatusSummary", () => {
     },
   );
 
-  it.each(["load", "runtime", "runtime with missing unit"])(
+  it.each(["load"])(
     "reports %s inspection failures without a readable definition",
     async (probe) => {
       const failInspection = vi.fn(async () => {

@@ -3,6 +3,7 @@ import { isUtf8 } from "node:buffer";
 import fs from "node:fs";
 import path from "node:path";
 import { readRegularFile } from "@openclaw/fs-safe/advanced";
+import { replaceFileAtomic } from "@openclaw/fs-safe/atomic";
 import { safeStatSync } from "@openclaw/fs-safe/path";
 import { note } from "../../packages/terminal-core/src/note.js";
 import { DEFAULT_AGENTS_FILENAME } from "../agents/workspace.js";
@@ -137,6 +138,7 @@ type RootMemoryMigrationResult = {
   legacyPath: string;
   mergedLegacy: boolean;
   archivedLegacyPath?: string;
+  canonicalBackupPath?: string;
   skipReason?: string;
 };
 
@@ -146,11 +148,10 @@ async function moveLegacyRootMemoryFileToArchive(params: {
 }): Promise<string> {
   const repairDir = resolveRootMemoryRepairDir(params.workspaceDir);
   await fs.promises.mkdir(repairDir, { recursive: true });
-  const archiveDir = path.join(
-    repairDir,
-    new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-"),
+  // A later repair must never reuse a directory containing earlier recovery copies.
+  const archiveDir = await fs.promises.mkdtemp(
+    path.join(repairDir, `${new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")}-`),
   );
-  await fs.promises.mkdir(archiveDir, { recursive: true });
   const archivePath = path.join(archiveDir, LEGACY_ROOT_MEMORY_FILENAME);
   // Source and repair archive live under one workspace. If a mounted file makes
   // this cross-device, fail before mutation instead of copying an unbounded file.
@@ -246,18 +247,39 @@ async function migrateLegacyRootMemoryFile(
       archivedLegacyPath,
     };
   }
+  let canonicalBackupPath: string | undefined;
   if (canonicalText !== legacyText) {
     const merged = `${canonicalText.trimEnd()}\n${buildMergedLegacyRootMemorySection({
       legacyText,
       archivedLegacyPath: shortenHomePath(archivedLegacyPath),
     })}`;
-    await fs.promises.writeFile(detection.canonicalPath, merged, "utf-8");
+    // Preserve the canonical bytes independently before publishing the merge.
+    // Keep the atomic writer's unlink/copy fallback disabled to avoid torn writes.
+    canonicalBackupPath = path.join(
+      path.dirname(archivedLegacyPath),
+      `${CANONICAL_ROOT_MEMORY_FILENAME}.pre-merge`,
+    );
+    await fs.promises.copyFile(detection.canonicalPath, canonicalBackupPath);
+    // Workspace aliases are supported, but the atomic writer needs a real parent
+    // and continues to reject a symlink at the final MEMORY.md path.
+    const publicationDir = await fs.promises.realpath(detection.workspaceDir);
+    await replaceFileAtomic({
+      filePath: path.join(publicationDir, CANONICAL_ROOT_MEMORY_FILENAME),
+      content: merged,
+      dirMode: (await fs.promises.stat(publicationDir)).mode & 0o7777,
+      preserveExistingMode: true,
+      tempPrefix: CANONICAL_ROOT_MEMORY_FILENAME,
+      syncTempFile: true,
+      syncParentDir: true,
+      throwOnCleanupError: true,
+    });
   }
   return {
     ...unchanged,
     changed: true,
     mergedLegacy: canonicalText !== legacyText,
     archivedLegacyPath,
+    ...(canonicalBackupPath ? { canonicalBackupPath } : {}),
   };
 }
 
@@ -273,9 +295,9 @@ export async function noteWorkspaceMemoryHealth(scope: WorkspaceMemoryDoctorScop
     if (detection.canonicalExists && detection.legacyExists) {
       const rootMemoryWarning = [
         "Split root durable memory files detected:",
-        `- canonical: ${shortenHomePath(detection.canonicalPath)} (${formatBytes(detection.canonicalBytes)})`,
+        `- current: ${shortenHomePath(detection.canonicalPath)} (${formatBytes(detection.canonicalBytes)})`,
         `- legacy: ${shortenHomePath(detection.legacyPath)} (${formatBytes(detection.legacyBytes)})`,
-        `OpenClaw uses ${CANONICAL_ROOT_MEMORY_FILENAME} as the canonical durable memory file.`,
+        `OpenClaw uses ${CANONICAL_ROOT_MEMORY_FILENAME} as the current durable memory file.`,
         `Dreaming writes durable promotions to ${CANONICAL_ROOT_MEMORY_FILENAME}, so older facts in ${LEGACY_ROOT_MEMORY_FILENAME} can be shadowed.`,
         `Run "openclaw doctor --fix" to merge the legacy file into ${CANONICAL_ROOT_MEMORY_FILENAME} with a backup.`,
       ].join("\n");
@@ -305,7 +327,7 @@ export async function maybeRepairWorkspaceMemoryHealth(params: {
       return;
     }
     const approvedLegacyMigration = await params.prompter.confirmRuntimeRepair({
-      message: `${prefix}Merge legacy root ${LEGACY_ROOT_MEMORY_FILENAME} into canonical ${CANONICAL_ROOT_MEMORY_FILENAME} and remove the shadowed file?`,
+      message: `${prefix}Merge legacy root ${LEGACY_ROOT_MEMORY_FILENAME} into the current ${CANONICAL_ROOT_MEMORY_FILENAME} and remove the shadowed file?`,
       initialValue: true,
     });
     if (!approvedLegacyMigration) {
@@ -317,7 +339,7 @@ export async function maybeRepairWorkspaceMemoryHealth(params: {
       note(
         [
           `${prefix}Workspace memory root repair skipped (${reason}):`,
-          `- canonical: ${migration.canonicalPath}`,
+          `- current: ${migration.canonicalPath}`,
           `- legacy: ${migration.legacyPath}`,
           migration.archivedLegacyPath
             ? `- preserved archive: ${migration.archivedLegacyPath}`
@@ -334,8 +356,9 @@ export async function maybeRepairWorkspaceMemoryHealth(params: {
     }
     const lines = [
       `${prefix}Workspace memory root merged:`,
-      `- canonical: ${migration.canonicalPath}`,
+      `- current: ${migration.canonicalPath}`,
       migration.archivedLegacyPath ? `- backup: ${migration.archivedLegacyPath}` : null,
+      migration.canonicalBackupPath ? `- pre-merge backup: ${migration.canonicalBackupPath}` : null,
       migration.mergedLegacy ? `- merged legacy content from: ${migration.legacyPath}` : null,
       `- removed legacy file: ${migration.legacyPath}`,
     ].filter(Boolean);

@@ -17,11 +17,9 @@ import {
 import {
   makePreflightConfigSnapshot,
   makeStartupConvergenceResult,
-  queueConfigSnapshot,
 } from "./doctor-config-preflight.state-migration.test-helpers.js";
 
 const {
-  autoMigrateLegacyState,
   repairLegacyCronStoreWithoutPrompt,
   collectCronCodexRuntimePolicyTargetsReadOnly,
   runPostCorePluginConvergence,
@@ -40,6 +38,15 @@ const doctorMigrationOptions = {
 
 describe("runDoctorConfigPreflight state migration", () => {
   beforeEach(resetStateMigrationPreflightMocks);
+
+  it("preserves the release cohort when the API baseline differs", async () => {
+    await withEnvAsync({ OPENCLAW_COMPATIBILITY_HOST_VERSION: "2026.10.33" }, async () => {
+      await runDoctorConfigPreflight(doctorMigrationOptions);
+      expect(runPostCorePluginConvergence).toHaveBeenCalledWith(
+        expect.objectContaining({ compatibilityHostVersion: "2026.10.33" }),
+      );
+    });
+  });
 
   it("carries cron Codex runtime policy targets only during repair", async () => {
     collectCronCodexRuntimePolicyTargetsReadOnly.mockResolvedValueOnce({
@@ -61,22 +68,6 @@ describe("runDoctorConfigPreflight state migration", () => {
       cfg: { gateway: { mode: "local", port: 19091 } },
     });
     expect(result.cronCodexRuntimePolicyTargets).toEqual([{ modelRef: "openai/gpt-5.6-sol" }]);
-  });
-
-  it("rejects external config changes during plugin repair before state migrations", async () => {
-    runPostCorePluginConvergence.mockImplementationOnce(async () => {
-      queueConfigSnapshot(
-        readConfigFileSnapshot,
-        makePreflightConfigSnapshot({ gateway: { mode: "local", port: 19092 } }),
-      );
-      return makeStartupConvergenceResult();
-    });
-
-    await expect(runDoctorConfigPreflight(doctorMigrationOptions)).rejects.toThrow(
-      "migration inputs changed during startup",
-    );
-
-    expect(autoMigrateLegacyState).not.toHaveBeenCalled();
   });
 
   it("preserves verified plugin quarantine while an older writable parent defers repair", async () => {

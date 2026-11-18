@@ -4,7 +4,7 @@ import type { createWizardPrompter as buildWizardPrompter } from "../../test/hel
 import type * as AuthChoiceModelCheck from "../commands/auth-choice.model-check.js";
 import type { PluginWebSearchProviderEntry } from "../plugins/types.js";
 
-export function createRuntimeProbeResult(bunVersion = "1.4.3") {
+export function createRuntimeProbeResult(bunVersion = "1.4.4") {
   return {
     stdout: JSON.stringify({
       nodeVersion: "26.8.1",

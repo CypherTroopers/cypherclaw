@@ -1,37 +1,9 @@
 // Gemini schema cleaner tests cover OpenAPI-compatible tool schema cleanup for
 // Gemini-backed providers before schemas are sent upstream.
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import {
-  resolveRuntimeWorkerArgv,
-  resolveRuntimeWorkerUrl,
-} from "../../../../src/infra/runtime-worker-url.js";
-import { cleanForGeminiEntrypoint } from "./clean-for-gemini-runtime.test-support.js";
 import { cleanSchemaForGemini } from "./clean-for-gemini.js";
 
-const execFileAsync = promisify(execFile);
-
 describe("cleanSchemaForGemini", () => {
-  it("normalizes deep nullable schemas in a cold process", async () => {
-    const { stdout } = await execFileAsync(
-      process.execPath,
-      [
-        "--max-old-space-size=192",
-        ...resolveRuntimeWorkerArgv(resolveRuntimeWorkerUrl(cleanForGeminiEntrypoint)),
-      ],
-      { cwd: process.cwd(), encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 20_000 },
-    );
-    expect(JSON.parse(stdout)).toEqual({
-      normalized: {
-        type: "object",
-        properties: { value: { type: "string" } },
-        required: ["value"],
-      },
-      leaf: { type: "string" },
-    });
-  }, 30_000);
-
   it("removes required entirely when no fields match properties", () => {
     const cleaned = cleanSchemaForGemini({
       type: "object",
@@ -107,14 +79,23 @@ describe("cleanSchemaForGemini", () => {
     expect(cleaned.description).toBe("nullable field");
   });
 
-  it("stringifies an integer const before type without changing the schema type", () => {
-    expect(cleanSchemaForGemini({ const: 42, type: "integer" })).toStrictEqual({
-      enum: ["42"],
-      type: "integer",
-    });
+  it.each([
+    [{ const: 42, type: "integer" }, "integer"],
+    [{ const: true, type: "boolean" }, "boolean"],
+    [{ enum: [true, false], type: ["null", "boolean"] }, "boolean"],
+  ])("drops non-string enums without changing the declared type: %j", (schema, type) => {
+    expect(cleanSchemaForGemini(schema)).toStrictEqual({ type });
   });
 
-  it("stringifies nested numeric enums while preserving their number type", () => {
+  it.each([
+    { type: "string", enum: ["a", "b"] },
+    { type: ["null", "string"], enum: ["a", "b"] },
+    { enum: ["a", "b"] },
+  ])("preserves permitted string enum values: %j", (schema) => {
+    expect(cleanSchemaForGemini(schema)).toHaveProperty("enum", ["a", "b"]);
+  });
+
+  it("drops nested numeric enums while preserving their number type", () => {
     const cleaned = cleanSchemaForGemini({
       type: "object",
       properties: {
@@ -136,7 +117,7 @@ describe("cleanSchemaForGemini", () => {
 
     const score = cleaned.properties?.outer?.items?.properties?.score;
     expect(score?.type).toBe("number");
-    expect(score?.enum).toStrictEqual(["1", "2", "3", "4", "5"]);
+    expect(score).not.toHaveProperty("enum");
   });
 
   it("returns no enum key when array becomes empty after coercion", () => {

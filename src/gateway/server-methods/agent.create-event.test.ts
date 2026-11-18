@@ -5,6 +5,16 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PreparedModelRuntimePublicationSupersededError } from "../../agents/prepared-model-runtime.errors.js";
+import { acquireAgentRunPreparedModelRuntime } from "../../agents/prepared-model-runtime.js";
+import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../../config/runtime-snapshot.js";
+import { pluginInvocationContext } from "../../plugins/plugin-instance-scope.js";
+import { PluginInstance } from "../../plugins/plugin-instance.js";
+import { PluginInvocationScope } from "../../plugins/plugin-invocation-scope.js";
+import { createEmptyPluginRegistry } from "../../plugins/registry-empty.js";
 import { trackAsyncWork } from "../../shared/async-work-scope.js";
 import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import {
@@ -36,13 +46,10 @@ const agentIngressMocks = vi.hoisted(() => ({
 }));
 const preparedRuntimeMocks = vi.hoisted(() => ({
   captured: vi.fn(),
+  executed: vi.fn(),
   acquired: vi.fn(),
   releaseDispatch: vi.fn(async () => {}),
   releaseSelected: vi.fn(async () => {}),
-}));
-
-vi.mock("../../config/config.js", () => ({
-  getRuntimeConfig: configMocks.getRuntimeConfig,
 }));
 
 vi.mock("../../commands/agent.js", () => ({
@@ -61,8 +68,13 @@ vi.mock("../../agents/prepared-model-runtime.js", async (importOriginal) => {
         getPreparedModelRuntimeBorrowedSnapshot(options.pluginGeneration),
         preparedRuntimeMocks.releaseDispatch.mock.calls.length,
       );
+      const invocation = new PluginInvocationScope(createEmptyPluginRegistry(), []);
       return {
-        [Symbol.asyncDispose]: preparedRuntimeMocks.releaseSelected,
+        run: <T>(run: () => T) => invocation.run(run),
+        [Symbol.asyncDispose]: async () => {
+          invocation.release();
+          await preparedRuntimeMocks.releaseSelected();
+        },
         snapshot: input,
         pluginGeneration: options.pluginGeneration,
       };
@@ -87,10 +99,15 @@ vi.mock("../../agents/prepared-model-runtime.js", async (importOriginal) => {
           metadataSnapshot: runtime.pluginGeneration.pluginMetadataSnapshot,
         };
         preparedRuntimeMocks.captured(snapshot);
+        const invocation = new PluginInvocationScope(createEmptyPluginRegistry(), []);
         onRuntimeLease?.({
+          run: <T>(run: () => T) => invocation.run(run),
           snapshot,
           pluginGeneration: runtime.pluginGeneration,
-          [Symbol.asyncDispose]: preparedRuntimeMocks.releaseDispatch,
+          [Symbol.asyncDispose]: async () => {
+            invocation.release();
+            await preparedRuntimeMocks.releaseDispatch();
+          },
         });
         return runtime;
       },
@@ -118,22 +135,37 @@ describe("agent handler session create events", () => {
     storePath = path.join(tempDir, "sessions.json");
     configMocks.storePath = storePath;
     configMocks.workspaceDir = tempDir;
+    setRuntimeConfigSnapshot(configMocks.getRuntimeConfig());
     configMocks.getRuntimeConfig.mockClear();
     agentIngressMocks.agentCommandFromIngress.mockClear();
-    agentIngressMocks.agentCommandFromIngress.mockResolvedValue({ ok: true });
+    agentIngressMocks.agentCommandFromIngress.mockImplementation(async () => {
+      // Real invocation scopes prove the selected run does not retain the closed
+      // dispatch lease; a mock-only lease would hide this execution failure.
+      const instance = new PluginInstance("agent-execution");
+      try {
+        expectDefined(pluginInvocationContext.getStore(), "selected run invocation scope").lookup(
+          instance,
+        );
+        preparedRuntimeMocks.executed();
+        return { ok: true };
+      } finally {
+        await instance.dispose();
+      }
+    });
     Object.values(preparedRuntimeMocks).forEach((mock) => mock.mockClear());
     await fs.writeFile(storePath, "{}\n", "utf8");
   });
 
   afterEach(() => {
+    clearRuntimeConfigSnapshot();
     for (const entry of listActiveSessionsForShutdown()) {
       forgetActiveSessionForShutdown(entry.sessionId);
     }
     vi.restoreAllMocks();
   });
 
-  it.each(["immediate", "deferred workspace"] as const)(
-    "retains runtime custody and emits session creation with %s preparation",
+  it.each(["immediate", "deferred workspace", "superseded catalog"] as const)(
+    "settles runtime custody with %s preparation",
     async (preparation) => {
       const caseId = preparation.replaceAll(" ", "-");
       const sessionKey = `agent:main:subagent:create-test-${caseId}`;
@@ -142,8 +174,16 @@ describe("agent handler session create events", () => {
         preparation === "deferred workspace",
       );
       vi.spyOn(sessionProject, "prepareSessionWorkspaceForRun").mockResolvedValue(undefined);
+      if (preparation === "superseded catalog") {
+        vi.mocked(acquireAgentRunPreparedModelRuntime).mockRejectedValueOnce(
+          new PreparedModelRuntimePublicationSupersededError(
+            "Accepted model catalog changed during runtime preparation",
+          ),
+        );
+      }
       const broadcastToConnIds = vi.fn();
       const respond = vi.fn();
+      const chatAbortControllers = new Map();
       let execution: Promise<unknown> | undefined;
 
       await expectDefined(agentHandlers.agent, "agentHandlers.agent test invariant").call(
@@ -160,7 +200,7 @@ describe("agent handler session create events", () => {
             dedupe: new Map(),
             deps: {} as never,
             logGateway: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } as never,
-            chatAbortControllers: new Map(),
+            chatAbortControllers,
             addChatRun: vi.fn(),
             registerToolEventRecipient: vi.fn(),
             getRuntimeConfig: configMocks.getRuntimeConfig,
@@ -176,12 +216,28 @@ describe("agent handler session create events", () => {
       const responseCall = firstMockCall(respond) as
         | [boolean, { status?: string; runId?: string }, unknown, { runId?: string }]
         | undefined;
+      if (preparation === "superseded catalog") {
+        expect(responseCall?.[0]).toBe(false);
+        expect(responseCall?.[2]).toMatchObject({
+          code: "UNAVAILABLE",
+          message: "Model runtime changed before this turn started. Retry the request.",
+          retryable: true,
+          retryAfterMs: 0,
+        });
+        expect(execution).toBeUndefined();
+        expect(agentIngressMocks.agentCommandFromIngress).not.toHaveBeenCalled();
+        expect(preparedRuntimeMocks.releaseDispatch).toHaveBeenCalledOnce();
+        expect(preparedRuntimeMocks.releaseSelected).not.toHaveBeenCalled();
+        expect(chatAbortControllers.size).toBe(0);
+        return;
+      }
       expect(responseCall?.[0], JSON.stringify(responseCall)).toBe(true);
       expect(responseCall?.[1]?.status).toBe("accepted");
       expect(responseCall?.[1]?.runId).toBe(runId);
       expect(responseCall?.[2]).toBeUndefined();
       expect(responseCall?.[3]?.runId).toBe(runId);
       await execution;
+      expect(preparedRuntimeMocks.executed).toHaveBeenCalledOnce();
       expect(preparedRuntimeMocks.acquired).toHaveBeenCalledExactlyOnceWith(
         preparedRuntimeMocks.captured.mock.calls[0]?.[0],
         0,

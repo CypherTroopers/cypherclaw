@@ -20,6 +20,10 @@ export type SessionTranscriptProjectionCursor = {
   leafEventId: string | null;
 };
 
+export type SessionTranscriptProjectionState = SessionTranscriptProjectionCursor & {
+  needsRebuild: boolean;
+};
+
 export type PreparedSessionTranscriptProjectionAppend = {
   activeRow?: {
     activePosition: number;
@@ -70,7 +74,8 @@ export function extractTranscriptIndexEntry(
   if (!id || (role !== "user" && role !== "assistant")) {
     return undefined;
   }
-  const text = readMessageText(message);
+  // Search is derived text; canonical transcript code units remain untouched.
+  const text = readMessageText(message)?.replaceAll("\0", " ");
   if (!text) {
     return undefined;
   }
@@ -94,9 +99,8 @@ export function hasTranscriptMessage(event: unknown): boolean {
 
 /** Control facts still belong in bounded context acquisition, even without a replay message. */
 export function transcriptEventContextEligibility(event: unknown): 0 | 1 {
-  return isRecord(event) && isRecord(event.message) && event.message.excludeFromContext === true
-    ? 0
-    : 1;
+  const message = isRecord(event) && (event.type === "custom_message" ? event : event.message);
+  return isRecord(message) && message.excludeFromContext === true ? 0 : 1;
 }
 
 export function shouldProjectActiveEvent(event: unknown): boolean {

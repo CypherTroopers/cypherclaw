@@ -1,6 +1,7 @@
-import type { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { computeBackoff } from "../infra/backoff.js";
+import { isStateDatabaseMaintenanceContention } from "../infra/gateway-state-owner-record.js";
+import type { EngineConnection } from "../infra/sql-connection.js";
 import { isSqliteLockError } from "../infra/sqlite-error-diagnostics.js";
 import { extractSqliteTableSchema } from "../infra/sqlite-schema-sql.js";
 import type { SqliteTransactionOptions } from "../infra/sqlite-transaction.js";
@@ -23,6 +24,7 @@ import {
 } from "./openclaw-state-lease-heartbeat-shared.js";
 import {
   readOpenClawStateLeaseExpiry,
+  readOpenClawStateLeaseLoss,
   releaseOpenClawStateLeaseInTransaction,
   renewOpenClawStateLeaseInTransaction,
 } from "./openclaw-state-lease-store.js";
@@ -57,7 +59,7 @@ export function resolveLeaseDatabasePath(database: OpenClawStateLeaseDatabase): 
 }
 function readLeaseDatabase<T>(
   database: OpenClawStateLeaseDatabase,
-  operation: (db: DatabaseSync) => T,
+  operation: (db: EngineConnection) => T,
 ): T {
   return database.schemaPolicy === "existing"
     ? withOpenClawStateDatabaseReadOnly(({ db }) => operation(db), database.options)
@@ -67,7 +69,7 @@ function readLeaseDatabase<T>(
 export function withLeaseWriteTransaction<T>(
   database: OpenClawStateLeaseDatabase,
   operationLabel: string,
-  operation: (db: DatabaseSync) => T,
+  operation: (db: EngineConnection) => T,
   busyTimeoutMs = 0,
 ): T {
   const transactionOptions = {
@@ -97,7 +99,22 @@ export const STATE_LEASE_WRITE_BACKOFF = {
   jitter: 0.25,
 } as const;
 
-export type OpenClawStateLeaseOwnerIdentity = OpenClawStateLeaseIdentity & { leaseLabel: string };
+export type OpenClawStateLeaseOwnerIdentity = OpenClawStateLeaseIdentity &
+  Parameters<typeof createOpenClawStateLeaseLostError>[0] & { leaseLabel: string };
+
+export function createOpenClawStateLeaseLostErrorFromDatabase(
+  identity: OpenClawStateLeaseOwnerIdentity,
+  database: OpenClawStateLeaseDatabase,
+  cause?: unknown,
+) {
+  let loss;
+  try {
+    loss = readLeaseDatabase(database, (db) => readOpenClawStateLeaseLoss(db, identity));
+  } catch {
+    // Expiry still fences the owner if storage or admission is unavailable.
+  }
+  return createOpenClawStateLeaseLostError(identity, cause, loss);
+}
 
 export function renewOpenClawStateLease(
   params: OpenClawStateLeaseOwnerIdentity & {
@@ -112,7 +129,11 @@ export function renewOpenClawStateLease(
     (db) => {
       const expiresAt = renewOpenClawStateLeaseInTransaction(db, params, params.leaseMs);
       if (expiresAt === undefined) {
-        throw createOpenClawStateLeaseLostError(params);
+        throw createOpenClawStateLeaseLostError(
+          params,
+          undefined,
+          readOpenClawStateLeaseLoss(db, params),
+        );
       }
       return expiresAt;
     },
@@ -120,12 +141,16 @@ export function renewOpenClawStateLease(
 }
 
 function assertOpenClawStateLeaseOwnedInDatabase(
-  database: DatabaseSync,
+  database: EngineConnection,
   params: OpenClawStateLeaseOwnerIdentity,
 ): number {
   const expiresAt = readOpenClawStateLeaseExpiry(database, params);
   if (expiresAt === undefined) {
-    throw createOpenClawStateLeaseLostError(params);
+    throw createOpenClawStateLeaseLostError(
+      params,
+      undefined,
+      readOpenClawStateLeaseLoss(database, params),
+    );
   }
   return expiresAt;
 }
@@ -133,7 +158,7 @@ function assertOpenClawStateLeaseOwnedInDatabase(
 export function verifyOpenClawStateLeaseOwnership(
   params: OpenClawStateLeaseOwnerIdentity & {
     database?: OpenClawStateLeaseDatabase;
-    transaction?: DatabaseSync;
+    transaction?: EngineConnection;
   },
 ): number {
   try {
@@ -181,8 +206,9 @@ export async function releaseOpenClawStateLeaseBestEffort(
     } catch (error) {
       const now = performance.now();
       if (!isSqliteLockError(error) || now >= deadline) {
-        if (execute) {
-          // The async resource owner retains failed cleanup for exact-owner retry.
+        if (execute || isStateDatabaseMaintenanceContention(error)) {
+          // Startup can fail before worker cleanup is available. Preserve maintenance
+          // refusal so the resource owner retries this exact lease after custody ends.
           throw error;
         }
         return;

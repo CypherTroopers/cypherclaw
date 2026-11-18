@@ -10,7 +10,9 @@ import {
 import { hasInternalDiagnosticEventListeners } from "../infra/diagnostic-event-listener-presence.js";
 import { areDiagnosticsEnabledForProcess } from "../infra/diagnostic-events.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import type { ImageContent } from "../llm/types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { getAgentScopedMediaLocalRoots } from "../media/local-roots.js";
 import {
   buildAgentHookContextChannelFields,
   buildAgentHookContextIdentityFields,
@@ -22,8 +24,8 @@ import {
   hasCompletionMessageSessionSpawn,
 } from "./accepted-session-spawn.js";
 import { bindOperatorModelExecution, readRunOperatorAuthority } from "./admitted-run-context.js";
+import type { CliOutput } from "./cli-output-contracts.js";
 import { runCliBeforeAgentReply } from "./cli-runner/before-agent-reply.js";
-import { runCliCleanup } from "./cli-runner/cleanup.js";
 import { acceptsCliLiveSession } from "./cli-runner/cli-live-session-registry.js";
 import {
   resolveCliSessionId,
@@ -34,7 +36,9 @@ import {
   assertCliRuntimeBinding,
   buildBlockedCliRunResult,
   buildCliDeliveredFailure,
+  buildCliReseedReceipt,
   buildCliRunResult,
+  buildCliSessionBinding,
   formatCliTerminalInterruption,
   isClaudeCliBackend,
   resolveCliSourceReplyMirror,
@@ -56,6 +60,7 @@ import {
   getCliMessagingDeliveryEvidence,
 } from "./cli-runner/delivery-evidence.js";
 import { createCliFailoverError } from "./cli-runner/exit-error.js";
+import { loadCliPromptImages } from "./cli-runner/helpers.js";
 import { cliBackendLog } from "./cli-runner/log.js";
 import {
   runClaudeCliAgentTurnWithDiagnostics,
@@ -79,7 +84,7 @@ import {
   runAgentHarnessLlmOutputHook,
 } from "./harness/lifecycle-hook-helpers.js";
 import { resolveReplyExpectation } from "./reply-completion.js";
-import { recordAgentCleanupFailure } from "./run-cleanup-timeout.js";
+import { isAgentRunDirectAbortReason } from "./run-termination.js";
 
 const log = createSubsystemLogger("agents/cli-runner");
 
@@ -141,12 +146,16 @@ async function runCliAgentInternal(
   // backend resources released only by runPreparedCliAgent's try…finally.
   await params.onExecutionStarted?.();
   assertAgentRunLifecycleGenerationCurrent(params.lifecycleGeneration!);
-  params.abortSignal?.throwIfAborted();
-  params.assertCurrent?.();
   let modelExecution: ReturnType<typeof bindOperatorModelExecution>;
-  const assertCallerCurrent = params.assertCurrent;
   const generationAbortController = new AbortController();
   let generation: Awaited<ReturnType<typeof prepareCronRootSessionGeneration>>;
+  const assertCurrent = () => {
+    params.abortSignal?.throwIfAborted();
+    params.assertCurrent?.();
+    modelExecution?.assertCurrent();
+    generation?.assertCurrent();
+  };
+  assertCurrent();
   try {
     const target = params.sessionTarget;
     generation =
@@ -162,7 +171,7 @@ async function runCliAgentInternal(
             (reason) => generationAbortController.abort(reason),
           )
         : undefined;
-    const hookResult = await runCliBeforeAgentReply(params, generation?.assertCurrent);
+    const hookResult = await runCliBeforeAgentReply(params, assertCurrent);
     if (hookResult) {
       return hookResult;
     }
@@ -181,13 +190,9 @@ async function runCliAgentInternal(
         ? {
             ...params,
             abortSignal: abortSignals.length > 1 ? AbortSignal.any(abortSignals) : abortSignals[0],
-            assertCurrent: () => {
-              assertCallerCurrent?.();
-              modelExecution?.assertCurrent();
-              generation?.assertCurrent();
-            },
+            assertCurrent,
           }
-        : params;
+        : { ...params, assertCurrent };
     const { prepareCliRunContext } = await import("./cli-runner/prepare.runtime.js");
     let context: PreparedCliRunContext;
     try {
@@ -197,15 +202,17 @@ async function runCliAgentInternal(
       throw error;
     }
     // Preparation resolves the execution owner and effective capture config;
-    // publish both before commentary can arrive from the prepared run.
+    // publish both before commentary can arrive from the prepared run. The
+    // captured prompt is published by execution, which composes what the CLI
+    // actually receives (history reseed, input transforms, context, images).
     diagnosticLifecycle?.setExecutionContext(context.params);
-    const result = await settlePreparedCliRun({
-      context,
-      diagnosticLifecycle,
-      run: async () => await runPreparedCliAgent(context, diagnosticLifecycle),
+    diagnosticLifecycle?.publishCapturedContent({
+      userPrompt: context.params.prompt,
     });
-    modelExecution?.assertCurrent();
-    return result;
+    // Settlement owns post-commit tolerance: an authority loss after the final
+    // reply commits records a warning and stays successful (#170757); authority
+    // checks live at the protected effect boundaries in the run params instead.
+    return await runPreparedCliAgent(context, diagnosticLifecycle);
   } finally {
     generation?.release();
     modelExecution?.release();
@@ -216,12 +223,19 @@ export async function runPreparedCliAgent(
   context: PreparedCliRunContext,
   diagnosticLifecycle?: ClaudeCliRunDiagnosticLifecycle,
 ): Promise<EmbeddedAgentRunResult> {
-  const run = () => runPreparedCliAgentOwned(context, diagnosticLifecycle);
-  return await runWithCliHistoryWriter(context.cliHistoryWriter, run);
+  return await settlePreparedCliRun({
+    context,
+    diagnosticLifecycle,
+    run: (complete) =>
+      runWithCliHistoryWriter(context.cliHistoryWriter, () =>
+        runPreparedCliAgentOwned(context, complete, diagnosticLifecycle),
+      ),
+  });
 }
 
 async function runPreparedCliAgentOwned(
   context: PreparedCliRunContext,
+  complete: (result: EmbeddedAgentRunResult) => void,
   diagnosticLifecycle?: ClaudeCliRunDiagnosticLifecycle,
 ): Promise<EmbeddedAgentRunResult> {
   let executePreparedCliRun: typeof import("./cli-runner/execute.runtime.js").executePreparedCliRun;
@@ -251,6 +265,7 @@ async function runPreparedCliAgentOwned(
   const hasBeforeAgentRunHooks = hookRunner?.hasHooks("before_agent_run") === true;
   const needsHookHistory = hasLlmInputHooks || hasAgentEndHooks || hasBeforeAgentRunHooks;
   let historyMessages: unknown[] = [];
+  let promptImages: ImageContent[] | undefined;
   const promptForHooks = context.promptForHooks ?? params.prompt;
   const contextWindowFields = () => ({
     ...(context.contextWindowInfo?.tokens
@@ -317,8 +332,47 @@ async function runPreparedCliAgentOwned(
     return buildBlockedCliRunResult({ ...resultContext, message });
   };
 
-  let deliveredMessagingSideEffect = false;
   let userTurnHandled = false;
+  // A directly stopped first turn rethrows its abort unsettled: no transcript, hooks,
+  // or replay. Its flushed native session is the chat's only continuity, so bind
+  // it into the still-empty binding. Superseded, restarted, resumed, and forked
+  // runs keep the abort guards from #147139 and bind nothing here.
+  const persistStoppedFirstCliSession = async (
+    error: unknown,
+    output: CliOutput,
+    cliSessionIdToUse: string | undefined,
+  ) => {
+    const sessionId = output.sessionId;
+    if (
+      !params.persistStoppedFirstCliSession ||
+      !output.terminalInterruption ||
+      !sessionId ||
+      cliSessionIdToUse ||
+      resolveCliSessionId(context.reusableCliSession) ||
+      sessionBindingDisabled ||
+      !isAgentRunDirectAbortReason(error) ||
+      !isClaudeCliBackend(params.provider) ||
+      !(await isCliBindingFlushed(sessionId, params.provider, context.cwd ?? context.workspaceDir))
+    ) {
+      return;
+    }
+    try {
+      const reseedReceipt = buildCliReseedReceipt({
+        runParams: params,
+        output,
+        usedHistoryPrompt: context.openClawHistoryPrompt !== undefined,
+        userTurnHandled,
+      });
+      await params.persistStoppedFirstCliSession(
+        buildCliSessionBinding(context, sessionId, output, reseedReceipt),
+      );
+    } catch (persistError) {
+      log.warn(
+        `CLI run ${params.runId} could not keep its stopped first session: ${formatErrorMessage(persistError)}`,
+      );
+    }
+  };
+
   const executeCliAttempt = async (cliSessionIdToUse?: string, options?: CliRecoveryOptions) => {
     const timeoutMs = options?.timeoutMs ?? params.timeoutMs;
     const forkCliSessionOnResume =
@@ -356,9 +410,25 @@ async function runPreparedCliAgentOwned(
     const output = await executePreparedCliRun(
       attemptContext,
       cliSessionIdToUse,
-      diagnosticLifecycle ? { onPhase: diagnosticLifecycle.setPhase } : undefined,
+      diagnosticLifecycle || promptImages
+        ? {
+            promptImages,
+            ...(diagnosticLifecycle
+              ? {
+                  onPhase: diagnosticLifecycle.setPhase,
+                  onPromptPrepared: (prompt: string) =>
+                    diagnosticLifecycle.publishCapturedContent({ userPrompt: prompt }),
+                }
+              : {}),
+          }
+        : undefined,
     );
-    params.assertCurrent?.();
+    try {
+      params.assertCurrent?.();
+    } catch (error) {
+      await persistStoppedFirstCliSession(error, output, cliSessionIdToUse);
+      throw error;
+    }
     // Test facades and non-instrumented executors may not signal the boundary.
     diagnosticLifecycle?.setPhase("resolve");
     const sourceReplyMirror = resolveCliSourceReplyMirror({
@@ -451,16 +521,6 @@ async function runPreparedCliAgentOwned(
   const executeRun = async (): Promise<EmbeddedAgentRunResult> => {
     ({ executePreparedCliRun } = await import("./cli-runner/execute.runtime.js"));
     historyMessages = needsHookHistory ? await loadCliSessionHistoryMessages(params) : [];
-    const llmInputEvent = {
-      runId: params.runId,
-      sessionId: params.sessionId,
-      provider: params.provider,
-      model: context.modelId,
-      systemPrompt: context.systemPrompt,
-      prompt: promptForHooks,
-      historyMessages,
-      imagesCount: params.images?.length ?? 0,
-    } as const;
     if (turnSideEffectsDisabled) {
       const reusableCliSessionId = isolatedCompletion
         ? undefined
@@ -483,6 +543,7 @@ async function runPreparedCliAgentOwned(
     }
     await bootstrapHarnessContextEngine({
       admittedRunContext: params.admittedRunContext,
+      preparedRunAdmission: params.preparedRunAdmission,
       hadSessionFile: context.hadSessionFile,
       contextEngine: context.contextEngine,
       sessionId: params.sessionId,
@@ -510,12 +571,22 @@ async function runPreparedCliAgentOwned(
     ) => {
       const { output, assistantText, lastAssistant, sourceReplyWasDelivered, usedHistoryPrompt } =
         result;
+      let completed: EmbeddedAgentRunResult | undefined;
       try {
         const terminalInterruption = output.terminalInterruption;
         if (!terminalInterruption) {
           await assertCliRuntimeBinding(context);
         }
         const effectiveCliSessionId = output.sessionId ?? fallbackCliSessionId;
+        // Native continuity must be resolved before the final transcript commit.
+        const bindingFlushOk = sessionBindingDisabled
+          ? true
+          : await isCliBindingFlushed(
+              effectiveCliSessionId,
+              params.provider,
+              context.cwd ?? context.workspaceDir,
+              { skipTranscriptProbe: acceptsCliLiveSession(context) },
+            );
         const assistantTranscript = await persistCliAssistantTranscript({
           runParams: params,
           // Dispatch owns source-reply transcript mirrors and their idempotency keys.
@@ -526,28 +597,7 @@ async function runPreparedCliAgentOwned(
           stopReason: resolveCliAssistantStopReason(output),
           yielded: output.yielded,
         });
-        await finalizeCliContextEngineTurn({
-          context,
-          historyMessages: context.contextEngine ? contextEngineHistoryMessages : historyMessages,
-          assistantText,
-          terminalAnchor: assistantTranscript.terminalAnchor,
-          output,
-        });
-        // A stateless backend may emit an id, but it never becomes continuity.
-        // Managed stdio sessions own continuity in-process and write no native transcript.
-        const bindingFlushOk = sessionBindingDisabled
-          ? true
-          : await isCliBindingFlushed(
-              effectiveCliSessionId,
-              params.provider,
-              context.cwd ?? context.workspaceDir,
-              { skipTranscriptProbe: acceptsCliLiveSession(context) },
-            );
-        const interruptionError = terminalInterruption
-          ? formatCliTerminalInterruption(terminalInterruption)
-          : undefined;
-        await finishAgentEndHook(buildAgentEndMessages(lastAssistant), interruptionError);
-        return buildCliRunResult({
+        const runResult = buildCliRunResult({
           ...resultContext,
           output,
           effectiveCliSessionId,
@@ -557,7 +607,29 @@ async function runPreparedCliAgentOwned(
           usedHistoryPrompt,
           userTurnHandled,
         });
+        if (!terminalInterruption && !output.yielded && assistantTranscript.idempotencyKey) {
+          completed = runResult;
+          complete(runResult);
+        }
+        await finalizeCliContextEngineTurn({
+          context,
+          historyMessages: context.contextEngine ? contextEngineHistoryMessages : historyMessages,
+          assistantText,
+          terminalAnchor: assistantTranscript.terminalAnchor,
+          output,
+        });
+        const interruptionError = terminalInterruption
+          ? formatCliTerminalInterruption(terminalInterruption)
+          : undefined;
+        await finishAgentEndHook(buildAgentEndMessages(lastAssistant), interruptionError);
+        return runResult;
       } catch (error) {
+        if (completed) {
+          log.warn(
+            `CLI run ${params.runId} finalization failed after final reply commit: ${formatErrorMessage(error)}`,
+          );
+          return completed;
+        }
         throw attachCliMessagingDeliveryEvidence(error, output);
       }
     };
@@ -571,7 +643,6 @@ async function runPreparedCliAgentOwned(
         return undefined;
       }
       await finishFailedAgentEndHook(error);
-      deliveredMessagingSideEffect = true;
       return buildCliDeliveredFailure({
         ...resultContext,
         error,
@@ -581,10 +652,25 @@ async function runPreparedCliAgentOwned(
       });
     };
 
+    if (hasBeforeAgentRunHooks && context.executionTarget.kind !== "node") {
+      promptImages = await loadCliPromptImages({
+        prompt: params.prompt,
+        imagePrompt: params.imagePrompt,
+        workspaceDir: context.workspaceDir,
+        localRoots: getAgentScopedMediaLocalRoots(params.config ?? {}, params.agentId),
+        images: params.images,
+        imageOrder: params.imageOrder,
+        mediaImageLayout: params.mediaImageLayout,
+        media: params.media,
+      });
+      params.abortSignal?.throwIfAborted();
+      params.assertCurrent?.();
+    }
     const block = await runBeforeAgentRunGate(
       hookRunner,
       {
         prompt: promptForHooks,
+        images: promptImages ?? [],
         systemPrompt: context.systemPrompt,
         messages: buildAgentHookConversationMessages({ historyMessages, currentTurnMessages: [] }),
         channelId: hookContext.channelId,
@@ -600,7 +686,16 @@ async function runPreparedCliAgentOwned(
 
     userTurnHandled = await persistApprovedCliUserTurnTranscript(params);
     runAgentHarnessLlmInputHook({
-      event: llmInputEvent,
+      event: {
+        runId: params.runId,
+        sessionId: params.sessionId,
+        provider: params.provider,
+        model: context.modelId,
+        systemPrompt: context.systemPrompt,
+        prompt: promptForHooks,
+        historyMessages,
+        imagesCount: (promptImages ?? params.images)?.length ?? 0,
+      },
       ctx: hookContext,
       hookRunner,
     });
@@ -613,41 +708,12 @@ async function runPreparedCliAgentOwned(
     });
   };
 
-  let outcome: { result: EmbeddedAgentRunResult } | { error: unknown };
   try {
-    outcome = { result: await executeRun() };
+    const result = await executeRun();
+    // Publish captured content before backend and session cleanup can throw.
+    diagnosticLifecycle?.publishResultContent(result);
+    return result;
   } catch (error) {
-    outcome = { error };
+    throw coerceToFailoverError(error, cliFailoverContext) ?? error;
   }
-  let cleanupError: Error | undefined;
-  try {
-    await runCliCleanup(params, "cli-backend-release", async () => {
-      await context.preparedBackend.cleanup?.();
-    });
-  } catch (error) {
-    cleanupError = error as Error;
-  }
-  params.assertCurrent?.();
-  if (cleanupError) {
-    recordAgentCleanupFailure();
-    if (!deliveredMessagingSideEffect) {
-      if ("error" in outcome) {
-        log.warn(
-          `CLI run also failed before backend cleanup: ${formatErrorMessage(outcome.error)}`,
-        );
-      }
-      diagnosticLifecycle?.setPhase("cleanup");
-      throw cleanupError;
-    }
-    log.warn(
-      `CLI backend cleanup failed after confirmed message delivery: ${formatErrorMessage(cleanupError)}`,
-    );
-  }
-  if ("error" in outcome) {
-    throw coerceToFailoverError(outcome.error, cliFailoverContext) ?? outcome.error;
-  }
-  if (!outcome.result) {
-    throw new Error("CLI run completed without a result");
-  }
-  return outcome.result;
 }

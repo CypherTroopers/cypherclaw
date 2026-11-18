@@ -42,6 +42,18 @@ OpenClaw also creates Docker sandbox containers with an init process and
 mounted read-only at `/agent`; write operations to the agent workspace are
 rejected, while the configured tmpfs paths remain writable.
 
+Writable workspaces protect managed skill directories with read-only bind mounts,
+including on first launch when those directories do not exist yet. Writable
+ancestors of nested skill mounts are pinned in place so a sandboxed process
+cannot rename an ancestor to bypass that protection. Other workspace files
+remain writable.
+
+After a Gateway restart, a running container may be replaced automatically when
+the only mount changes add these protections, its root filesystem is read-only,
+and all existing mounts still match. Containers with image volumes, incomplete
+setup, changed user binds, or use in the current Gateway process retain their
+normal explicit-recreation requirement.
+
 File tools require a host-backed bind mount. A tmpfs or image volume can hide
 files below a workspace bind; file tools report those paths as container-only
 instead of reading the hidden host files. Use `exec` to access that storage.
@@ -85,7 +97,7 @@ These Codex bwrap checks run in standalone `openclaw doctor` and are omitted dur
 
 ### Sandboxed browser
 
-- The sandbox browser auto-starts (ensures CDP is reachable) when the browser tool needs it. Configure via `agents.defaults.sandbox.browser.autoStart` (default `true`) and `autoStartTimeoutMs` (default 12s).
+- The sandbox browser auto-starts and waits for CDP to become reachable when the browser tool needs it. Configure via `agents.defaults.sandbox.browser.autoStart` (default `true`) and `autoStartTimeoutMs` (default 12s).
 - Sandbox browser containers use a dedicated Docker network (`openclaw-sandbox-browser`) instead of the global `bridge` network. Configure with `agents.defaults.sandbox.browser.network`.
 - Sandbox browser network mode `"none"` is unsupported because browser control requires host-published CDP ports. Use the dedicated default, `bridge`, or another custom bridge network. `openclaw doctor --fix` disables affected persisted sidecars and restores the dedicated network without silently enabling egress.
 - `agents.defaults.sandbox.browser.cdpSourceRange` restricts container-edge CDP ingress with a CIDR allowlist (for example `172.21.0.1/32`).

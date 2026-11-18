@@ -1,28 +1,24 @@
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
-import {
-  loadSessionEntryReadOnly,
-  loadTranscriptEvents,
-  replaceSessionEntry,
-} from "../config/sessions/session-accessor.js";
+import { loadTranscriptEvents, replaceSessionEntry } from "../config/sessions/session-accessor.js";
 import { writeSessionEntry } from "../config/sessions/session-accessor.sqlite-entry-store.js";
 import { readTranscriptEventMessage } from "../config/sessions/session-accessor.sqlite-read.js";
 import {
   resolveSqliteScope,
   toDatabaseOptions,
 } from "../config/sessions/session-accessor.sqlite-scope.js";
-import { sessionMutationHandlers } from "../gateway/server-methods/sessions-mutations.js";
-import { callGatewayHandler } from "../gateway/server-methods/skills.test-helpers.js";
+import { createDeferredCore } from "../shared/deferred.js";
 import {
   closeOpenClawAgentDatabasesAsync,
+  closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "../state/openclaw-agent-db.js";
-import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { commitBackgroundResultToSession } from "./background-session-result.js";
 import {
   beginSessionWorkAdmission,
   getActiveSessionLifecycleMutationCount,
+  runExclusiveSessionLifecycleMutation,
 } from "./session-lifecycle-admission.js";
 import { onSessionTranscriptUpdate } from "./transcript-events.js";
 
@@ -31,6 +27,7 @@ describe("commitBackgroundResultToSession", () => {
     afterEach(async () => {
       for (const root of tempDirs.dirs) {
         await closeOpenClawAgentDatabasesAsync(root);
+        closeOpenClawAgentDatabasesForTest(root);
       }
       cleanup();
     }),
@@ -54,7 +51,7 @@ describe("commitBackgroundResultToSession", () => {
     };
   }
 
-  it("waits for active source work, commits provenance, and deduplicates retry", async () => {
+  it("commits during active source work, preserves provenance, and deduplicates retry", async () => {
     const target = await createTarget();
     const admission = await beginSessionWorkAdmission({
       scope: target.storePath,
@@ -68,7 +65,7 @@ describe("commitBackgroundResultToSession", () => {
     const commit = commitBackgroundResultToSession({
       agentId: "main",
       sessionKey: target.sessionKey,
-      expectedGeneration: target.generation,
+      expectedLifecycleRevision: target.generation.lifecycleRevision,
       text: "Automation finished while the chat was active.",
       idempotencyKey: "cron-current-completion:cron:job-1:1000",
       provenance: { kind: "cron", jobId: "job-1", runId: "cron:job-1:1000" },
@@ -85,50 +82,31 @@ describe("commitBackgroundResultToSession", () => {
         },
       ),
     ];
-    let laterAdmission: ReturnType<typeof beginSessionWorkAdmission> | undefined;
 
     try {
-      await vi.waitFor(() => expect(getActiveSessionLifecycleMutationCount()).toBe(1));
-      expect(commitSettled).toBe(false);
-      let laterAdmissionSettled = false;
-      laterAdmission = beginSessionWorkAdmission({
-        scope: target.storePath,
-        identities: [target.sessionKey, target.sessionId],
-        assertAllowed: () => {},
-        signal: controller.signal,
-      });
-      observations.push(
-        laterAdmission.then(
-          () => {
-            laterAdmissionSettled = true;
-          },
-          () => {
-            laterAdmissionSettled = true;
-          },
-        ),
-      );
-      await Promise.resolve();
-      expect(laterAdmissionSettled).toBe(false);
-      admission.release();
-
+      // The admission stays held until `finally`, so settling here proves the commit
+      // did not wait for source work. A fixed poll window flaked on cold CI workers.
       const first = await commit;
+      expect(commitSettled).toBe(true);
+      expect(admission.isActive()).toBe(true);
       expect(first).toMatchObject({ ok: true });
-      (await laterAdmission).release();
       const retry = await commitBackgroundResultToSession({
         agentId: "main",
         sessionKey: target.sessionKey,
-        expectedGeneration: target.generation,
+        expectedLifecycleRevision: target.generation.lifecycleRevision,
         text: "Automation finished while the chat was active.",
         idempotencyKey: "cron-current-completion:cron:job-1:1000",
         provenance: { kind: "cron", jobId: "job-1", runId: "cron:job-1:1000" },
         config: target.config,
       });
       expect(retry).toEqual(first);
+      expect(admission.isActive()).toBe(true);
+      expect(getActiveSessionLifecycleMutationCount()).toBe(0);
       await expect(
         commitBackgroundResultToSession({
           agentId: "main",
           sessionKey: target.sessionKey,
-          expectedGeneration: target.generation,
+          expectedLifecycleRevision: target.generation.lifecycleRevision,
           text: "A different completion must not reuse the committed run.",
           idempotencyKey: "cron-current-completion:cron:job-1:1000",
           provenance: { kind: "cron", jobId: "job-1", runId: "cron:job-1:1000" },
@@ -164,123 +142,77 @@ describe("commitBackgroundResultToSession", () => {
       controller.abort();
       admission.release();
       unsubscribe();
-      await laterAdmission?.then(
-        (lease) => lease.release(),
-        () => {},
-      );
       await Promise.allSettled([commit, ...observations]);
     }
   });
 
-  it("cancels a background completion's pure wait without waiting for old work release", async () => {
-    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+  it.each(["cancel", "replace"] as const)(
+    "revalidates a background result queued behind an existing lifecycle mutation: %s",
+    async (action) => {
       const target = await createTarget();
-      const admission = await beginSessionWorkAdmission({
+      const entered = createDeferredCore();
+      const release = createDeferredCore();
+      const blocker = runExclusiveSessionLifecycleMutation("background-result", {
         scope: target.storePath,
         identities: [target.sessionKey, target.sessionId],
-        assertAllowed: () => {},
+        run: async () => {
+          entered.resolve();
+          await release.promise;
+          if (action === "replace") {
+            await replaceSessionEntry(
+              { agentId: "main", sessionKey: target.sessionKey, storePath: target.storePath },
+              { sessionId: target.sessionId, lifecycleRevision: "replacement", updatedAt: 2 },
+            );
+          }
+        },
       });
-      const lifecycle = await import("./session-lifecycle-admission.js");
-      const releaseSpy = vi.spyOn(lifecycle, "getSessionWorkAdmissionRelease");
+      await entered.promise;
       const controller = new AbortController();
       const prepareDisplayContent = vi.fn(async () => undefined);
-      const pending: Promise<unknown>[] = [];
-      let completionOutcome:
-        | PromiseSettledResult<Awaited<ReturnType<typeof commitBackgroundResultToSession>>>
-        | undefined;
-      let sourceResponse: Awaited<ReturnType<typeof callGatewayHandler>> | undefined;
+      const result = commitBackgroundResultToSession({
+        agentId: "main",
+        sessionKey: target.sessionKey,
+        expectedLifecycleRevision: target.generation.lifecycleRevision,
+        text: "Queued completion",
+        idempotencyKey: "queued-completion",
+        provenance: { kind: "cron", jobId: "queued", runId: "queued" },
+        config: target.config,
+        signal: controller.signal,
+        prepareDisplayContent,
+      });
+      const observed = result.then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
       try {
-        const completion = commitBackgroundResultToSession({
-          agentId: "main",
-          sessionKey: target.sessionKey,
-          expectedGeneration: target.generation,
-          text: "Cancelled synthetic background result",
-          prepareDisplayContent,
-          idempotencyKey: "background-cancellation-progress",
-          provenance: {
-            kind: "cron",
-            jobId: "synthetic-cancel-job",
-            runId: "synthetic-cancel-run",
-          },
-          config: target.config,
-          signal: controller.signal,
-        });
-        pending.push(completion);
-        const completionSettlement = completion.then(
-          (value) => {
-            completionOutcome = { status: "fulfilled", value };
-          },
-          (reason: unknown) => {
-            completionOutcome = { status: "rejected", reason };
-          },
-        );
-        pending.push(completionSettlement);
-        await vi.waitFor(() => expect(releaseSpy).toHaveBeenCalledOnce());
-        expect(getActiveSessionLifecycleMutationCount()).toBe(1);
+        if (action === "cancel") {
+          controller.abort();
+          await expect(result).rejects.toMatchObject({ name: "AbortError" });
+        }
+        release.resolve();
+        await blocker;
+        if (action === "replace") {
+          await expect(result).resolves.toMatchObject({
+            ok: false,
+            reason: expect.stringContaining("session rebound"),
+          });
+        }
         expect(prepareDisplayContent).not.toHaveBeenCalled();
-        const sourceMutation = admission.run(async () => {
-          sourceResponse = await callGatewayHandler(
-            sessionMutationHandlers,
-            "sessions.patch",
-            { key: target.sessionKey, pinned: true },
-            {
-              context: {
-                getRuntimeConfig: () => target.config,
-                getSessionEventSubscriberConnIds: () => new Set<string>(),
-                broadcastToConnIds: vi.fn(),
-                chatAbortControllers: new Map(),
-                chatQueuedTurns: new Map(),
-                dedupe: new Map(),
-              },
-            },
-          );
-          return sourceResponse;
-        });
-        pending.push(sourceMutation);
-        controller.abort();
-        await completionSettlement;
-        expect(
-          completionOutcome,
-          "cancelled background completion must settle while the unrelated old lease stays held",
-        ).toMatchObject({ status: "rejected", reason: { name: "AbortError" } });
-        await expect(sourceMutation).resolves.toMatchObject({ ok: true });
-        expect(admission.isActive()).toBe(true);
-        expect(getActiveSessionLifecycleMutationCount()).toBe(0);
-        expect(prepareDisplayContent).not.toHaveBeenCalled();
-        const scope = {
-          agentId: "main",
-          sessionKey: target.sessionKey,
-          sessionId: target.sessionId,
-          storePath: target.storePath,
-        };
-        expect(loadSessionEntryReadOnly({ ...scope, readConsistency: "latest" })).toMatchObject({
-          pinnedAt: expect.any(Number),
-          sessionId: target.sessionId,
-        });
-        await expect(loadTranscriptEvents(scope)).resolves.toEqual([]);
-      } finally {
-        controller.abort();
-        admission.release();
-        const settled = await Promise.allSettled(pending);
-        releaseSpy.mockRestore();
-        expect(settled.filter((result) => result.status === "rejected")).toHaveLength(1);
-        expect(completionOutcome).toMatchObject({
-          status: "rejected",
-          reason: { name: "AbortError" },
-        });
-        expect(sourceResponse).toMatchObject({ ok: true });
-        expect(getActiveSessionLifecycleMutationCount()).toBe(0);
-        expect(
-          await loadTranscriptEvents({
+        await expect(
+          loadTranscriptEvents({
             agentId: "main",
             sessionKey: target.sessionKey,
             sessionId: target.sessionId,
             storePath: target.storePath,
           }),
-        ).toEqual([]);
+        ).resolves.toEqual([]);
+      } finally {
+        release.resolve();
+        await Promise.allSettled([blocker, observed]);
       }
-    });
-  });
+      expect(getActiveSessionLifecycleMutationCount()).toBe(0);
+    },
+  );
 
   it.each([false, true])(
     "settles accepted display content with provider review paused=%s",
@@ -324,7 +256,7 @@ describe("commitBackgroundResultToSession", () => {
       const commit = await commitBackgroundResultToSession({
         agentId: "main",
         sessionKey: target.sessionKey,
-        expectedGeneration: target.generation,
+        expectedLifecycleRevision: target.generation.lifecycleRevision,
         text: "Example report\nreport.png",
         prepareDisplayContent: async () => content,
         idempotencyKey: "cron-current-completion:cron:job-media:4000",
@@ -366,7 +298,7 @@ describe("commitBackgroundResultToSession", () => {
       commitBackgroundResultToSession({
         agentId: "main",
         sessionKey: target.sessionKey,
-        expectedGeneration: target.generation,
+        expectedLifecycleRevision: target.generation.lifecycleRevision,
         text: "Do not append this.",
         idempotencyKey: "cron-current-completion:cron:job-2:2000",
         provenance: { kind: "cron", jobId: "job-2", runId: "cron:job-2:2000" },
@@ -382,7 +314,7 @@ describe("commitBackgroundResultToSession", () => {
       commitBackgroundResultToSession({
         agentId: "main",
         sessionKey: target.sessionKey,
-        expectedGeneration: target.generation,
+        expectedLifecycleRevision: target.generation.lifecycleRevision,
         text: "Cancelled report",
         prepareDisplayContent: async () => {
           controller.abort();
@@ -430,7 +362,7 @@ describe("commitBackgroundResultToSession", () => {
       commitBackgroundResultToSession({
         agentId: "main",
         sessionKey: target.sessionKey,
-        expectedGeneration: target.generation,
+        expectedLifecycleRevision: target.generation.lifecycleRevision,
         text: "Do not append this stale cron result.",
         idempotencyKey: "cron-current-completion:cron:job-stale:3000",
         provenance: { kind: "cron", jobId: "job-stale", runId: "cron:job-stale:3000" },
@@ -448,7 +380,39 @@ describe("commitBackgroundResultToSession", () => {
     ).resolves.toEqual([]);
   });
 
-  it("treats a missing lifecycle revision as exact generation state", async () => {
+  it("follows a message edit while retaining the final exact writer fence", async () => {
+    const target = await createTarget();
+    await replaceSessionEntry(
+      { agentId: "main", sessionKey: target.sessionKey, storePath: target.storePath },
+      {
+        sessionId: "edited-session",
+        lifecycleRevision: target.generation.lifecycleRevision,
+        updatedAt: 2,
+      },
+    );
+    await expect(
+      commitBackgroundResultToSession({
+        agentId: "main",
+        sessionKey: target.sessionKey,
+        expectedLifecycleRevision: target.generation.lifecycleRevision,
+        text: "Result after edit",
+        idempotencyKey: "edited-result",
+        provenance: { kind: "cron", jobId: "edited", runId: "edited" },
+        config: target.config,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    const events = await loadTranscriptEvents({
+      ...target,
+      agentId: "main",
+      sessionId: "edited-session",
+    });
+    expect(
+      events.some((event) => readTranscriptEventMessage(event)?.model === "automation-result"),
+    ).toBe(true);
+    expect(await loadTranscriptEvents({ ...target, agentId: "main" })).toEqual([]);
+  });
+
+  it("follows a reset when no lifecycle revision is pinned", async () => {
     const target = await createTarget();
     const generation = { sessionId: target.sessionId, lifecycleRevision: undefined };
     await replaceSessionEntry(
@@ -460,7 +424,7 @@ describe("commitBackgroundResultToSession", () => {
       commitBackgroundResultToSession({
         agentId: "main",
         sessionKey: target.sessionKey,
-        expectedGeneration: generation,
+        expectedLifecycleRevision: generation.lifecycleRevision,
         text: "This still belongs to the revision-less session.",
         idempotencyKey: "cron-current-completion:cron:job-legacy:4000",
         provenance: { kind: "cron", jobId: "job-legacy", runId: "cron:job-legacy:4000" },
@@ -476,12 +440,12 @@ describe("commitBackgroundResultToSession", () => {
       commitBackgroundResultToSession({
         agentId: "main",
         sessionKey: target.sessionKey,
-        expectedGeneration: generation,
-        text: "Do not append after the generation changes.",
+        expectedLifecycleRevision: generation.lifecycleRevision,
+        text: "Append to the current transcript after the lifecycle changes.",
         idempotencyKey: "cron-current-completion:cron:job-legacy:5000",
         provenance: { kind: "cron", jobId: "job-legacy", runId: "cron:job-legacy:5000" },
         config: target.config,
       }),
-    ).resolves.toMatchObject({ ok: false, reason: expect.stringContaining("session rebound") });
+    ).resolves.toMatchObject({ ok: true });
   });
 });

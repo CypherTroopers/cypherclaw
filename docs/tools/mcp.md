@@ -39,6 +39,10 @@ access. A successful listing replaces the catalog, including tools removed by
 the server. Explicit config changes, removals, and plugin reloads retire the
 changed runtime immediately; unchanged servers keep their catalogs.
 
+For legacy SSE servers, reconnecting to the same session endpoint preserves the
+session. If the server announces a new endpoint, OpenClaw reconnects and
+initializes a fresh session before sending further tool calls.
+
 When OpenClaw's built-in MCP client cannot start a server, new runtimes skip it during an exponential backoff: 30 seconds, doubling up to 10 minutes. The runtime that encountered the first failure can retry once on its normal five-second catalog schedule, using a fresh connection after retiring the failed one. If that recovery attempt also fails, the same exponential backoff applies to it. Failure state survives ordinary session cleanup and is scoped to the server configuration and requester. The effective tool inventory shows the server as unavailable, with that runtime's next retry time and a reachability check as the next step. Each failed retry logs once; skipped runs do not repeat the warning. A successful connection, config publication, or explicit MCP reload clears the backoff. Reload the process that owns the connection; a CLI reload does not reset a separate Gateway.
 
 ## Add a server from the composer
@@ -144,6 +148,8 @@ If a Streamable HTTP server refuses initialization with HTTP 401, its startup lo
 
 Set `auth: "oauth"` plus any required `oauth` metadata. In **Settings → MCP**, an administrator can select **Sign in** for an enabled HTTP server that uses shared native OAuth credentials. Approve access in the browser, then return to Settings. If the browser blocks the new tab, use the sign-in link in the dialog.
 
+Agents sharing a native OAuth credential can reuse a fresh stored access token concurrently. Token refreshes, authorization challenges, sign-in, and sign-out still use the credential's exclusive flow lease. An expired or rejected token may wait for another refresh; the existing lease wait limit still applies.
+
 **Authentication saved** means credentials were saved on the Gateway selected when sign-in started. It does not prove the server is reachable or its tools work; run a check or use the connector next. Changing the selected Gateway or agent closes the dialog. A Gateway restart ends an unfinished browser sign-in, but does not remove saved credentials.
 
 Browser sign-in requires Settings on the Gateway's own HTTPS address (including an operator-managed reverse proxy or Tailscale Serve route), its local loopback address, or its published Tailscale address. A separately hosted UI cannot receive the Gateway's callback. Older Gateways and unsupported addresses keep the terminal instructions. Servers with an existing auth-profile mapping or per-requester identity use that account's sign-in path instead; Settings does not create a second credential for them.
@@ -168,3 +174,10 @@ Follow the printed authorization URL. OpenClaw normally captures the loopback re
 - [MCP CLI reference](/cli/mcp)
 - [Manage plugins](/plugins/manage-plugins)
 - [Tool policies](/tools)
+
+### Remote session cleanup
+
+A Streamable HTTP server that does not confirm its session DELETE produces a warning,
+not a permanent local cleanup failure. Once the local transport and client close,
+the next turn can replace the runtime. Unconfirmed local cleanup still blocks
+replacement. A remote server may retain an abandoned session until it expires.

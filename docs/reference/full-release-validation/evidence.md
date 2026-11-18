@@ -28,7 +28,7 @@ same commit. In that case, retain the successful full validation parent and
 its exact prepared publication artifacts for both roles. For a later
 changelog-only Release SHA using evidence reuse, also record the reuse policy,
 complete changed-path set, green Code SHA parent run, and Release SHA parent
-run. For extended-stable, record the canonical branch, exact release SHA,
+run. For extended-stable, record the release branch, exact release SHA,
 accepted producer identity, parent run id and attempt, workflow ref, every child run, and any
 frozen-target compatibility repair or intentional omission.
 
@@ -55,6 +55,24 @@ or a promise that registry state is unchanged. Final writers keep their own trus
 approval, content, and readback checks. Known enclosing evidence is budgeted before
 fanout, but later job/attempt growth can still exceed the unchanged final artifact
 limit and fail sealing; evidence is not truncated to fit.
+
+## Preserve qualification identity during recovery
+
+Preserve the originally admitted candidate (C) and qualification (Q) tuple,
+including when C and Q differ. The original publication selection, complete
+coverage, and frozen upgrade baselines remain authoritative. Recovery must not
+select new tests or resolve replacement baselines from the current registry.
+A qualification harness change requires a new admission and request; it must not
+rewrite the original evidence.
+
+## ClawHub recovery custody
+
+Recovery records a validated successor attempt in its existing result artifact
+before waiting for publication. A timeout or failed observation preserves
+incomplete evidence; it does not mean the accepted attempt disappeared or permit
+replacement publication. The original sealed manifest remains unchanged. This
+branch does not provide parent-requested recovery or a parent successor roster;
+use the recovery CLI result artifact for accepted-attempt custody.
 
 ## Workflow files
 

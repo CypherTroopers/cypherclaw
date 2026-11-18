@@ -13,6 +13,7 @@ import {
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { CronService } from "../../cron/service.js";
 import { createNoopLogger } from "../../cron/service.test-harness.js";
+import { loadCronJobsStore } from "../../cron/store.js";
 import type { CronDelivery } from "../../cron/types.js";
 import {
   claimAgentRunDelegatedAuthority,
@@ -49,6 +50,7 @@ async function withWebchatTool(
     cron: CronService;
     revoke: () => void;
     creatorStorePath: string;
+    cronStorePath: string;
   }) => Promise<void>,
   storedContext: DeliveryContext = { channel: "webchat", to: sessionKey },
   channelsEnabled = true,
@@ -56,13 +58,26 @@ async function withWebchatTool(
   await withOpenClawTestState({ layout: "home" }, async (state) => {
     const sessionStorePath = path.join(state.sessionsDir(), "sessions.json");
     const cfg: OpenClawConfig = {
-      agents: { entries: { main: { workspace: state.workspaceDir } } },
+      agents: {
+        entries: { main: { workspace: state.workspaceDir } },
+        defaults: { model: "openai/gpt-4.1" },
+      },
       session: { store: sessionStorePath },
       channels: channelsEnabled
         ? { discord: { token: "test-token" }, telegram: { botToken: "test-token" } }
         : {},
       plugins: { entries: { discord: { enabled: true }, telegram: { enabled: true } } },
     };
+    await state.writeAuthProfiles({
+      version: 1,
+      profiles: {
+        "openai:webchat-fixture": {
+          type: "api_key",
+          provider: "openai",
+          key: "synthetic-webchat-inference-key",
+        },
+      },
+    });
     setRuntimeConfigSnapshot(cfg);
     setActivePluginRegistry(
       createTestRegistry(
@@ -165,6 +180,7 @@ async function withWebchatTool(
       await check({
         cron,
         creatorStorePath: sessionStorePath,
+        cronStorePath: storePath,
         revoke,
         tool,
         add: async (delivery, target = "current") => {
@@ -190,9 +206,9 @@ async function withWebchatTool(
 }
 
 describe("WebChat automation creation through the tool and Gateway", () => {
-  it("previews the retained binding when replaying a declaration after reset", async () => {
+  it("previews the retained conversation when replaying a declaration after reset", async () => {
     await withWebchatTool(
-      async ({ tool, cron, creatorStorePath }) => {
+      async ({ tool, cron, creatorStorePath, cronStorePath }) => {
         const create = () =>
           tool.execute("declare-watcher", {
             action: "add",
@@ -206,6 +222,13 @@ describe("WebChat automation creation through the tool and Gateway", () => {
             },
           });
         await create();
+        const original = structuredClone(
+          expectDefined((await loadCronJobsStore(cronStorePath)).jobs[0], "created job"),
+        );
+        expect(original.sourceConversation).toMatchObject({
+          sessionKey,
+          sessionId: "webchat-source",
+        });
         await resetSessionEntryLifecycle({
           storePath: creatorStorePath,
           target: { canonicalKey: sessionKey, storeKeys: [sessionKey] },
@@ -218,9 +241,18 @@ describe("WebChat automation creation through the tool and Gateway", () => {
         const replayed = await create();
         expect(replayed.details).toMatchObject({
           created: false,
-          deliveryPreview: { detail: expect.stringContaining("original session generation") },
+          deliveryPreview: {
+            label: "announce -> creating conversation",
+            detail: "commits to this conversation (no external channel route)",
+          },
         });
-        expect(await cron.list({ includeDisabled: true })).toHaveLength(1);
+        // Replay follows the same conversation without recapturing its replacement generation.
+        expect(await cron.list({ includeDisabled: true })).toEqual([
+          expect.objectContaining({
+            id: original.id,
+            sourceConversation: original.sourceConversation,
+          }),
+        ]);
       },
       undefined,
       false,
@@ -253,7 +285,11 @@ describe("WebChat automation creation through the tool and Gateway", () => {
           expect(updated.details).not.toHaveProperty("deliveryPreview");
           expect(added.details).toMatchObject({
             deliveryPreview: channelsEnabled
-              ? { label: "announce -> telegram:recipient", detail: "explicit" }
+              ? {
+                  label: "announce -> telegram:recipient",
+                  detail:
+                    "commits to the destination conversation; sends one external notification",
+                }
               : {
                   label: "announce -> creating conversation",
                   detail: "commits to this conversation (no external channel route)",
@@ -295,7 +331,6 @@ describe("WebChat automation creation through the tool and Gateway", () => {
           trigger: { script: "return { fire: false };", once: true },
         }),
       ]);
-      expect(jobs[0]?.delivery).toEqual(delivery ?? { mode: "announce" });
     }, storedContext);
   });
 

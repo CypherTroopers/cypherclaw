@@ -107,6 +107,7 @@ describe("update-cli", () => {
   )(
     "converges plugins on an already-current core (failure=$failure, platform=$platform)",
     async ({ failure, platform }) => {
+      baseConfig.update = { channel: "stable" };
       if (platform) {
         vi.spyOn(process, "platform", "get").mockReturnValue(platform);
         vi.spyOn(serviceMembership, "inspectServiceProcessMembershipSync").mockReturnValue(
@@ -177,13 +178,27 @@ describe("update-cli", () => {
           new ExitError(1),
         );
         expect(serviceStop).toHaveBeenCalledTimes(failure === "changed owner" ? 0 : 1);
-        expect(freshRestartCalls()).toHaveLength(0);
+        // The native stop mutation precedes the failed listener check; recovery must start it.
+        expect(freshRestartCalls()).toHaveLength(failure === "stop" ? 1 : 0);
+        if (failure === "stop") {
+          expect(freshRestartCalls()[0]?.[0]).toContain("--preserve-definition");
+        }
+        expect(packageInstallCommandCall()).toBeUndefined();
         expect(lastWriteJsonCall()).toMatchObject({
           status: "error",
           reason: "post-update-plugins",
           ...(failure === "changed owner"
             ? {}
-            : { run: { verification: { serviceRunning: false } } }),
+            : {
+                run: {
+                  verification: {
+                    serviceRunning: true,
+                    readyz: true,
+                    settled: true,
+                    recovery: { serviceRestartSafe: true, service: "healthy" },
+                  },
+                },
+              }),
         });
         return;
       }
@@ -232,6 +247,7 @@ describe("update-cli", () => {
 
   registerAlreadyCurrentAdmissionTests({
     prepareCurrentPackage: async (prefix) => {
+      baseConfig.update = { channel: "stable" };
       const root = await mockPackageInstallAtCaseDir(prefix, VERSION);
       readPackageVersion.mockResolvedValue(VERSION);
       primeNpmChannelTag("latest", VERSION);
@@ -280,6 +296,7 @@ describe("update-cli", () => {
   });
 
   it("reports retained pins on an already-current core", async () => {
+    baseConfig.update = { channel: "stable" };
     const root = await mockPackageInstallAtCaseDir();
     await writeOpenClawPackageFixture(root, VERSION);
     readPackageVersion.mockResolvedValue(VERSION);
@@ -332,6 +349,7 @@ describe("update-cli", () => {
   it.each(["inside", "descendant"] as const)(
     "never stages or stops an unchanged managed gateway under auto admission (membership=%s)",
     async (membership) => {
+      baseConfig.update = { channel: "stable" };
       const root = await mockPackageInstallAtCaseDir("openclaw-current-package", VERSION);
       readPackageVersion.mockResolvedValue(VERSION);
       primeNpmChannelTag("latest", VERSION);
@@ -496,6 +514,7 @@ describe("update-cli", () => {
   });
 
   it.each(["latest", "next"] as const)("handles an unresolved %s dist-tag lookup", async (tag) => {
+    baseConfig.update = { channel: "stable" };
     setTty(false);
     await mockPackageInstallAtCaseDir();
     readPackageVersion.mockResolvedValue("2026.4.22");
@@ -533,7 +552,10 @@ describe("update-cli", () => {
   });
 
   registerUpdatePreflightTests({
-    mockPackageInstallAtCaseDir,
+    mockPackageInstallAtCaseDir: async () => {
+      baseConfig.update = { channel: "stable" };
+      return await mockPackageInstallAtCaseDir();
+    },
     statfsFixture,
     resolveNpmChannelTag,
     fetchNpmPackageTargetStatus,

@@ -10,6 +10,7 @@ import type { SessionEntry } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ProviderModelRouteSource } from "../plugin-sdk/provider-model-types.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.types.js";
+import { createProviderModelRoutesResolver } from "../plugins/provider-model-routes.js";
 import type { PluginRegistry } from "../plugins/registry-types.js";
 import { getActivePluginRegistry } from "../plugins/runtime.js";
 import { dedupeByKey, indexFirstByKey } from "../shared/dedupe-by-key.js";
@@ -146,11 +147,14 @@ export function createModelCatalogView(params: {
       return row;
     },
     implicitNativeRuntime(entry: Pick<ModelCatalogEntry, "provider" | "id">) {
-      const variants = variantsOf(entry);
-      const runtime = variants?.[0]?.nativeRuntime;
-      return runtime && variants?.every((variant) => variant.nativeRuntime === runtime)
-        ? runtime
-        : undefined;
+      // An API metadata donor is not evidence of API credentials. Host bindings
+      // and credentials still take precedence in evaluateNative below.
+      const runtimes = new Set(
+        variantsOf(entry)?.flatMap((variant) =>
+          variant.nativeRuntime ? [variant.nativeRuntime] : [],
+        ),
+      );
+      return runtimes.size === 1 ? runtimes.values().next().value : undefined;
     },
     project(
       entry: ModelCatalogEntry,
@@ -212,10 +216,12 @@ export type ModelCatalogViewFacts = {
   profileProvider?: string;
   view?: ModelCatalogBrowseView;
   retainedModel?: ModelRef;
+  resolveOpenAIProviderRoutes?: ReturnType<typeof createProviderModelRoutesResolver>;
 };
 
 /** Projects captured catalog facts while keeping native observations revocable. */
 export function prepareModelCatalogView(params: ModelCatalogViewFacts) {
+  let preparedOpenAIProviderRoutes = params.resolveOpenAIProviderRoutes;
   const defaultModel = resolveNativeModelPrimary(params.cfg, params.agentId);
   const agentDir = params.agentDir ?? resolveAgentDir(params.cfg, params.agentId);
   const catalog = [...params.snapshot.entries];
@@ -260,7 +266,7 @@ export function prepareModelCatalogView(params: ModelCatalogViewFacts) {
   });
   const runtimePolicies = new WeakMap<
     ModelCatalogEntry,
-    ReturnType<typeof resolveAgentHarnessPolicy>
+    { policy: ReturnType<typeof resolveAgentHarnessPolicy>; hostConfigured?: boolean }
   >();
   const providerEndpoints = new Map<string, { endpoint?: string; api?: string }>();
   for (const [id, configured] of Object.entries(params.cfg.models?.providers ?? {})) {
@@ -284,22 +290,32 @@ export function prepareModelCatalogView(params: ModelCatalogViewFacts) {
       host: ModelAuthAvailabilityEvaluation,
       runtimeId?: string,
     ): ModelAuthAvailabilityEvaluation => {
-      let policy = runtimePolicies.get(entry);
-      if (!policy) {
-        policy = resolveAgentHarnessPolicy({
+      let prepared = runtimePolicies.get(entry);
+      if (!prepared) {
+        let policy = resolveAgentHarnessPolicy({
           provider: entry.provider,
           modelId: entry.id,
           modelApi: entry.api,
           modelBaseUrl: entry.baseUrl,
           config: params.cfg,
           agentScope: { kind: "prepared", agentId: params.agentId },
+          resolveOpenAIProviderRoutes: (observed) =>
+            (preparedOpenAIProviderRoutes ??= createProviderModelRoutesResolver({
+              provider: "openai",
+              config: params.cfg,
+            }))(observed),
         });
-        if (!policy.forcedByEnvironment && policy.runtimeSource === "implicit") {
+        if (
+          !policy.forcedByEnvironment &&
+          policy.runtimeSource === "implicit" &&
+          policy.runtime === "auto"
+        ) {
           policy = { ...policy, runtime: routes.implicitNativeRuntime(entry) ?? policy.runtime };
         }
-        runtimePolicies.set(entry, policy);
+        prepared = { policy };
+        runtimePolicies.set(entry, prepared);
       }
-      const runtime = runtimeId ?? host.requestedRuntimeId ?? policy.runtime;
+      const runtime = runtimeId ?? host.requestedRuntimeId ?? prepared.policy.runtime;
       if (runtime === "auto" || runtime === "openclaw") {
         return host;
       }
@@ -307,40 +323,46 @@ export function prepareModelCatalogView(params: ModelCatalogViewFacts) {
         entry.nativeRuntime === runtime ||
         routes.variantsOf(entry)?.some((variant) => variant.nativeRuntime === runtime) === true;
       const provider = normalizeProviderId(entry.provider);
-      const sameProvider =
-        !params.profileProvider || normalizeProviderId(params.profileProvider) === provider;
-      const configured = resolveMergedModelProviderConfig(params.cfg, provider);
-      const modelKey = (id: string) =>
-        stripSelfProviderModelPrefix(provider, splitTrailingAuthProfile(id).model.trim()).trim();
-      // Native account evidence cannot satisfy an authored host route, key, profile,
-      // or request override. Those keep the prepared host evaluation.
+      if (prepared.hostConfigured === undefined) {
+        const sameProvider =
+          !params.profileProvider || normalizeProviderId(params.profileProvider) === provider;
+        const configured = resolveMergedModelProviderConfig(params.cfg, provider);
+        const modelKey = (id: string) =>
+          stripSelfProviderModelPrefix(provider, splitTrailingAuthProfile(id).model.trim()).trim();
+        // This view captures configuration; native account readiness remains live below.
+        prepared.hostConfigured = Boolean(
+          (sameProvider && params.preferredProfileId) ||
+          (sameProvider && params.pinnedProfileId) ||
+          configured?.api ||
+          configured?.baseUrl ||
+          configured?.apiKey ||
+          configured?.auth ||
+          configured?.models?.some(
+            (model) => modelKey(model.id) === modelKey(entry.id) && (model.api || model.baseUrl),
+          ) ||
+          Object.keys(params.cfg.auth?.order ?? {}).some(
+            (id) => normalizeProviderId(id) === provider,
+          ) ||
+          Object.values(params.cfg.auth?.profiles ?? {}).some(
+            (profile) => normalizeProviderId(profile.provider) === provider,
+          ) ||
+          createModelProviderRouteOverrideResolver({
+            authoredConfig: params.cfg,
+            provider,
+          })(entry.id) === "present" ||
+          hasAuthoredProviderRequestParams({
+            config: params.cfg,
+            provider,
+            modelId: entry.id,
+            agentId: params.agentId,
+          }),
+        );
+      }
+      // Native account evidence cannot replace an authored host binding or live host credentials.
       if (
-        (sameProvider && params.preferredProfileId) ||
-        (sameProvider && params.pinnedProfileId) ||
-        (host.selectedAuthMode && (host.evidence !== "runtime" || !observedNative)) ||
-        configured?.api ||
-        configured?.baseUrl ||
-        configured?.apiKey ||
-        configured?.auth ||
-        configured?.models?.some(
-          (model) => modelKey(model.id) === modelKey(entry.id) && (model.api || model.baseUrl),
-        ) ||
-        Object.keys(params.cfg.auth?.order ?? {}).some(
-          (id) => normalizeProviderId(id) === provider,
-        ) ||
-        Object.values(params.cfg.auth?.profiles ?? {}).some(
-          (profile) => normalizeProviderId(profile.provider) === provider,
-        ) ||
-        createModelProviderRouteOverrideResolver({
-          authoredConfig: params.cfg,
-          provider,
-        })(entry.id) === "present" ||
-        hasAuthoredProviderRequestParams({
-          config: params.cfg,
-          provider,
-          modelId: entry.id,
-          agentId: params.agentId,
-        })
+        prepared.hostConfigured ||
+        (host.selectedAuthMode &&
+          (host.selectedCredential?.source !== "harness" || !observedNative))
       ) {
         return host;
       }
@@ -399,8 +421,11 @@ export function prepareModelCatalogView(params: ModelCatalogViewFacts) {
         authMode = undefined;
       }
       // A native catalog owner without an observation is unknown, not missing host API auth.
-      const availability =
-        ready && !harness?.readModelCatalogReadiness && !observedNative ? undefined : ready;
+      const availability = observedNative
+        ? ready
+        : ready && harness?.readModelCatalogReadiness
+          ? true
+          : undefined;
       return {
         availability,
         availabilityAuthoritative: true,
@@ -596,15 +621,12 @@ export async function loadPreparedModelCatalogView(
     catalog = catalog.filter((entry) => !deprecatedKeys.has(keyOf(entry)));
     configured = configured.filter((entry) => !staticKeys.has(keyOf(entry)));
   }
-  const entries = [...catalog];
-  const seen = new Set(catalog.map((entry) => pickerModelKey(entry.provider, entry.id)));
-  for (const entry of configured) {
-    const key = pickerModelKey(entry.provider, entry.id);
-    if (!seen.has(key)) {
-      seen.add(key);
-      entries.push(entry);
-    }
-  }
+  const keyOf = (entry: ModelCatalogEntry) => pickerModelKey(entry.provider, entry.id);
+  const seen = new Set(catalog.map(keyOf));
+  const entries = [
+    ...catalog,
+    ...dedupeByKey(configured, keyOf).filter((entry) => !seen.has(keyOf(entry))),
+  ];
   return {
     snapshot: {
       ...view.snapshot,

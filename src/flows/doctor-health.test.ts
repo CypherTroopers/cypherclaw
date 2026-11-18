@@ -127,7 +127,9 @@ describe("runDoctorHealthFlow", () => {
       if (windows) {
         await expect(run).rejects.toThrow("Doctor could not enter maintenance");
         await expect(run).rejects.toThrow("gateway status --deep");
-        await expect(run).rejects.toThrow("openclaw doctor --fix");
+        await expect(run).rejects.toThrow("operator-owned launcher override");
+        await expect(run).rejects.toThrow("The service was left unchanged.");
+        await expect(run).rejects.not.toThrow("openclaw doctor --fix");
         await expect(run).rejects.not.toThrow(/--no-restart|before the update/);
         expect(mocks.config).not.toHaveBeenCalled();
         expect(mocks.runContributions).not.toHaveBeenCalled();
@@ -147,7 +149,7 @@ describe("runDoctorHealthFlow", () => {
         );
         expect(fs.existsSync(sourcePath)).toBe(false);
         expect(mocks.outro).toHaveBeenCalledWith("Doctor complete.");
-        const action = "Restart the Gateway you launched manually after the update.";
+        const action = "Stop the Gateway through its owner";
         expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining(action));
         expect(mocks.writeUpdatePostInstallDoctorResult).toHaveBeenCalledWith({
           resultPath,

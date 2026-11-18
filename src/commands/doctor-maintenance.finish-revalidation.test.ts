@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { hostname } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import * as restartHealthProbe from "../cli/daemon-cli/restart-health-probe.js";
@@ -233,7 +234,8 @@ async function runDoctorFinishForStoppedUnit(
         }
         const pathname = openOpenClawStateDatabase().path;
         closeOpenClawStateDatabaseForTest();
-        const db = openNodeSqliteDatabase(pathname);
+        // Damaged legacy bytes are input to Doctor, not a managed schema publication.
+        const db = new DatabaseSync(pathname);
         try {
           db.exec(
             "CREATE TABLE IF NOT EXISTS skill_workshop_collection_reviews (review_id TEXT NOT NULL PRIMARY KEY, owner_agent_id TEXT NOT NULL, backup_id TEXT NOT NULL, create_time INTEGER NOT NULL, kept_names_json TEXT NOT NULL, written_names_json TEXT NOT NULL, dropped_json TEXT NOT NULL) STRICT; CREATE INDEX idx_skill_workshop_collection_reviews_workspace_time ON skill_workshop_collection_reviews(review_id, create_time DESC);",
@@ -632,7 +634,7 @@ it.each([
     expect(result.finishError).toBeUndefined();
     expect(mocks.stops).toBe(1);
     expect(result.restartCalls).toBe(1);
-    expect(result.logs).toContain("Gateway restarted and verified after Doctor repair.");
+    expect(result.logs).toContain("Gateway restarted and verified after Doctor maintenance.");
   },
 );
 
@@ -665,7 +667,7 @@ it.each<{
 }>([
   {
     scenario: "lifecycle-contended",
-    message: "is undergoing offline maintenance; retry when it finishes.",
+    message: "without an active schema lease or maintenance scope",
   },
   {
     catalog: "conflict-on-recheck",
@@ -696,7 +698,7 @@ it("continues owning-run Doctor maintenance", async () => {
   expect(mocks.stops).toBe(1);
   expect(restartCalls).toBe(1);
   expect(logs).toContain("Stopped the managed Gateway for Doctor repair.");
-  expect(logs).toContain("Gateway restarted and verified after Doctor repair.");
+  expect(logs).toContain("Gateway restarted and verified after Doctor maintenance.");
 });
 
 it("rechecks update admission after failed restoration inspection", async () => {
@@ -746,5 +748,5 @@ it("restores the Gateway and records one takeover when the owner terminalizes an
   expect(restartCalls).toBe(1);
   expect(takeoverSteps).toBe(1);
   expect(runStatus).toBe("failed");
-  expect(logs).toContain("Gateway restarted and verified after Doctor repair.");
+  expect(logs).toContain("Gateway restarted and verified after Doctor maintenance.");
 });

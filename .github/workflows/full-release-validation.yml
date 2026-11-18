@@ -86,8 +86,10 @@ on:
           - plugin-prerelease
           - install-smoke
           - cross-os
+          - windows-node
           - live-e2e
           - package
+          - qualified-package
           - qa-parity
           - qa-live
           - npm-telegram
@@ -103,7 +105,7 @@ on:
         default: true
         type: boolean
       live_suite_filter:
-        description: Optional exact live/E2E suite id, or comma-separated QA live lane ids (qa-live-matrix, qa-live-telegram, qa-live-discord, qa-live-whatsapp, qa-live-slack); blank runs all selected live suites
+        description: Optional exact live/E2E suite id (live-cache checks prompt-cache reuse), or comma-separated QA live lane ids (qa-live-matrix, qa-live-telegram, qa-live-discord, qa-live-whatsapp, qa-live-slack); blank runs all selected live suites
         required: false
         default: ""
         type: string
@@ -178,15 +180,15 @@ env:
   FULL_RELEASE_PUBLICATION_ADMISSION_CONTRACT: "1"
   FULL_RELEASE_EXECUTION_PLAN_RESTORE_CONTRACT: "1"
   FULL_RELEASE_LANE_INPUTS_CONTRACT: "1"
-  FULL_RELEASE_ARTIFACT_RECOVERY_CONTRACT: "1"
+  FULL_RELEASE_ARTIFACT_RECOVERY_CONTRACT: "2"
   CHILD_EVIDENCE_REUSE: ${{ inputs.reuse_evidence && inputs.rerun_group == 'all' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-ci/')) }}
 
 jobs:
   resolve_target:
     name: Resolve target ref
-    # Hosted admission delays compound along this serial release path.
-    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON(github.repository == 'openclaw/openclaw' && vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04'))) || (github.repository == 'openclaw/openclaw' && vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04') }}
-    timeout-minutes: 10
+    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON('ubuntu-24.04'))) || ('ubuntu-24.04') }}
+    # Allow degraded GitHub Git operations without cancelling the FRV.
+    timeout-minutes: 15
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
       release_tag: ${{ steps.release_inputs.outputs.release_tag }}
@@ -283,7 +285,7 @@ jobs:
 
       - name: Upload root dispatch inputs
         if: ${{ steps.dispatch_witness.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-dispatch-inputs-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/full-release-dispatch-inputs/dispatch-inputs.json
@@ -336,7 +338,8 @@ jobs:
               --qualification-inputs-json "$QUALIFICATION_INPUTS_JSON" --candidate-sha "$CANDIDATE_SHA")
           fi
           identity="$(
-            node workflow/scripts/release-tooling-identity.mjs resolve "${admission_args[@]}" \
+            node workflow/scripts/release-tooling-identity.mjs resolve \
+              ${admission_args[@]+"${admission_args[@]}"} \
               --repository "$GITHUB_REPOSITORY" \
               --workflow-contract "$WORKFLOW_CONTRACT" \
               --workflow-ref "$WORKFLOW_REF" \
@@ -401,7 +404,8 @@ jobs:
           input="${RUNNER_TEMP}/full-release-candidate-request-input.json"
           output="${RUNNER_TEMP}/full-release-candidate-request.json"
           allow_frozen_target_scenario_omissions=false
-          if [[ -n "$TARGET_CONTEXT_REF" && "$TARGET_SHA" != "$GITHUB_SHA" ]]; then
+          # P-admitted qualification must cover every required scenario, even when C != Q.
+          if [[ -z "$QUALIFICATION_ADMISSION_JSON" && -n "$TARGET_CONTEXT_REF" && "$TARGET_SHA" != "$GITHUB_SHA" ]]; then
             allow_frozen_target_scenario_omissions=true
           fi
           if [[ -n "$QUALIFICATION_ADMISSION_JSON" && -z "$QUALIFICATION_BASELINES_JSON" ]]; then
@@ -436,10 +440,10 @@ jobs:
           plugin_required=false
           [[ "$RERUN_GROUP" =~ ^(all|plugin-prerelease)$ ]] && plugin_required=true
           release_artifact_required=false
-          if [[ "$RERUN_GROUP" =~ ^(all|cross-os)$ &&
+          if [[ "$RERUN_GROUP" =~ ^(all|cross-os|windows-node)$ &&
                 -z "${RELEASE_PACKAGE_SPEC// }" ]]; then
             release_artifact_required=true
-          elif [[ "$RERUN_GROUP" =~ ^(all|package)$ &&
+          elif [[ "$RERUN_GROUP" =~ ^(all|package|qualified-package)$ &&
                   -z "${RELEASE_PACKAGE_SPEC// }" &&
                   -z "${PACKAGE_ACCEPTANCE_PACKAGE_SPEC// }" ]]; then
             release_artifact_required=true
@@ -672,6 +676,7 @@ jobs:
         id: frozen_selection
         env:
           ADMISSION_WORKFLOW: parent
+          QUALIFICATION_ADMISSION_JSON: ${{ steps.publication_dispatch.outputs.qualification_admission_json }}
           ADMISSION_INPUTS: ${{ toJSON(inputs) }}
           ADMISSION_SELECTED_ROOT: ${{ github.workspace }}/target
           ADMISSION_SELECTED_SHA: ${{ steps.resolve.outputs.sha }}
@@ -745,7 +750,7 @@ jobs:
           printf 'digest=%s\n' "$(jq -er '.digest' "$RUNNER_TEMP/frozen-admission.json")" >> "$GITHUB_OUTPUT"
 
       - name: Upload frozen admission diagnostic
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frozen-source-admission-parent-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/frozen-admission.json
@@ -769,13 +774,30 @@ jobs:
             .toString('latin1').split('\0').filter(record =>
               /^(?:package\.json|apps\/android\/version\.json|extensions\/[^/]+\/(?:package\.json|README\.md)|packages\/[^/]+\/package\.json)$/.test(record.slice(record.indexOf('\t') + 1)));
           if (records.length > 4096) throw new Error('publication metadata count exceeds limit');
-          let bytes = 0;
-          for (const record of records) {
+          const oids = records.map(record => {
             const tab = record.indexOf('\t');
             const header = record.slice(0, tab), path = record.slice(tab + 1);
             const [mode, type, oid] = header.split(' ');
             new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(path, 'latin1'));
             if (!['100644', '100755'].includes(mode) || type !== 'blob') throw new Error('publication metadata must be regular committed files');
+            return oid;
+          });
+          // The target is a blob:none checkout, so each missing blob read below would be its own
+          // lazy promisor fetch. Fetch them in one batch with git's own lazy-fetch arguments first;
+          // if that fails, the reads below still fall back to lazy fetches.
+          const missing = oids.length === 0 ? [] : git('rev-list', '--objects', '--no-walk', '--missing=print', ...new Set(oids))
+            .toString().split('\n').filter(line => line.startsWith('?')).map(line => line.slice(1));
+          if (missing.length > 0) {
+            try {
+              execFileSync('git', ['--no-replace-objects', '-C', root, '-c', 'fetch.negotiationAlgorithm=noop', 'fetch', 'origin',
+                '--no-tags', '--no-write-fetch-head', '--recurse-submodules=no', '--filter=blob:none', '--stdin'],
+                { timeout: 120000, input: `${missing.join('\n')}\n`, stdio: ['pipe', 'ignore', 'pipe'] });
+            } catch (error) {
+              console.log(`::warning::Batched publication metadata prefetch failed; falling back to per-blob fetches: ${error.message}`);
+            }
+          }
+          let bytes = 0;
+          for (const oid of oids) {
             const size = Number(git('cat-file', '-s', oid).toString());
             if (!Number.isSafeInteger(size) || size > 16 * 1024 * 1024 || (bytes += size) > 64 * 1024 * 1024) throw new Error('publication metadata byte limit exceeded');
             git('cat-file', 'blob', oid);
@@ -794,7 +816,7 @@ jobs:
       - name: Restore immutable plan inputs for publication admission
         if: ${{ github.run_attempt != 1 && steps.publication_plan_cache.outputs.cache-hit != 'true' }}
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: full-release-execution-plan-inputs-${{ github.run_id }}-1
           path: ${{ github.workspace }}/full-release-execution-plan-inputs
@@ -827,7 +849,7 @@ jobs:
 
       - name: Upload restored immutable release execution plan
         if: ${{ github.run_attempt != 1 && steps.publication_plan_cache.outputs.cache-hit == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-execution-plan-${{ github.run_id }}
           path: ${{ github.workspace }}/full-release-execution-plan/full-release-execution-plan.json
@@ -835,7 +857,7 @@ jobs:
           overwrite: false
 
       - name: Upload publication source admission
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-source-admission-parent-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/publication-source-admission.json
@@ -845,7 +867,7 @@ jobs:
       - name: Upload immutable publication observations
         id: publication_observations
         if: github.run_attempt == 1 && steps.publication_request.outputs.required == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-publication-observations-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/publication-observations.json
@@ -865,7 +887,7 @@ jobs:
         run: node scripts/full-release-validation-state.mjs finalize-publication
 
       - name: Upload immutable publication admission
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-publication-admission-${{ github.run_id }}-1
           path: ${{ runner.temp }}/publication-admission.json
@@ -942,7 +964,7 @@ jobs:
             else
               echo "- Plugin prerelease: skipped by rerun group"
             fi
-            if [[ "$RERUN_GROUP" == "all" || "$RERUN_GROUP" == "install-smoke" || "$RERUN_GROUP" == "cross-os" || "$RERUN_GROUP" == "live-e2e" || "$RERUN_GROUP" == "package" || "$RERUN_GROUP" == "qa-parity" || "$RERUN_GROUP" == "qa-live" ]]; then
+            if [[ "$RERUN_GROUP" == "all" || "$RERUN_GROUP" == "install-smoke" || "$RERUN_GROUP" == "cross-os" || "$RERUN_GROUP" == "windows-node" || "$RERUN_GROUP" == "live-e2e" || "$RERUN_GROUP" == "package" || "$RERUN_GROUP" == "qualified-package" || "$RERUN_GROUP" == "qa-parity" || "$RERUN_GROUP" == "qa-live" ]]; then
               echo "- Release/live/Docker/package/QA: \`OpenClaw Release Checks\`"
             else
               echo "- Release/live/Docker/package/QA: skipped by rerun group"
@@ -986,7 +1008,7 @@ jobs:
     name: Enforce plugin compatibility release readiness
     needs: [resolve_target]
     if: needs.resolve_target.outputs.plugin_compatibility_required == 'true'
-    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON(github.repository == 'openclaw/openclaw' && vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04'))) || (github.repository == 'openclaw/openclaw' && vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04') }}
+    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON('ubuntu-24.04'))) || ('ubuntu-24.04') }}
     timeout-minutes: 10
     steps:
       - name: Checkout target source
@@ -1027,9 +1049,10 @@ jobs:
 
   evidence_reuse:
     name: Check for reusable validation evidence
-    needs: [resolve_target, plugin_compatibility_readiness]
-    if: ${{ always() && needs.resolve_target.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.plugin_compatibility_readiness.result) && inputs.rerun_group == 'all' && inputs.reuse_evidence && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-ci/')) }}
-    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON(github.repository == 'openclaw/openclaw' && vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04'))) || (github.repository == 'openclaw/openclaw' && vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04') }}
+    # Read-only lookup can overlap readiness; fanout and final success still require it.
+    needs: [resolve_target]
+    if: ${{ always() && needs.resolve_target.result == 'success' && inputs.rerun_group == 'all' && inputs.reuse_evidence && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-ci/')) }}
+    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON('ubuntu-24.04'))) || ('ubuntu-24.04') }}
     timeout-minutes: 10
     outputs:
       reuse: ${{ steps.find.outputs.reuse }}
@@ -1098,7 +1121,7 @@ jobs:
           openclaw_ensure_node "$REQUESTED_NODE_VERSION"
 
       - name: Download publication admission for reuse budgeting
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: full-release-publication-admission-${{ github.run_id }}-1
           path: ${{ runner.temp }}/full-release-publication-admission
@@ -1562,7 +1585,8 @@ jobs:
               args=(-f target_ref="$TARGET_SHA" -f expected_sha="$TARGET_SHA" -f full_release_validation=true -f phase="$PHASE" -f dispatch_id="$dispatch_id" -f node_test_exclude_patterns_json="$PLUGIN_PRERELEASE_NODE_EXCLUDE_PATTERNS_JSON" -f extension_test_exclude_patterns_json="$EXTENSION_TEST_EXCLUDE_PATTERNS_JSON")
               if [[ -n "${TARGET_CONTEXT_REF:-}" ]]; then
                 args+=(-f target_context_ref="$TARGET_CONTEXT_REF")
-                if [[ "$TARGET_SHA" != "$PARENT_WORKFLOW_SHA" ]]; then
+                # Consume the sealed request, not a fresh C/Q comparison.
+                if [[ "$(jq -r '.allowFrozenTargetScenarioOmissions' <<< "$CANDIDATE_REQUEST_JSON")" == true ]]; then
                   args+=(-f allow_frozen_target_scenario_omissions=true)
                 fi
               fi
@@ -1624,7 +1648,8 @@ jobs:
               )
               if [[ -n "${TARGET_CONTEXT_REF// }" ]]; then
                 args+=(-f target_context_ref="$TARGET_CONTEXT_REF")
-                if [[ "$TARGET_SHA" != "$PARENT_WORKFLOW_SHA" ]]; then
+                # Consume the sealed request, not a fresh C/Q comparison.
+                if [[ "$(jq -r '.allowFrozenTargetScenarioOmissions' <<< "$CANDIDATE_REQUEST_JSON")" == true ]]; then
                   args+=(-f allow_frozen_target_scenario_omissions=true)
                 fi
               fi
@@ -1725,6 +1750,7 @@ jobs:
           TARGET_SHA: ${{ needs.resolve_target.outputs.sha }}
           CHILD_WORKFLOW_REF: ${{ github.ref_name }}
           PARENT_WORKFLOW_SHA: ${{ github.sha }}
+          CANDIDATE_REQUEST_JSON: ${{ needs.resolve_target.outputs.candidate_request_json }}
           CANDIDATE_ARTIFACT_JSON: ""
           PLUGIN_PRERELEASE_NODE_EXCLUDE_PATTERNS_JSON: ${{ inputs.plugin_prerelease_node_exclude_patterns_json }}
           EXTENSION_TEST_EXCLUDE_PATTERNS_JSON: ${{ needs.resolve_target.outputs.extension_test_exclude_patterns_json }}
@@ -1757,6 +1783,7 @@ jobs:
           TARGET_SHA: ${{ needs.resolve_target.outputs.sha }}
           CHILD_WORKFLOW_REF: ${{ github.ref_name }}
           PARENT_WORKFLOW_SHA: ${{ github.sha }}
+          CANDIDATE_REQUEST_JSON: ${{ needs.resolve_target.outputs.candidate_request_json }}
           CANDIDATE_ARTIFACT_JSON: ${{ needs.candidate_acquisition.outputs.candidate_artifact_json }}
           PLUGIN_PRERELEASE_NODE_EXCLUDE_PATTERNS_JSON: ${{ inputs.plugin_prerelease_node_exclude_patterns_json }}
           EXTENSION_TEST_EXCLUDE_PATTERNS_JSON: ${{ needs.resolve_target.outputs.extension_test_exclude_patterns_json }}
@@ -1767,7 +1794,7 @@ jobs:
     name: Run release checks independent validation
     needs: [resolve_target, plugin_compatibility_readiness, evidence_reuse]
     if: ${{ always() && github.run_attempt == 1 && needs.resolve_target.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.plugin_compatibility_readiness.result) && contains(fromJSON('["success","skipped"]'), needs.evidence_reuse.result) && contains(fromJSON('["all","install-smoke","live-e2e","qa-parity","qa-live"]'), inputs.rerun_group) && needs.evidence_reuse.outputs.reuse != 'true' }}
-    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON(vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404'))) || (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404') }}
+    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON('ubuntu-24.04'))) || ('ubuntu-24.04') }}
     timeout-minutes: 15
     outputs:
       run_id: ${{ steps.dispatch.outputs.run_id }}
@@ -1802,6 +1829,7 @@ jobs:
           RELEASE_PACKAGE_SPEC: ${{ inputs.release_package_spec }}
           PACKAGE_ACCEPTANCE_PACKAGE_SPEC: ${{ inputs.package_acceptance_package_spec }}
           CODEX_PLUGIN_SPEC: ${{ inputs.codex_plugin_spec }}
+          CANDIDATE_REQUEST_JSON: ${{ needs.resolve_target.outputs.candidate_request_json }}
           CANDIDATE_ARTIFACT_JSON: ""
           SKIP_PACKAGE_TELEGRAM_E2E: ${{ needs.resolve_target.outputs.skip_package_telegram_e2e }}
           TELEGRAM_WAIVER: ${{ inputs.telegram_waiver }}
@@ -1810,8 +1838,8 @@ jobs:
   release_checks_candidate:
     name: Run release checks candidate validation
     needs: [resolve_target, plugin_compatibility_readiness, evidence_reuse, candidate_acquisition]
-    if: ${{ always() && github.run_attempt == 1 && needs.resolve_target.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.plugin_compatibility_readiness.result) && contains(fromJSON('["success","skipped"]'), needs.evidence_reuse.result) && (needs.resolve_target.outputs.release_candidate_artifact_required != 'true' || (needs.candidate_acquisition.result == 'success' && needs.candidate_acquisition.outputs.state == 'ready')) && (contains(fromJSON('["all","cross-os","package"]'), inputs.rerun_group) || (inputs.rerun_group == 'live-e2e' && needs.resolve_target.outputs.live_suite_filter == '')) && needs.evidence_reuse.outputs.reuse != 'true' }}
-    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON(vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404'))) || (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404') }}
+    if: ${{ always() && github.run_attempt == 1 && needs.resolve_target.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.plugin_compatibility_readiness.result) && contains(fromJSON('["success","skipped"]'), needs.evidence_reuse.result) && (needs.resolve_target.outputs.release_candidate_artifact_required != 'true' || (needs.candidate_acquisition.result == 'success' && needs.candidate_acquisition.outputs.state == 'ready')) && (contains(fromJSON('["all","cross-os","windows-node","package","qualified-package"]'), inputs.rerun_group) || (inputs.rerun_group == 'live-e2e' && needs.resolve_target.outputs.live_suite_filter == '')) && needs.evidence_reuse.outputs.reuse != 'true' }}
+    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON('ubuntu-24.04'))) || ('ubuntu-24.04') }}
     timeout-minutes: 15
     outputs:
       run_id: ${{ steps.dispatch.outputs.run_id }}
@@ -1846,6 +1874,7 @@ jobs:
           RELEASE_PACKAGE_SPEC: ${{ inputs.release_package_spec }}
           PACKAGE_ACCEPTANCE_PACKAGE_SPEC: ${{ inputs.package_acceptance_package_spec }}
           CODEX_PLUGIN_SPEC: ${{ inputs.codex_plugin_spec }}
+          CANDIDATE_REQUEST_JSON: ${{ needs.resolve_target.outputs.candidate_request_json }}
           CANDIDATE_ARTIFACT_JSON: ${{ needs.resolve_target.outputs.release_candidate_artifact_required == 'true' && needs.candidate_acquisition.outputs.candidate_artifact_json || '' }}
           SKIP_PACKAGE_TELEGRAM_E2E: ${{ needs.resolve_target.outputs.skip_package_telegram_e2e }}
           TELEGRAM_WAIVER: ${{ inputs.telegram_waiver }}
@@ -1883,7 +1912,7 @@ jobs:
     name: Run product performance evidence
     needs: [resolve_target, plugin_compatibility_readiness, evidence_reuse]
     if: ${{ always() && github.run_attempt == 1 && needs.resolve_target.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.plugin_compatibility_readiness.result) && contains(fromJSON('["success","skipped"]'), needs.evidence_reuse.result) && needs.resolve_target.outputs.coverage_policy != 'npm-beta-v1' && contains(fromJSON('["all","performance"]'), inputs.rerun_group) && needs.evidence_reuse.outputs.reuse != 'true' }}
-    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON(vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404'))) || (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404') }}
+    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON('ubuntu-24.04'))) || ('ubuntu-24.04') }}
     timeout-minutes: 15
     outputs:
       run_id: ${{ steps.dispatch.outputs.run_id }}
@@ -2038,6 +2067,10 @@ jobs:
       CHILD_WORKFLOW_REF: ${{ github.ref_name }}
       PARENT_WORKFLOW_SHA: ${{ github.sha }}
       DISPATCH_ID: full-release-validation-${{ github.run_id }}-1-plugin-npm-preflight
+      # The normal publish route repacks with the admitted publisher tooling P;
+      # the preflight child packs with this run's tooling.
+      PUBLISHER_SHA: ${{ fromJSON(needs.resolve_target.outputs.source_admission_json || '{}').qualificationAdmission.workflowSha || '' }}
+      PUBLICATION_ROUTE: ${{ fromJSON(needs.resolve_target.outputs.publication_selection_json || '{}').route || '' }}
     steps:
       - name: Retain original plugin npm artifact descriptor
         id: reused
@@ -2050,6 +2083,62 @@ jobs:
         id: dispatch
         if: github.run_attempt == 1 && env.PUBLICATION_ARTIFACTS_REUSED != 'true'
         run: *full_release_child_dispatch
+
+      # While the child runs, pack and scan as Plugin NPM Release will: candidate
+      # source at the root, P's tooling, scripts, and inventory at .release-tooling.
+      # A P-only bundler or inventory drift then fails here instead of at publish.
+      - name: Checkout target source for publisher scan
+        if: &publisher_tooling_scan env.PUBLISHER_SHA != '' && env.PUBLISHER_SHA != github.sha && env.PUBLICATION_ROUTE == 'normal'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - name: Checkout publisher tooling
+        if: *publisher_tooling_scan
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.PUBLISHER_SHA }}
+          path: .release-tooling
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - name: Setup Node environment for publisher tooling scan
+        if: *publisher_tooling_scan
+        uses: ./.github/actions/setup-node-env
+        with:
+          cache-mode: restore
+          node-version: ${{ env.NODE_VERSION }}
+          install-bun: "false"
+
+      - name: Install publisher tooling dependencies
+        if: *publisher_tooling_scan
+        working-directory: .release-tooling
+        env:
+          CI: "true"
+        run: pnpm install --frozen-lockfile --prefer-offline --ignore-scripts
+
+      - name: Scan plugin npm packs with publisher tooling
+        if: *publisher_tooling_scan
+        env:
+          TSX_TSCONFIG_PATH: ${{ github.workspace }}/.release-tooling/tsconfig.json
+        run: |
+          set -euo pipefail
+          if [[ ! -f .release-tooling/scripts/check-plugin-npm-security-scan.mts ]]; then
+            echo "::warning::Publisher tooling ${PUBLISHER_SHA} predates this scan; Plugin NPM Release scans at publish."
+            exit 0
+          fi
+          plan_args=(--selection-mode "$PLUGIN_PUBLISH_SCOPE")
+          [[ -z "$PLUGINS" ]] || plan_args+=(--plugins "$PLUGINS")
+          [[ "$NPM_DIST_TAG" != extended-stable ]] || plan_args+=(--npm-dist-tag "$NPM_DIST_TAG")
+          node --import tsx .release-tooling/scripts/plugin-npm-release-plan.ts "${plan_args[@]}" > "$RUNNER_TEMP/plugin-npm-publisher-plan.json"
+          echo "Packing with publisher tooling ${PUBLISHER_SHA}."
+          node --import tsx .release-tooling/scripts/check-plugin-npm-security-scan.mts \
+            --tooling-root .release-tooling \
+            --plan "$RUNNER_TEMP/plugin-npm-publisher-plan.json"
 
       - name: Resolve and seal exact plugin npm artifact descriptor
         id: prepared
@@ -2194,16 +2283,20 @@ jobs:
       CANDIDATE_REQUEST_JSON: ${{ needs.resolve_target.outputs.candidate_request_json }}
       PREPARED_NPM_BUNDLE_JSON: ${{ needs.prepare_npm_package.outputs.prepared_bundle_json }}
     steps:
-      - name: Dispatch immutable validation candidate producer
-        id: dispatch
-        if: github.run_attempt == 1
-        run: *full_release_child_dispatch
       - *artifact_tooling_checkout
       - name: Setup supported Node runtime
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
+
+      - name: Wait for candidate acquisition GitHub API quota
+        if: github.run_attempt == 1
+        run: node scripts/wait-for-github-api-quota.mjs --minimum-remaining 6 --max-wait-seconds 18000
+      - name: Dispatch immutable validation candidate producer
+        id: dispatch
+        if: github.run_attempt == 1
+        run: *full_release_child_dispatch
 
       - *artifact_producer_resolution
       - name: Wait for exact validation candidate
@@ -2220,6 +2313,10 @@ jobs:
       [
         resolve_target,
         evidence_reuse,
+        prepare_npm_package,
+        qualify_npm_package,
+        prepare_plugin_npm,
+        prepare_docker_release,
         candidate_acquisition,
         normal_ci,
         plugin_prerelease_independent,
@@ -2230,7 +2327,7 @@ jobs:
         performance,
       ]
     if: always()
-    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON(vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404'))) || (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404') }}
+    runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON('ubuntu-24.04'))) || ('ubuntu-24.04') }}
     timeout-minutes: 15
     outputs:
       sha256: ${{ steps.plan.outputs.sha256 }}
@@ -2261,7 +2358,7 @@ jobs:
         id: plan_restore
         if: ${{ always() && github.run_attempt != 1 && steps.plan_cache.outputs.cache-hit != 'true' }}
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: full-release-execution-plan-${{ github.run_id }}
           path: ${{ github.workspace }}/full-release-execution-plan
@@ -2271,7 +2368,7 @@ jobs:
       - name: Restore immutable release execution plan inputs
         id: plan_inputs_restore
         if: ${{ always() && github.run_attempt != 1 && steps.plan_cache.outputs.cache-hit != 'true' && steps.plan_restore.outcome != 'success' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: full-release-execution-plan-inputs-${{ github.run_id }}-1
           path: ${{ github.workspace }}/full-release-execution-plan-inputs
@@ -2280,7 +2377,7 @@ jobs:
 
       - name: Download immutable publication admission
         if: github.run_attempt == 1 && needs.resolve_target.result == 'success'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: full-release-publication-admission-${{ github.run_id }}-1
           path: ${{ runner.temp }}/full-release-publication-admission
@@ -2359,6 +2456,11 @@ jobs:
           CANDIDATE_ACQUISITION_RESULT: ${{ needs.candidate_acquisition.result }}
           CANDIDATE_EVIDENCE_JSON: ${{ needs.candidate_acquisition.outputs.binding_json }}
           CANDIDATE_REQUEST_JSON: ${{ needs.resolve_target.outputs.candidate_request_json }}
+          NPM_PREPARATION_RESULT: ${{ needs.prepare_npm_package.result }}
+          NPM_QUALIFICATION_RESULT: ${{ needs.qualify_npm_package.result }}
+          PLUGIN_NPM_REQUIRED: ${{ needs.resolve_target.outputs.plugin_npm_preflight_required }}
+          PLUGIN_NPM_PREPARATION_RESULT: ${{ needs.prepare_plugin_npm.result }}
+          DOCKER_PREPARATION_RESULT: ${{ needs.prepare_docker_release.result }}
           FULL_RELEASE_RESTORE_PLAN: ${{ github.run_attempt != 1 }}
           FULL_RELEASE_EXECUTION_PLAN_PATH: ${{ github.workspace }}/full-release-execution-plan/full-release-execution-plan.json
           PUBLICATION_ADMISSION_PATH: ${{ runner.temp }}/full-release-publication-admission/publication-admission.json
@@ -2395,6 +2497,11 @@ jobs:
               --arg candidateAcquisitionResult "$CANDIDATE_ACQUISITION_RESULT" \
               --argjson candidateEvidence "${CANDIDATE_EVIDENCE_JSON:-null}" \
               --argjson candidateRequestInput "$CANDIDATE_REQUEST_JSON" \
+              --arg npmPreparationResult "$NPM_PREPARATION_RESULT" \
+              --arg npmQualificationResult "$NPM_QUALIFICATION_RESULT" \
+              --arg pluginNpmPreflightRequired "$PLUGIN_NPM_REQUIRED" \
+              --arg pluginNpmPreparationResult "$PLUGIN_NPM_PREPARATION_RESULT" \
+              --arg dockerPreparationResult "$DOCKER_PREPARATION_RESULT" \
               --arg normalCiResult "$NORMAL_CI_RESULT" \
               --arg normalCiRunId "$NORMAL_CI_RUN_ID" \
               --arg normalCiRunAttempt "$NORMAL_CI_RUN_ATTEMPT" \
@@ -2458,6 +2565,11 @@ jobs:
                 candidateAcquisitionResult: $candidateAcquisitionResult,
                 candidateEvidence: $candidateEvidence,
                 candidateRequestInput: $candidateRequestInput,
+                npmPreparationResult: $npmPreparationResult,
+                npmQualificationResult: $npmQualificationResult,
+                pluginNpmPreflightRequired: $pluginNpmPreflightRequired,
+                pluginNpmPreparationResult: $pluginNpmPreparationResult,
+                dockerPreparationResult: $dockerPreparationResult,
                 children: {
                   normalCi: {result: $normalCiResult, runId: $normalCiRunId, runAttempt: $normalCiRunAttempt, url: $normalCiUrl},
                   pluginPrereleaseIndependent: {result: $pluginPrereleaseIndependentResult, runId: $pluginPrereleaseIndependentRunId, runAttempt: $pluginPrereleaseIndependentRunAttempt, url: $pluginPrereleaseIndependentUrl},
@@ -2483,7 +2595,7 @@ jobs:
       - name: Upload immutable release execution plan inputs
         id: plan_inputs_upload
         if: ${{ github.run_attempt == 1 && steps.plan_inputs.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-execution-plan-inputs-${{ github.run_id }}-1
           path: ${{ github.workspace }}/full-release-execution-plan-inputs
@@ -2523,7 +2635,7 @@ jobs:
         # The sealer can write a valid interrupted checkpoint and exit nonzero.
         # Only a write derived from the immutable attempt-one inputs may publish the alias.
         if: ${{ always() && steps.plan.outputs.sha256 != '' && steps.plan.outputs.source_parent_attempt == '1' && (steps.plan_inputs_upload.outcome == 'success' || steps.plan_inputs_restore.outcome == 'success') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-execution-plan-${{ github.run_id }}
           path: ${{ github.workspace }}/full-release-execution-plan/full-release-execution-plan.json
@@ -2550,10 +2662,20 @@ jobs:
 
   release_decision:
     name: Release Decision
-    needs: [resolve_target, release_execution_plan]
+    needs:
+      [
+        resolve_target,
+        prepare_npm_package,
+        qualify_npm_package,
+        prepare_plugin_npm,
+        prepare_docker_release,
+        release_execution_plan,
+      ]
     if: always()
     runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON(vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404'))) || (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404') }}
     timeout-minutes: 720
+    env:
+      RELEASE_STATE_SCRIPT: &release_state_script ${{ needs.resolve_target.result == 'success' && fromJSON(needs.resolve_target.outputs.source_admission_json || '{}').qualificationAdmission != null && format('{0}/qualification-verifier/scripts/full-release-validation-state.mjs', github.workspace) || format('{0}/scripts/full-release-validation-state.mjs', github.workspace) }}
     outputs:
       state: ${{ steps.state.outputs.state }}
     steps:
@@ -2568,7 +2690,7 @@ jobs:
       - *qualification_evidence_verifier_checkout
 
       - name: Download immutable release execution plan
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: full-release-execution-plan-${{ github.run_id }}
           path: ${{ runner.temp }}/full-release-execution-plan
@@ -2589,16 +2711,20 @@ jobs:
           RELEASE_PROFILE: ${{ inputs.release_profile }}
           RERUN_GROUP: ${{ inputs.rerun_group }}
           TARGET_SHA: ${{ needs.resolve_target.outputs.sha }}
+          NPM_PREPARATION_RESULT: ${{ needs.prepare_npm_package.result }}
+          NPM_QUALIFICATION_RESULT: ${{ needs.qualify_npm_package.result }}
+          PLUGIN_NPM_PREPARATION_RESULT: ${{ needs.prepare_plugin_npm.result }}
+          DOCKER_PREPARATION_RESULT: ${{ needs.prepare_docker_release.result }}
           FULL_RELEASE_STATE_MODE: decision
           FULL_RELEASE_EXECUTION_PLAN_PATH: ${{ runner.temp }}/full-release-execution-plan/full-release-execution-plan.json
           FULL_RELEASE_STATE_PATH: ${{ runner.temp }}/full-release-decision/full-release-decision.json
         run: &full_release_state |
           set -euo pipefail
-          node scripts/full-release-validation-state.mjs "$FULL_RELEASE_STATE_MODE"
+          node "$RELEASE_STATE_SCRIPT" "$FULL_RELEASE_STATE_MODE"
 
       - name: Upload release decision
         if: always() && steps.state.outputs.state != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-decision-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/full-release-decision
@@ -2618,10 +2744,20 @@ jobs:
 
   diagnostic_drain:
     name: Diagnostic Drain
-    needs: [resolve_target, release_execution_plan]
+    needs:
+      [
+        resolve_target,
+        prepare_npm_package,
+        qualify_npm_package,
+        prepare_plugin_npm,
+        prepare_docker_release,
+        release_execution_plan,
+      ]
     if: always()
     runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON(vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404'))) || (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404') }}
     timeout-minutes: 720
+    env:
+      RELEASE_STATE_SCRIPT: *release_state_script
     outputs:
       state: ${{ steps.state.outputs.state }}
       normal_ci_conclusion: ${{ steps.state.outputs.normalCi_conclusion }}
@@ -2640,8 +2776,10 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
+      - *qualification_evidence_verifier_checkout
+
       - name: Download immutable release execution plan
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: full-release-execution-plan-${{ github.run_id }}
           path: ${{ runner.temp }}/full-release-execution-plan
@@ -2661,6 +2799,10 @@ jobs:
           RELEASE_PROFILE: ${{ inputs.release_profile }}
           RERUN_GROUP: ${{ inputs.rerun_group }}
           TARGET_SHA: ${{ needs.resolve_target.outputs.sha }}
+          NPM_PREPARATION_RESULT: ${{ needs.prepare_npm_package.result }}
+          NPM_QUALIFICATION_RESULT: ${{ needs.qualify_npm_package.result }}
+          PLUGIN_NPM_PREPARATION_RESULT: ${{ needs.prepare_plugin_npm.result }}
+          DOCKER_PREPARATION_RESULT: ${{ needs.prepare_docker_release.result }}
           FULL_RELEASE_STATE_MODE: drain
           FULL_RELEASE_EXECUTION_PLAN_PATH: ${{ runner.temp }}/full-release-execution-plan/full-release-execution-plan.json
           FULL_RELEASE_STATE_PATH: ${{ runner.temp }}/full-release-diagnostics/full-release-diagnostic-manifest.json
@@ -2690,7 +2832,7 @@ jobs:
 
       - name: Upload diagnostic drain manifest
         if: always() && steps.state.outputs.state != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/full-release-diagnostics
@@ -2717,6 +2859,7 @@ jobs:
     needs:
       [
         resolve_target,
+        plugin_compatibility_readiness,
         evidence_reuse,
         prepare_npm_package,
         qualify_npm_package,
@@ -2737,7 +2880,23 @@ jobs:
     if: always()
     runs-on: ${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP != '' && fromJSON(format('{{"group":{0},"labels":{1}}}', toJSON(vars.OPENCLAW_RELEASE_RUNNER_GROUP), toJSON('ubuntu-24.04'))) || ('ubuntu-24.04') }}
     timeout-minutes: 10
+    env:
+      RELEASE_STATE_SCRIPT: *release_state_script
+      NPM_PREPARATION_RESULT: ${{ needs.prepare_npm_package.result }}
+      NPM_QUALIFICATION_RESULT: ${{ needs.qualify_npm_package.result }}
+      PLUGIN_NPM_PREPARATION_RESULT: ${{ needs.prepare_plugin_npm.result }}
+      DOCKER_PREPARATION_RESULT: ${{ needs.prepare_docker_release.result }}
     steps:
+      - name: Require successful source readiness
+        env:
+          SOURCE_READINESS_RESULT: ${{ needs.plugin_compatibility_readiness.result }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_READINESS_RESULT" == "success" ]] || {
+            echo "Release source readiness must succeed, including when reusing evidence." >&2
+            exit 1
+          }
+
       - name: Require qualified publication artifacts
         if: inputs.rerun_group == 'all'
         env:
@@ -2776,20 +2935,22 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
+      - *qualification_evidence_verifier_checkout
+
       - name: Download immutable release execution plan
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: full-release-execution-plan-${{ github.run_id }}
           path: ${{ runner.temp }}/full-release-execution-plan
 
       - name: Download release decision attempts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: full-release-decision-${{ github.run_id }}-*
           path: ${{ runner.temp }}/full-release-decision-attempts
 
       - name: Download diagnostic drain attempts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: full-release-diagnostics-${{ github.run_id }}-*
           path: ${{ runner.temp }}/full-release-diagnostic-attempts
@@ -2811,7 +2972,7 @@ jobs:
           DIAGNOSTIC_DRAIN_ATTEMPTS_PATH: ${{ runner.temp }}/full-release-diagnostic-attempts
           RELEASE_DECISION_PATH: ${{ runner.temp }}/full-release-decision/full-release-decision.json
           DIAGNOSTIC_DRAIN_PATH: ${{ runner.temp }}/full-release-diagnostics/full-release-diagnostic-manifest.json
-        run: node scripts/full-release-validation-state.mjs select
+        run: node "$RELEASE_STATE_SCRIPT" select
 
       - name: Verify exact release state artifacts
         env:
@@ -2821,7 +2982,7 @@ jobs:
           RELEASE_EXECUTION_PLAN_PATH: ${{ runner.temp }}/full-release-execution-plan/full-release-execution-plan.json
           RELEASE_DECISION_PATH: ${{ runner.temp }}/full-release-decision/full-release-decision.json
           DIAGNOSTIC_DRAIN_PATH: ${{ runner.temp }}/full-release-diagnostics/full-release-diagnostic-manifest.json
-        run: node scripts/full-release-validation-state.mjs verify
+        run: node "$RELEASE_STATE_SCRIPT" verify
 
       # Exact IDs from the sealed plan prevent verification from drifting to a newer upload.
       # Parent-owned candidate plans are rejected before same-parent continuation.
@@ -2927,6 +3088,7 @@ jobs:
       - name: Write release validation manifest
         if: ${{ success() }}
         env:
+          TARGET_SHA: ${{ needs.resolve_target.outputs.sha }}
           GH_TOKEN: ${{ github.token }}
           TARGET_REF: ${{ startsWith(github.ref, 'refs/heads/release-ci/') && needs.resolve_target.outputs.sha || inputs.ref }}
           RELEASE_PROFILE: ${{ inputs.release_profile }}
@@ -2958,7 +3120,8 @@ jobs:
           PREPARED_DOCKER_RUN_ATTEMPT: ${{ needs.prepare_docker_release.outputs.prepared_run_attempt }}
           PREPARED_DOCKER_ARTIFACT_NAME: ${{ needs.prepare_docker_release.outputs.prepared_artifact_name }}
           PREPARED_DOCKER_MANIFEST_SHA256: ${{ needs.prepare_docker_release.outputs.prepared_manifest_sha256 }}
-        run: node scripts/full-release-validation-state.mjs write-manifest
+          OPENCLAW_RELEASE_CI_SUMMARY_VALIDATOR: ${{ fromJSON(needs.resolve_target.outputs.source_admission_json || '{}').qualificationAdmission != null && format('{0}/qualification-verifier/scripts/release-ci-summary.mjs', github.workspace) || format('{0}/scripts/release-ci-summary.mjs', github.workspace) }}
+        run: node "$RELEASE_STATE_SCRIPT" write-manifest
 
       - name: Validate release validation manifest
         env:
@@ -2969,11 +3132,11 @@ jobs:
           RELEASE_DECISION_PATH: ${{ runner.temp }}/full-release-decision/full-release-decision.json
           DIAGNOSTIC_DRAIN_PATH: ${{ runner.temp }}/full-release-diagnostics/full-release-diagnostic-manifest.json
           RELEASE_VALIDATION_MANIFEST_PATH: ${{ runner.temp }}/full-release-validation/full-release-validation-manifest.json
-        run: node scripts/full-release-validation-state.mjs validate-manifest
+        run: node "$RELEASE_STATE_SCRIPT" validate-manifest
 
       - name: Upload release validation manifest
         if: ${{ success() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-validation-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/full-release-validation
@@ -2981,7 +3144,7 @@ jobs:
 
       - name: Upload legacy release validation manifest alias
         if: ${{ success() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-release-validation-${{ github.run_id }}
           path: ${{ runner.temp }}/full-release-validation

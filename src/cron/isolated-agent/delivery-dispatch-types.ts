@@ -6,7 +6,7 @@ import type { TtsAutoMode } from "../../config/types.tts.js";
 import type { SourceDeliveryOutcome } from "../../infra/outbound/source-delivery-plan.js";
 import type { CronCompletionDeliveryFence } from "../delivery-attempt-fence.js";
 import type { CronDeliveryPlan } from "../delivery-plan.js";
-import type { CronJob, CronResolvedDeliveryState } from "../types.js";
+import type { CronResolvedDeliveryState, CronRunDiagnostics, CronStoredJob } from "../types.js";
 import type { DeliveryTargetResolution } from "./delivery-target.js";
 
 export type SuccessfulCronDeliveryTarget = Extract<DeliveryTargetResolution, { ok: true }>;
@@ -14,7 +14,7 @@ export type SuccessfulCronDeliveryTarget = Extract<DeliveryTargetResolution, { o
 export type DispatchCronDeliveryParams = {
   cfgWithAgentDefaults: OpenClawConfig;
   deps: CliDeps;
-  job: CronJob;
+  job: CronStoredJob;
   deliveryAttemptFence: CronCompletionDeliveryFence | null;
   agentId: string;
   agentSessionKey: string;
@@ -36,10 +36,7 @@ export type DispatchCronDeliveryParams = {
   skipDelivery?: NormalizeReplySkipReason;
   spawnOnlyHandoff: boolean;
   sourceDeliveryOutcome: SourceDeliveryOutcome;
-  /** Queues same-source fallback awareness only after a durable completion commit fails. */
-  queueSourceSessionMessageToolAwareness?: () => Promise<void>;
   deliveryBestEffort: boolean;
-  deliveryPayloadHasStructuredContent: boolean;
   deliveryPayloads: ReplyPayload[];
   synthesizedText?: string;
   ttsAuto?: TtsAutoMode;
@@ -66,6 +63,5 @@ export type DispatchCronDeliveryState = {
   outputText?: string;
   synthesizedText?: string;
   deliveryPayloads: ReplyPayload[];
-  /** Explanation from a settled descendant answer that reported AUTOMATION_FAILED. */
-  agentReportedFailure?: string;
+  diagnostics?: CronRunDiagnostics;
 };

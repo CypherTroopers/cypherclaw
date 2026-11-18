@@ -2,7 +2,7 @@ import type { RequestListener } from "node:http";
 import { type FetchFunction, type WebClientOptions, WebClient } from "@slack/web-api";
 import { waitUntilAbort } from "openclaw/plugin-sdk/channel-outbound";
 import { createLazyRuntimeModule } from "openclaw/plugin-sdk/lazy-runtime";
-import { getRuntimeConfig } from "openclaw/plugin-sdk/runtime-config-snapshot";
+import { captureRuntimeConfigAsyncReader } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import {
   warn,
   computeBackoff,
@@ -57,7 +57,7 @@ import {
   createSlackBoltApp,
   gracefulStopSlackApp,
   publishSlackConnectedStatus,
-  publishSlackBlockedStatus,
+  trackSlackAuthFailure,
   publishSlackDisconnectedStatus,
   resolveSlackBoltInterop,
   startSlackSocketAndWaitForDisconnect,
@@ -65,7 +65,6 @@ import {
 } from "./provider-support.js";
 import {
   formatSlackSocketModeSharedConnectionWarning,
-  isNonRecoverableSlackAuthError,
   registerSlackSocketModeConnectionDiagnostics,
   SLACK_SOCKET_RECONNECT_POLICY,
 } from "./reconnect-policy.js";
@@ -217,7 +216,7 @@ function resolveSlackRelayConfig(params: { relay: unknown; accountId: string }):
 
 export async function monitorSlackProvider(opts: MonitorSlackOpts) {
   const { scheduler } = opts;
-  const cfg = opts.config ?? getRuntimeConfig();
+  const cfg = opts.config ?? (await captureRuntimeConfigAsyncReader()());
   const runtime: RuntimeEnv = opts.runtime ?? createNonExitingRuntime();
 
   const account = resolveSlackAccount({
@@ -446,7 +445,7 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts) {
       warn(
         `[${account.accountId}] slack auth.test failed at boot (${authTestError}); ` +
           `${identityFailureDetail}; ` +
-          "required-mention channels will fail closed without another trusted activation signal",
+          "required-mention channels will ignore messages without another trusted activation signal",
       ),
     );
   }
@@ -687,6 +686,8 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts) {
 
     if (slackMode === "socket") {
       let reconnectAttempts = 0;
+      const authState = { consecutiveInvalidAuth: 0 };
+      const logError = (message: string) => runtime.error?.(message);
       let hasLoggedSocketConnected = false;
       while (!opts.abortSignal?.aborted) {
         let delayMs: number;
@@ -696,6 +697,7 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts) {
             abortSignal: opts.abortSignal,
             onStarted: async () => {
               reconnectAttempts = 0;
+              authState.consecutiveInvalidAuth = 0;
               await recoverSlackIdentity();
               publishSlackConnectedStatus(opts.setStatus, ctx.identityHealth);
               if (!hasLoggedSocketConnected) {
@@ -716,16 +718,13 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts) {
           }
           publishSlackDisconnectedStatus(opts.setStatus, disconnect.error);
 
-          // Permanent account and credential failures need operator action.
-          if (disconnect.error && isNonRecoverableSlackAuthError(disconnect.error)) {
-            publishSlackBlockedStatus(opts.setStatus, disconnect.error);
-            runtime.error?.(
-              `slack socket mode disconnected due to non-recoverable auth error — skipping channel (${formatSlackError(disconnect.error)})`,
-            );
-            throw disconnect.error instanceof Error
-              ? disconnect.error
-              : new Error(formatSlackError(disconnect.error));
-          }
+          trackSlackAuthFailure(
+            disconnect.error,
+            "auth: disconnected, skipping channel",
+            opts.setStatus,
+            logError,
+            authState,
+          );
 
           reconnectAttempts += 1;
           delayMs = computeBackoff(SLACK_SOCKET_RECONNECT_POLICY, reconnectAttempts);
@@ -741,13 +740,13 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts) {
           );
           await gracefulStopSlackApp(app);
         } catch (err) {
-          if (isNonRecoverableSlackAuthError(err)) {
-            publishSlackBlockedStatus(opts.setStatus, err);
-            runtime.error?.(
-              `slack socket mode failed to start due to non-recoverable auth error — skipping channel (${formatSlackError(err)})`,
-            );
-            throw err;
-          }
+          trackSlackAuthFailure(
+            err,
+            "auth: start failed, skipping channel",
+            opts.setStatus,
+            logError,
+            authState,
+          );
           publishSlackDisconnectedStatus(opts.setStatus, err);
           reconnectAttempts += 1;
           delayMs = computeBackoff(SLACK_SOCKET_RECONNECT_POLICY, reconnectAttempts);

@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ProviderCatalogOutcome } from "../plugins/provider-catalog-outcome.js";
 import type { PreparedAgentCredentialModes } from "./agent-auth-credential-modes.js";
 import { isOAuthRefreshFence } from "./auth-profiles/oauth-refresh-marker.js";
@@ -127,7 +128,10 @@ export type PreparedAccountCatalogAccess = {
 
 /** Private auth facts owned by an immutable prepared model generation. */
 type RuntimeAuthBinding = {
+  /** Host-only policy selection; public snapshots carry no callable policy authority. */
+  readPolicyConfig?: () => OpenClawConfig;
   store?: AuthProfileStore;
+  readUsage?: (store: AuthProfileStore) => AuthProfileStore;
   labels?: ModelCatalogAuthLabels;
   materializations?: readonly RuntimeAuthMaterialization[];
   load?: (scope: PreparedModelRuntimeAuthScope) => Promise<PreparedModelRuntimeAuth>;
@@ -146,8 +150,15 @@ export function bindPreparedModelRuntimeAuth(snapshot: object, binding: RuntimeA
   runtimeAuth.set(snapshot, { ...runtimeAuth.get(snapshot), ...binding });
 }
 
+export function getPreparedModelRuntimePolicyConfigReader(
+  snapshot: object | undefined,
+): (() => OpenClawConfig) | undefined {
+  return snapshot ? runtimeAuth.get(snapshot)?.readPolicyConfig : undefined;
+}
+
 export function getPreparedModelRuntimeAuthStore(snapshot: object): AuthProfileStore | undefined {
-  return runtimeAuth.get(snapshot)?.store;
+  const binding = runtimeAuth.get(snapshot);
+  return binding?.store ? (binding.readUsage?.(binding.store) ?? binding.store) : undefined;
 }
 
 export function getPreparedModelRuntimeAuthLabels(snapshot: object): ModelCatalogAuthLabels {
@@ -194,7 +205,7 @@ export async function loadPreparedModelRuntimeAuth(
   if (load) {
     return await load(scope);
   }
-  const authStore = binding?.store;
+  const authStore = getPreparedModelRuntimeAuthStore(snapshot);
   return authStore ? { authStore, authModes: snapshot.authModes ?? {} } : undefined;
 }
 

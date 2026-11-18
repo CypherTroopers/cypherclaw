@@ -45,9 +45,16 @@ export type ChannelApprovalNativeFinalAction<TPayload> =
   | { kind: "clear-actions" }
   | { kind: "leave" };
 
+/** Synchronous eligibility for adapters whose availability is already in memory. */
 export type ChannelApprovalNativeAvailabilityAdapter = {
   isConfigured: (params: ChannelApprovalCapabilityHandlerContext) => boolean;
   shouldHandle: (params: ApprovalRequestContext) => boolean;
+};
+
+/** Eligibility may prepare account state through its owning worker. */
+export type ChannelApprovalNativeAvailabilityAdapterAsync = {
+  isConfigured: (params: ChannelApprovalCapabilityHandlerContext) => boolean | Promise<boolean>;
+  shouldHandle: (params: ApprovalRequestContext) => boolean | Promise<boolean>;
 };
 
 type ChannelApprovalNativePresentationAdapterForView<
@@ -115,6 +122,8 @@ type ChannelApprovalNativeTransportAdapterForView<
     params: ApprovalRequestContext &
       FinalApprovalEntryContext<TPendingEntry> & {
         payload: TFinalPayload;
+        /** Delivered entries still awaiting terminal processing, in fanout order. */
+        remainingEntries?: readonly TPendingEntry[];
       },
   ) => Promise<void>;
   deleteEntry?: (params: FinalApprovalEntryContext<TPendingEntry>) => Promise<void>;
@@ -211,7 +220,9 @@ type ChannelApprovalNativeRuntimeOptions = {
   availability: ChannelApprovalNativeAvailabilityAdapter;
 };
 
-/** Runtime adapter consumed by core after a plugin's strongly typed spec has been erased. */
+/**
+ * Runtime adapter consumed by core after a plugin's strongly typed spec has been erased.
+ */
 export type ChannelApprovalNativeRuntimeAdapter<
   TPendingPayload = unknown,
   TPreparedTarget = unknown,
@@ -230,7 +241,9 @@ export type ChannelApprovalNativeRuntimeAdapter<
   observe?: ChannelApprovalNativeObserveAdapter;
 };
 
-/** Strongly typed plugin spec used to build a channel-native approval runtime adapter. */
+/**
+ * Strongly typed plugin spec used to build a channel-native approval runtime adapter.
+ */
 export type ChannelApprovalNativeRuntimeSpec<
   TPendingPayload,
   TPreparedTarget,
@@ -269,3 +282,43 @@ export type ChannelApprovalNativeRuntimeSpec<
     TPendingView
   >;
 };
+
+export type ChannelApprovalNativeRuntimeAdapterAsync<
+  TPendingPayload = unknown,
+  TPreparedTarget = unknown,
+  TPendingEntry = unknown,
+  TBinding = unknown,
+  TFinalPayload = unknown,
+> = Omit<
+  ChannelApprovalNativeRuntimeAdapter<
+    TPendingPayload,
+    TPreparedTarget,
+    TPendingEntry,
+    TBinding,
+    TFinalPayload
+  >,
+  "availability"
+> & { availability: ChannelApprovalNativeAvailabilityAdapterAsync };
+
+export type ChannelApprovalNativeRuntimeSpecAsync<
+  TPendingPayload,
+  TPreparedTarget,
+  TPendingEntry,
+  TBinding = unknown,
+  TFinalPayload = unknown,
+  TPendingView extends PendingApprovalView = PendingApprovalView,
+  TResolvedView extends ResolvedApprovalView = ResolvedApprovalView,
+  TExpiredView extends ExpiredApprovalView = ExpiredApprovalView,
+> = Omit<
+  ChannelApprovalNativeRuntimeSpec<
+    TPendingPayload,
+    TPreparedTarget,
+    TPendingEntry,
+    TBinding,
+    TFinalPayload,
+    TPendingView,
+    TResolvedView,
+    TExpiredView
+  >,
+  "availability"
+> & { availability: ChannelApprovalNativeAvailabilityAdapterAsync };

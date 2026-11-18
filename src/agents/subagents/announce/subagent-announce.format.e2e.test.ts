@@ -110,7 +110,10 @@ const { subagentRegistryMock } = vi.hoisted(() => ({
     shouldIgnorePostCompletionAnnounceForSession: vi.fn(
       (_sessionKey: string, _childAgentId?: string) => false,
     ),
-    countPendingDescendantRuns: vi.fn((_sessionKey: string) => 0),
+    countPendingDescendantRuns: vi.fn(
+      (_sessionKey: string, _assert?: unknown, _options?: { excludeSuspendedDelivery?: boolean }) =>
+        0,
+    ),
     latestRunForChild: vi.fn((_childSessionKey: string): MockSubagentRun | undefined => undefined),
     listSubagentRunsForRequester: vi.fn(
       (_sessionKey: string, _scope?: { requesterRunId?: string }): MockSubagentRun[] => [],
@@ -346,6 +349,22 @@ const gatewayDeps = {
   getRuntimeConfig: () => configOverride,
 };
 
+const deliveryDeps = {
+  ...gatewayDeps,
+  loadSessionEntry: (scope) => readSessionFixture(scope.sessionKey),
+  loadSessionEntryByKey: async (sessionKey) => readSessionFixture(sessionKey),
+  getRequesterSessionActivity: (requesterSessionKey: string) => {
+    const entry = readSessionFixture(requesterSessionKey);
+    const sessionId = entry?.sessionId;
+    return {
+      sessionId,
+      isActive: Boolean(sessionId && embeddedRunMock.isEmbeddedAgentRunActive(sessionId)),
+    };
+  },
+  queueEmbeddedAgentMessageWithOutcome: (sessionId, text, options) =>
+    embeddedRunMock.queueEmbeddedAgentMessageWithOutcome(sessionId, text, options),
+} satisfies Parameters<typeof subagentAnnounceDeliveryTesting.setDepsForTest>[0];
+
 function expectParentAnnounce() {
   expect(sendSpy).not.toHaveBeenCalled();
   expect(agentSpy).toHaveBeenCalledTimes(1);
@@ -438,21 +457,7 @@ describe("subagent announce formatting", () => {
       }
       return {};
     });
-    subagentAnnounceDeliveryTesting.setDepsForTest({
-      ...gatewayDeps,
-      loadSessionEntry: (scope) => readSessionFixture(scope.sessionKey),
-      loadSessionEntryByKey: async (sessionKey) => readSessionFixture(sessionKey),
-      getRequesterSessionActivity: (requesterSessionKey: string) => {
-        const entry = readSessionFixture(requesterSessionKey);
-        const sessionId = entry?.sessionId;
-        return {
-          sessionId,
-          isActive: Boolean(sessionId && embeddedRunMock.isEmbeddedAgentRunActive(sessionId)),
-        };
-      },
-      queueEmbeddedAgentMessageWithOutcome: (sessionId, text, options) =>
-        embeddedRunMock.queueEmbeddedAgentMessageWithOutcome(sessionId, text, options),
-    });
+    subagentAnnounceDeliveryTesting.setDepsForTest(deliveryDeps);
     subagentAnnounceTesting.setDepsForTest(gatewayDeps);
     transcriptEvents = [];
     subagentAnnounceOutputTesting.setDepsForTest({
@@ -464,7 +469,6 @@ describe("subagent announce formatting", () => {
       },
       ...gatewayDeps,
       readSubagentSessionEntry: (_storePath, sessionKey) => readSessionFixture(sessionKey),
-      resolveAgentIdFromSessionKey: () => "main",
       resolveSessionStorePathCore: () => "/tmp/sessions.json",
     });
     resolveAgentIdFromSessionKeySpy.mockReset().mockImplementation(() => "main");
@@ -708,10 +712,13 @@ describe("subagent announce formatting", () => {
           skipMaintenance: true,
         },
       );
-      // readSubagentSessionEntry is intentionally omitted so the real reader runs.
+      // Drop both read overrides so the real announce reader reaches the session worker.
+      subagentAnnounceDeliveryTesting.setDepsForTest({
+        ...deliveryDeps,
+        loadSessionEntry: undefined,
+      });
       subagentAnnounceOutputTesting.setDepsForTest({
         ...gatewayDeps,
-        resolveAgentIdFromSessionKey: () => "main",
         resolveSessionStorePathCore: () => storePath,
       });
       await run();
@@ -1801,7 +1808,10 @@ describe("subagent announce formatting", () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
-  it("bubbles child announce to parent requester when requester subagent session is missing", async () => {
+  it("bubbles completion past a missing requester without deleting suspended descendants", async () => {
+    subagentRegistryMock.countPendingDescendantRuns.mockImplementation((_key, _assert, options) =>
+      options?.excludeSuspendedDelivery ? 0 : 1,
+    );
     subagentRegistryMock.isSubagentSessionRunActive.mockReturnValue(false);
     subagentRegistryMock.resolveRequesterForChildSession.mockReturnValue({
       requesterSessionKey: "agent:main:main",
@@ -1815,10 +1825,14 @@ describe("subagent announce formatting", () => {
       ...defaultOutcomeAnnounce,
       childSessionKey: "agent:main:subagent:leaf",
       childRunId: "run-leaf",
+      childAgentId: "main",
+      childSessionIdentity: { sessionId: "leaf-session", lifecycleRevision: "leaf-revision" },
       requesterSessionKey: "agent:main:subagent:orchestrator",
+      cleanup: "delete",
     });
 
     expect(didAnnounce).toBe("delivered");
+    expect(sessionsDeleteSpy).not.toHaveBeenCalled();
     const call = getAgentCall();
     expect(call.params?.sessionKey).toBe("agent:main:main");
     expect(call.params?.deliver).toBe(true);

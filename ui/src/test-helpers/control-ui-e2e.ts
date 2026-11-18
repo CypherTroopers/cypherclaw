@@ -1,6 +1,7 @@
 // Control UI test helper supports control ui e2e setup.
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { cp } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +10,7 @@ import { normalizeAgentId } from "@openclaw/normalization-core/agent-id";
 import { buildControlUiSessionPath } from "@openclaw/session-url-contract";
 import type { Locator, Page } from "playwright";
 import type { InlineConfig, Plugin, PreviewServer, ViteDevServer } from "vite";
+import type { MigrationsMemoryPlanResult } from "../../../packages/gateway-protocol/src/schema/migrations.ts";
 import { GATEWAY_SERVER_CAPS } from "../../../packages/gateway-protocol/src/server-capabilities.js";
 import { PROTOCOL_VERSION } from "../../../packages/gateway-protocol/src/version.js";
 import { CONTROL_UI_BOOTSTRAP_CONFIG_PATH } from "../../../src/gateway/control-ui-contract.js";
@@ -19,6 +21,7 @@ import type {
   UpdateAvailable,
   UpdateScheduleState,
 } from "../api/types.ts";
+import type { ControlUiReadiness } from "../app/control-ui-readiness.ts";
 import { normalizeControlUiBuildInfo } from "../build-info-normalizers.ts";
 import type { ControlUiBuildInfo } from "../build-info.ts";
 import { createControlUiAttachmentFacts } from "./control-ui-attachment-fixtures.ts";
@@ -29,6 +32,7 @@ import type {
   ControlUiMockRequestHandler,
   MockGatewayControls,
   MockGatewayRequest,
+  MockGatewayRequestSelector,
   MockGatewayWindow,
 } from "./control-ui-e2e-contract.ts";
 import { createMockGatewayControls } from "./control-ui-e2e-controls.ts";
@@ -46,10 +50,12 @@ import {
   waitForControlUiInitialRoster,
 } from "./control-ui-e2e-readiness.ts";
 import { getSharedControlUiE2ePreview } from "./control-ui-e2e-shared-preview.ts";
+import { createControlUiMockDeferredRequests } from "./control-ui-mock-deferred-requests.ts";
 import { createControlUiMockPresence } from "./control-ui-mock-presence.ts";
 import { createControlUiMockReactions } from "./control-ui-mock-reactions.ts";
 import { createControlUiMockResponses } from "./control-ui-mock-responses.ts";
 import { createControlUiMockSessionSubscriptions } from "./control-ui-mock-session-subscriptions.ts";
+import { createControlUiPaneRuntimeTestAdapterScript } from "./control-ui-pane-runtime.test-support.ts";
 import type { NativeControlUiPluginFixture } from "./control-ui-plugin-fixture.ts";
 import {
   createControlUiSessionFixtures,
@@ -225,32 +231,24 @@ export async function assertSessionSectionCountAlignment(
 }
 
 export async function navigateToControlUiSession(page: Page, sessionKey: string): Promise<void> {
+  // The hook loads its readiness module on first read, so the first read can be undefined.
+  await page.waitForFunction(() => window.openclawControlUi !== undefined);
   const expectedPathname = await page.evaluate((sessionPath) => {
-    const app = document.querySelector("openclaw-app") as HTMLElement & {
-      runtime?: {
-        context: {
-          basePath: string;
-          navigate: (routeId: string, options: { pathname: string }) => void;
-        };
-      };
-    };
-    if (!app.runtime) {
-      throw new Error("CypherClaw application runtime is unavailable");
+    const app: ControlUiReadiness["hook"] | undefined = window.openclawControlUi;
+    if (!app) {
+      throw new Error("Control UI readiness hook is unavailable");
     }
-    const pathname = `${app.runtime.context.basePath}${sessionPath}`;
+    const pathname = `${app.snapshot().basePath}${sessionPath}`;
     const url = new URL(window.location.href);
     url.pathname = pathname;
-    app.runtime.context.navigate("chat", { pathname });
+    app.navigate("chat", { pathname });
     return url.pathname;
   }, controlUiSessionPath(sessionKey));
   await page.waitForURL((url) => url.pathname === expectedPathname);
   await page.waitForFunction(
     (targetSessionKey) =>
-      [...document.querySelectorAll<HTMLElement>("openclaw-chat-pane")].some(
-        (pane) =>
-          pane.classList.contains("chat-pane-cache__pane--visible") &&
-          (pane as HTMLElement & { sessionKey?: string }).sessionKey === targetSessionKey,
-      ),
+      window.openclawControlUi?.snapshot().routeReady === true &&
+      window.openclawControlUi.snapshot().sessionKey === targetSessionKey,
     sessionKey,
   );
 }
@@ -302,22 +300,8 @@ export async function waitForControlUiRoute(page: Page, target: ControlUiRouteTa
   try {
     const handle = await page.waitForFunction(
       (expected) => {
-        const app = document.querySelector<
-          HTMLElement & {
-            runtime?: {
-              router: {
-                getState: () => {
-                  status: string;
-                  resolvedLocation: { pathname: string } | null;
-                  matches: { routeId: string }[];
-                  pendingMatches: unknown[];
-                };
-              };
-            };
-          }
-        >("openclaw-app");
-        // Native popup events can arrive before the app element is parsed.
-        const state = app?.runtime?.router.getState();
+        const snapshot = window.openclawControlUi?.snapshot();
+        const state = snapshot?.route;
         const pathname = window.location.pathname;
         // Router paths retain literal characters that browser history percent-encodes.
         // Serialize as a pathname; decoding would alias encoded delimiters and percent data.
@@ -327,6 +311,7 @@ export async function waitForControlUiRoute(page: Page, target: ControlUiRouteTa
           return url.pathname;
         };
         return (
+          snapshot?.routeReady === true &&
           state?.status === "success" &&
           state.matches[0]?.routeId === expected.routeId &&
           state.resolvedLocation !== null &&
@@ -345,19 +330,10 @@ export async function waitForControlUiRoute(page: Page, target: ControlUiRouteTa
     await handle.dispose();
   } catch (error) {
     const state = await page.evaluate(() => {
-      const app = document.querySelector<
-        HTMLElement & {
-          runtime?: {
-            router: {
-              getState: () => unknown;
-            };
-          };
-        }
-      >("openclaw-app");
       return {
         hash: window.location.hash,
         pathname: window.location.pathname,
-        router: app?.runtime?.router.getState() ?? null,
+        router: window.openclawControlUi?.snapshot().route ?? null,
         search: window.location.search,
       };
     });
@@ -423,8 +399,11 @@ export type ControlUiMockGatewayScenario = {
   connectCapabilities?: string[];
   defaultAgentId?: string;
   deferredMethods?: string[];
+  deferredRequests?: MockGatewayRequestSelector[];
   /** Hold every request until resolveDeferred/rejectDeferred releases the method. */
   heldMethods?: string[];
+  /** Hold only requests matching these method and parameter selectors. */
+  heldRequests?: MockGatewayRequestSelector[];
   /** Fail each admission-dependent read this many times before serving its normal response. */
   startupPendingResponses?: number;
   /** Non-release gateway checkout branch surfaced in the sidebar footer. */
@@ -443,6 +422,7 @@ export type ControlUiMockGatewayScenario = {
   deviceToken?: string;
   authMethod?: HelloOk["auth"]["method"];
   authMode?: HelloOk["snapshot"]["authMode"] | null;
+  featureEvents?: string[];
   featureMethods?: string[];
   /** Simulate a legacy Gateway that predates the advertised method catalog. */
   omitFeatureMethods?: boolean;
@@ -550,10 +530,7 @@ export async function reconnectMockGateway(
   await gateway.setOnline(false);
   await page.waitForFunction(
     () => {
-      const app = document.querySelector("openclaw-app") as HTMLElement & {
-        runtime?: { context: { gateway: { snapshot: { phase: string } } } };
-      };
-      return app.runtime?.context.gateway.snapshot.phase === "reconnecting";
+      return window.openclawControlUi?.snapshot().gatewayPhase === "reconnecting";
     },
     undefined,
     { timeout: controlUiE2eWaitTimeoutMs },
@@ -568,54 +545,24 @@ export async function reconnectMockGateway(
   await gateway.setOnline(true);
   await page.waitForFunction(
     () => {
-      const app = document.querySelector("openclaw-app") as HTMLElement & {
-        runtime?: { context: { gateway: { snapshot: { phase: string } } } };
-      };
-      return app.runtime?.context.gateway.snapshot.phase === "connected";
+      return window.openclawControlUi?.snapshot().gatewayPhase === "connected";
     },
     undefined,
     { timeout: controlUiE2eWaitTimeoutMs },
   );
 }
 
-const chromiumExecutableOverrideEnvKey = "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH";
-export const systemChromiumExecutableCandidates = [
-  "/snap/bin/chromium",
-  "/usr/bin/chromium-browser",
-  "/usr/bin/chromium",
-  "/usr/bin/google-chrome",
-  "/usr/bin/google-chrome-stable",
-] as const;
-
 function resolveRepoRoot(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(here, "../../..");
 }
 
-export function resolvePlaywrightChromiumExecutablePath(
-  defaultExecutablePath: string,
-  env: NodeJS.ProcessEnv = process.env,
-  canRun: (chromiumExecutablePath: string) => boolean = canRunPlaywrightChromium,
-): string {
-  const executableOverride = env[chromiumExecutableOverrideEnvKey]?.trim();
-  if (executableOverride) {
-    return executableOverride;
-  }
-  if (canRun(defaultExecutablePath)) {
-    return defaultExecutablePath;
-  }
-  return (
-    systemChromiumExecutableCandidates.find((candidate) => canRun(candidate)) ??
-    defaultExecutablePath
-  );
-}
-
-export function canRunPlaywrightChromium(chromiumExecutablePath: string): boolean {
-  if (!existsSync(chromiumExecutablePath)) {
-    return false;
-  }
-  return spawnSync(chromiumExecutablePath, ["--version"], { stdio: "ignore" }).status === 0;
-}
+// Many UI tests and proof scripts import Chromium selection through this helper.
+export {
+  canRunPlaywrightChromium,
+  resolvePlaywrightChromiumExecutablePath,
+  systemChromiumExecutableCandidates,
+} from "./playwright-chromium.ts";
 
 // Pause an installed virtual clock slightly ahead of its current time so
 // elapsed time advances only through clock.runFor/fastForward. Without this,
@@ -648,9 +595,9 @@ export async function startControlUiE2eServer(
   const [
     { createServer },
     { controlUiLocaleModulesPlugin },
+    { controlUiSolidPlugin },
     {
       commonJsOptimizeDeps,
-      controlUiBrowserOnlySharedModuleAliases,
       resolveExternalPackageAliasesForVite,
       resolveSourcePackageAliasesForVite,
       resolveTsconfigPathAliasesForVite,
@@ -658,6 +605,7 @@ export async function startControlUiE2eServer(
   ] = await Promise.all([
     import("vite"),
     import("../../config/control-ui-locales.ts"),
+    import("../../config/control-ui-solid.ts"),
     import("../../vite.config.ts"),
   ]);
   const repoRoot = resolveRepoRoot();
@@ -676,7 +624,7 @@ export async function startControlUiE2eServer(
       include: ["ipaddr.js", "lit/directives/repeat.js", ...commonJsOptimizeDeps],
     },
     publicDir: path.join(uiRoot, "public"),
-    plugins: [controlUiLocaleModulesPlugin(), controlUiBrowserOnlySharedModuleAliases()],
+    plugins: [controlUiSolidPlugin(), controlUiLocaleModulesPlugin()],
     resolve: {
       alias: [
         { find: "json5", replacement: json5EsmPath },
@@ -826,6 +774,49 @@ export async function buildProductionControlUiE2e(
   }
 }
 
+export async function refreshProductionControlUiE2e(
+  outDir: string,
+  buildId: string,
+): Promise<void> {
+  // Refresh release identity in a caller-owned copy without recompiling its assets.
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    NODE_ENV: "production",
+    OPENCLAW_CONTROL_UI_BUILD_ID: buildId,
+  };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("VITEST")) {
+      delete env[key];
+    }
+  }
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      "--input-type=module",
+      "--eval",
+      `const { refreshControlUiBuildOutput, resolveControlUiBuildInfo } =
+await import(process.argv[1]);
+await refreshControlUiBuildOutput(process.argv[2], resolveControlUiBuildInfo());`,
+      new URL("../../vite.config.ts", import.meta.url).href,
+      outDir,
+    ],
+    {
+      cwd: path.join(resolveRepoRoot(), "ui"),
+      encoding: "utf8",
+      env,
+      stdio: ["ignore", "inherit", "pipe"],
+      maxBuffer: 10 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `Production Control UI identity refresh failed (exit ${result.status ?? "unknown"}):\n${result.stderr || result.error?.message || "See streamed build output above."}`,
+    );
+  }
+}
+
 async function runProductionControlUiBuild(
   outDir: string,
   options: ControlUiE2eBuildOptions = {},
@@ -903,6 +894,19 @@ export async function startProductionControlUiE2eServer(
   return startBuiltControlUiE2eServer(outDir, bootstrapConfig);
 }
 
+export async function startCopiedProductionControlUiE2eServer(
+  sourceRoot: string,
+  outDir: string,
+  buildId: string,
+  bootstrapConfig?: Record<string, unknown>,
+): Promise<ControlUiE2eProductionServer> {
+  // A private copy lets deployment fixtures change identity and replace workers
+  // without mutating the producer artifact or another fixture's active build.
+  await cp(sourceRoot, outDir, { recursive: true, dereference: true });
+  await refreshProductionControlUiE2e(outDir, buildId);
+  return startBuiltControlUiE2eServer(outDir, bootstrapConfig);
+}
+
 function resolveServerBaseUrl(server: ViteDevServer | PreviewServer): string {
   const address = server.httpServer?.address();
   if (!address || typeof address === "string") {
@@ -942,7 +946,7 @@ function normalizeScenario(
     agentModel:
       scenario.agentModel === undefined ? "openai/gpt-5.5" : scenario.agentModel?.trim() || null,
     assistantAgentId: scenario.assistantAgentId?.trim() || defaultAgentId,
-    assistantName: scenario.assistantName?.trim() || "CypherClaw",
+    assistantName: scenario.assistantName?.trim() || "OpenClaw",
     basePath,
     controlUiTabs: scenario.controlUiTabs ?? [],
     controlUiWidgetKinds: scenario.controlUiWidgetKinds ?? [],
@@ -960,7 +964,9 @@ function normalizeScenario(
     ],
     defaultAgentId,
     deferredMethods: scenario.deferredMethods ?? [],
+    deferredRequests: scenario.deferredRequests ?? [],
     heldMethods: scenario.heldMethods ?? [],
+    heldRequests: scenario.heldRequests ?? [],
     startupPendingResponses: scenario.startupPendingResponses ?? 0,
     devGitBranch: scenario.devGitBranch?.trim() || "",
     serverBuildId: scenario.serverBuildId?.trim() || sharedBuildInfo?.buildId || "e2e",
@@ -973,6 +979,7 @@ function normalizeScenario(
     deviceToken: scenario.deviceToken?.trim() || "e2e-device-token",
     authMethod: scenario.authMethod ?? "token",
     authMode: scenario.authMode ?? null,
+    featureEvents: scenario.featureEvents ?? [],
     // Baseline scenarios represent a current Gateway. Tests for unsupported or
     // mixed-version methods provide an explicit narrower catalog.
     featureMethods: scenario.featureMethods ?? [...defaultControlUiFeatureMethods],
@@ -1063,7 +1070,7 @@ export function createControlUiMockGatewayInitScript(
     protocolVersion: PROTOCOL_VERSION,
     scenario: normalizeScenario(scenario),
   };
-  return `${json5BrowserSource}\n;(() => { const __name = (target) => target; (${installControlUiMockGateway.toString()})(${JSON.stringify(input)}, globalThis.JSON5.parse, ${createControlUiSessionFixtures.toString()}, ${createControlUiAttachmentFacts.toString()}, ${createControlUiMockResponses.toString()}, ${createControlUiMockSessionSubscriptions.toString()}, ${createControlUiMockPresence.toString()}, ${createControlUiMockReactions.toString()}); })();`;
+  return `${createControlUiPaneRuntimeTestAdapterScript()}\n${json5BrowserSource}\n;(() => { const __name = (target) => target; (${installControlUiMockGateway.toString()})(${JSON.stringify(input)}, globalThis.JSON5.parse, ${createControlUiSessionFixtures.toString()}, ${createControlUiAttachmentFacts.toString()}, ${createControlUiMockResponses.toString()}, ${createControlUiMockDeferredRequests.toString()}, ${createControlUiMockSessionSubscriptions.toString()}, ${createControlUiMockPresence.toString()}, ${createControlUiMockReactions.toString()}); })();`;
 }
 
 function installControlUiMockGateway(
@@ -1075,6 +1082,7 @@ function installControlUiMockGateway(
   createSessions: typeof createControlUiSessionFixtures,
   createAttachmentFacts: typeof createControlUiAttachmentFacts,
   createResponses: typeof createControlUiMockResponses,
+  createDeferredRequests: typeof createControlUiMockDeferredRequests,
   createSubscriptions: typeof createControlUiMockSessionSubscriptions,
   createPresence: typeof createControlUiMockPresence,
   createReactions: typeof createControlUiMockReactions,
@@ -1091,10 +1099,6 @@ function installControlUiMockGateway(
     method: string;
     params?: unknown;
     socket: MockWebSocket;
-  };
-  type DeferredMethod = {
-    method: string;
-    match?: Record<string, unknown>;
   };
   type MockTerminalSession = {
     sessionId: string;
@@ -1146,9 +1150,6 @@ function installControlUiMockGateway(
   } catch {
     // Opaque initial documents may not expose storage; the target page will.
   }
-  const deferredMethods: DeferredMethod[] = scenario.deferredMethods.map((method) => ({ method }));
-  const heldMethods = new Set(scenario.heldMethods);
-  const deferredResponses: DeferredResponse[] = [];
   const requests: MockGatewayRequest[] = [];
   const requestHandlers = new Map<string, ControlUiMockRequestHandler>();
   const pendingApprovals = new Map<string, Map<string, Record<string, unknown>>>();
@@ -1216,6 +1217,11 @@ function installControlUiMockGateway(
       groupRenames: () => groupsState.renames,
     },
     isRecord,
+  );
+  const deferredRequests = createDeferredRequests<DeferredResponse>(
+    scenario,
+    responseFixtures.matches,
+    responseFixtures.matchesExact,
   );
   let online = true;
   try {
@@ -1872,7 +1878,7 @@ function installControlUiMockGateway(
               }),
           features: {
             capabilities: scenario.featureCapabilities,
-            events: [],
+            events: scenario.featureEvents,
             ...(scenario.omitFeatureMethods ? {} : { methods: scenario.featureMethods }),
           },
           controlUiTabs: scenario.controlUiTabs,
@@ -2003,7 +2009,7 @@ function installControlUiMockGateway(
           name: scenario.assistantName,
         };
       case "agents.list":
-        return {
+        return responseFixtures.applySessionPlacement(params, {
           agents: [
             {
               id: scenario.defaultAgentId,
@@ -2017,7 +2023,7 @@ function installControlUiMockGateway(
           defaultId: scenario.defaultAgentId,
           mainKey: "main",
           scope: scenario.sessionScope,
-        };
+        });
       case "agents.files.list":
         return {
           agentId:
@@ -2164,6 +2170,15 @@ function installControlUiMockGateway(
         return { commands: [] };
       case "plugins.list":
         return { plugins: [] };
+      case "migrations.memory.plan":
+        return {
+          agentId:
+            isRecord(params) && typeof params.agentId === "string"
+              ? params.agentId
+              : scenario.defaultAgentId,
+          workspace: scenario.workspace || "/tmp/control-ui-mock/workspace",
+          providers: [],
+        } satisfies MigrationsMemoryPlanResult;
       case "health":
         return {
           agents: [],
@@ -2350,7 +2365,7 @@ function installControlUiMockGateway(
       typeof response.sessionId === "string"
     ) {
       session = terminalSessions.get(response.sessionId);
-      data = "CypherClaw mock terminal\r\nType anything and the mock Gateway will echo it.\r\n$ ";
+      data = "OpenClaw mock terminal\r\nType anything and the mock Gateway will echo it.\r\n$ ";
     } else if (method === "terminal.input" && isRecord(params)) {
       session =
         typeof params.sessionId === "string" ? terminalSessions.get(params.sessionId) : undefined;
@@ -2367,40 +2382,6 @@ function installControlUiMockGateway(
       seq: ++seq,
       type: "event",
     });
-  }
-
-  function shouldDefer(method: string, params: unknown): boolean {
-    if (heldMethods.has(method)) {
-      return true;
-    }
-    const index = deferredMethods.findIndex(
-      (candidate) =>
-        candidate.method === method && responseFixtures.matches(params, candidate.match),
-    );
-    if (index < 0) {
-      return false;
-    }
-    deferredMethods.splice(index, 1);
-    return true;
-  }
-
-  function takeDeferredResponses(method: string): DeferredResponse[] {
-    const index = deferredResponses.findIndex((response) => response.method === method);
-    if (index < 0) {
-      throw new Error(`No deferred mock Gateway response for ${method}`);
-    }
-    if (!heldMethods.delete(method)) {
-      return deferredResponses.splice(index, 1);
-    }
-    // Startup can replace a request when connection scope settles. A held
-    // catalog releases every admitted request, not only its retired predecessor.
-    const responses = deferredResponses.filter((response) => response.method === method);
-    for (let i = deferredResponses.length - 1; i >= 0; i -= 1) {
-      if (deferredResponses[i]?.method === method) {
-        deferredResponses.splice(i, 1);
-      }
-    }
-    return responses;
   }
 
   function parseFrame(raw: string | ArrayBufferLike | Blob | ArrayBufferView): BrowserFrame | null {
@@ -2505,8 +2486,8 @@ function installControlUiMockGateway(
         return;
       }
       requests.push({ id, method, params: frame.params });
-      if (shouldDefer(method, frame.params)) {
-        deferredResponses.push({ id, method, params: frame.params, socket: this });
+      if (deferredRequests.shouldDefer(method, frame.params)) {
+        deferredRequests.responses.push({ id, method, params: frame.params, socket: this });
         return;
       }
       const respond = (response: unknown) => {
@@ -2579,17 +2560,6 @@ function installControlUiMockGateway(
       if (this.readyState !== MockWebSocket.OPEN) {
         return;
       }
-      if (isRecord(frame) && frame.type === "res" && frame.ok === true) {
-        const request = requests.findLast((candidate) => candidate.id === frame.id);
-        if (
-          request?.method === "sessions.list" &&
-          isRecord(request.params) &&
-          request.params.includeGlobal === true &&
-          !request.params.spawnedBy
-        ) {
-          exposed.initialRosterDelivered = true;
-        }
-      }
       this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(frame) }));
     }
   }
@@ -2598,28 +2568,28 @@ function installControlUiMockGateway(
     get online() {
       return online;
     },
-    initialRosterDelivered: false,
     closeLatest(code, reason) {
       MockWebSocket.latest?.close(code ?? 1006, reason ?? "mock close");
     },
     deliverLatest(frame) {
       MockWebSocket.latest?.deliver(frame);
     },
-    deferNext(method, match) {
-      deferredMethods.push({ method, match });
-      return exposed.findRequests(method, match).length;
+    deferNext(method, match, options) {
+      deferredRequests.defer({ method, match, exactParams: options?.exactParams });
+      return exposed.findRequests(method, match, options).length;
     },
     emit(event, payload) {
       emitGatewayEvent(MockWebSocket.latest, event, payload);
     },
     // Capture and deferral must select the same RPC scope; child lists share the roster method.
-    findRequests: (method, match) =>
+    findRequests: (method, match, options) =>
       requests.filter(
         (request) =>
-          (!method || request.method === method) && responseFixtures.matches(request.params, match),
+          (!method || request.method === method) &&
+          deferredRequests.matches(request.params, { match, exactParams: options?.exactParams }),
       ),
-    rejectDeferred(method, error) {
-      for (const response of takeDeferredResponses(method)) {
+    rejectDeferred(method, error, options) {
+      for (const response of deferredRequests.take(method, options)) {
         response.socket.deliver({
           error: {
             code: error?.code ?? "INVALID_REQUEST",
@@ -2634,8 +2604,8 @@ function installControlUiMockGateway(
       }
     },
     requests,
-    resolveDeferred(method, payload) {
-      for (const response of takeDeferredResponses(method)) {
+    resolveDeferred(method, payload, options) {
+      for (const response of deferredRequests.take(method, options)) {
         const resolvedPayload = commitFixtureResponse(
           response.method,
           response.params,
@@ -2880,9 +2850,12 @@ export async function installMockGateway(
     scenario.awaitInitialRoster ??
     (!connectFails &&
       normalizedScenario.startupPendingResponses === 0 &&
-      ![...normalizedScenario.heldMethods, ...normalizedScenario.deferredMethods].some((method) =>
-        rosterGates.has(method),
-      ))
+      ![
+        ...normalizedScenario.heldMethods,
+        ...normalizedScenario.deferredMethods,
+        ...normalizedScenario.heldRequests.map((request) => request.method),
+        ...normalizedScenario.deferredRequests.map((request) => request.method),
+      ].some((method) => rosterGates.has(method)))
   ) {
     // Startup renders the selected descriptor before releasing the automatic roster.
     // Keep navigation's Response, but give ordinary scenarios the fully rendered roster.
