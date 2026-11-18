@@ -31,7 +31,7 @@ import {
   resolveOfficialPluginCohortNpmSpecs,
 } from "../../../plugins/plugin-version-drift.js";
 import { resolveNpmUpdateTarget } from "../../../plugins/update-source.js";
-import { resolveReleaseHostVersion } from "../../../version.js";
+import { resolveCompatibilityHostVersion } from "../../../version.js";
 import {
   collectDownloadableInstallCandidates,
   resolveConfiguredPluginInstallContext,
@@ -70,7 +70,7 @@ export function resolveConfiguredPluginRepairVersions(params: {
     bundledPluginsById,
     officialReplacementPluginIds,
   } = params.context;
-  const coreVersion = resolveReleaseHostVersion(env);
+  const coreVersion = resolveCompatibilityHostVersion(env);
   const cohortSpecs = resolveOfficialPluginCohortNpmSpecs({
     gatewayVersion: coreVersion,
     installRecords: records,

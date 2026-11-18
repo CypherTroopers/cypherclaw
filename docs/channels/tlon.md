@@ -167,6 +167,10 @@ the bot ship can read regardless of the auto-discovery setting.
 Once the bot has replied inside a thread, it keeps responding to later messages in that thread
 without requiring another mention.
 
+Automatic group responses stay at the channel top level for a top-level message,
+or reply to the existing root for a thread message. They do not nest a reply under
+another reply. Explicit reply directives and direct messages keep their own targets.
+
 Set `channels.tlon.implicitMentions.threadParticipation: false` to require a new explicit mention
 for those follow-ups. Account overrides use `channels.tlon.accounts.<id>.implicitMentions`. Tlon
 does not currently produce `replyToBot` or `quotedBot` facts, so those flags have no effect here.
@@ -319,6 +323,11 @@ size check or download fails the send instead of embedding an unchecked URL.
 Upload failures after a successful bounded download can still use the original URL.
 Without a configured cap, the existing link fallback remains available even when
 the image cannot be downloaded within that ceiling.
+
+Outbound image uploads preserve the downloaded filename, including names supplied
+by `Content-Disposition`. If no filename is available, Tlon uses the source URL
+basename or a generated name. Custom-S3 public URLs encode object-key path segments
+so filename characters such as `#` and `?` remain part of the object name.
 
 | Feature         | Status                                        |
 | --------------- | --------------------------------------------- |

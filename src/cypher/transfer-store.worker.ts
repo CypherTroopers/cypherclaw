@@ -1,42 +1,40 @@
-import { getAdmittedSqliteSchemaFacts } from "../infra/sqlite-schema-facts.js";
-import { extractSqliteTableSchema } from "../infra/sqlite-schema-sql.js";
-import type { SqliteWorkerCommand } from "../infra/sqlite-worker-contract.js";
 import { requestSqliteWorkerOperationAdmission } from "../infra/sqlite-worker-operation-admission.js";
-import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db-contract.js";
-import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
-import { OPENCLAW_STATE_SCHEMA_SQL } from "../state/openclaw-state-schema.js";
-import type { CypherTransferWriteOperations } from "./transfer-store.contract.js";
+import { createOpenClawStateSchemaEnsurer } from "../state/openclaw-state-feature-schema-ensure.js";
+import type { WorkerWriteOperationContext } from "../state/worker-operation-registry.js";
 import { writeCypherTransferInDatabase } from "./transfer-store.kernel.js";
 import type { CypherTransferRecord } from "./types.js";
 
-export function executeCypherTransferCommand(
-  command: SqliteWorkerCommand<CypherTransferWriteOperations>,
-  options: OpenClawStateDatabaseOptions,
+const ensureSchema = createOpenClawStateSchemaEnsurer({
+  table: "cypher_transfers",
+  indexes: ["idx_cypher_transfers_node_created"],
+  endMarker: "ON cypher_transfers(node_key, created_at_ms DESC, request_id);\n",
+  operationLabel: "cypherTransfers.schema.ensure",
+});
+
+function writeCypherTransfer(
+  type: "cypherTransfers.insert" | "cypherTransfers.update",
+  record: CypherTransferRecord,
+  context: WorkerWriteOperationContext,
 ): CypherTransferRecord {
-  return runOpenClawStateWriteTransaction(
+  ensureSchema({ ...context.stateOptions(), database: context.open() });
+  return context.write(
     ({ db }) => {
       requestSqliteWorkerOperationAdmission({ stage: "transaction", facts: undefined });
-      const facts = getAdmittedSqliteSchemaFacts(db);
-      if (!facts) {
-        throw new Error("Cypher transfer writes require an admitted state database");
-      }
-      if (!facts.tables.has("cypher_transfers")) {
-        // sqlite-allow-raw: Canonical feature-local first-use DDL; row access uses Kysely.
-        db.exec(
-          extractSqliteTableSchema(OPENCLAW_STATE_SCHEMA_SQL, "cypher_transfers", {
-            endMarker: "ON cypher_transfers(node_key, created_at_ms DESC, request_id);",
-          }),
-        );
-      }
-      const record = writeCypherTransferInDatabase(
+      const written = writeCypherTransferInDatabase(
         db,
-        command.input,
-        command.type === "cypherTransfers.insert" ? "insert" : "update",
+        record,
+        type === "cypherTransfers.insert" ? "insert" : "update",
       );
       requestSqliteWorkerOperationAdmission({ stage: "commit", facts: undefined });
-      return record;
+      return written;
     },
-    options,
-    { operationLabel: command.type },
+    { operationLabel: type },
   );
 }
+
+export const cypherTransferOperations = {
+  "cypherTransfers.insert": (input: CypherTransferRecord, context: WorkerWriteOperationContext) =>
+    writeCypherTransfer("cypherTransfers.insert", input, context),
+  "cypherTransfers.update": (input: CypherTransferRecord, context: WorkerWriteOperationContext) =>
+    writeCypherTransfer("cypherTransfers.update", input, context),
+};

@@ -1,109 +1,19 @@
-import { beforeEach, describe, vi } from "vitest";
-import {
-  doctorCommandCall,
-  expectNoSideEffects,
-  freshRestartCalls,
-  getErrorOutput,
-  getTriageFailures,
-  lastWriteJsonCall,
-  packageInstallCommandCall,
-} from "./update-cli-assertions.test-support.js";
+import { describe, vi } from "vitest";
+import * as assertions from "./update-cli-assertions.test-support.js";
 import { createUpdateCliFixture } from "./update-cli-fixture.test-support.js";
-import {
-  candidateValidation,
-  databasePreflightMocks,
-  gatewayFixturePid,
-  mockGetSelfAndAncestorPidsSync,
-  nodeVersionSatisfiesEngine,
-  pluginAvailabilityPreflight,
-  readPackageVersion,
-  serviceLoaded,
-  serviceRestart,
-  serviceStart,
-  serviceStop,
-  spawn,
-} from "./update-cli-mocks.test-support.js";
-import {
-  defaultRuntime,
-  ExitError,
-  fetchNpmPackageTargetStatus,
-  invokeUpdateCli,
-  listUpdateRuns,
-  readConfigFileSnapshot,
-  replaceConfigFile,
-  resolveGatewayInstallEntrypoint,
-  updateCommand,
-  updateGitCheckout,
-} from "./update-cli-modules.test-support.js";
+import * as mocks from "./update-cli-mocks.test-support.js";
+import * as modules from "./update-cli-modules.test-support.js";
 import { registerCandidateAdmissionTests } from "./update-cli/update-command-candidate-admission.test-support.js";
 
 await vi.hoisted(() => import("./update-cli-mocks.test-support.js"));
 
 describe("update-cli", () => {
-  const {
-    baseConfig,
-    baseSnapshot,
-    createCaseDir,
-    fixtureRoot,
-    mockCurrentProcessFreshDoctor,
-    mockNpmGlobalCommands,
-    mockOwnedGitService,
-    mockPackageInstallAtCaseDir,
-    mockPackageInstallStatus,
-    primeNpmChannelTag,
-    primeServiceCommand,
-    profileStateDir,
-    setupInstalledPackageRoot,
-    tempDirs,
-  } = createUpdateCliFixture();
-
-  beforeEach(() => {
-    // Candidate admission scenarios use synthetic stable npm targets.
-    baseConfig.update = { channel: "stable" };
-  });
-
+  const fixture = createUpdateCliFixture();
   registerCandidateAdmissionTests({
-    createCaseDir,
-    makeTempDir: (prefix) => tempDirs.make(prefix),
-    fixtureRoot,
-    baseSnapshot,
-    setupInstalledPackageRoot,
-    mockNpmGlobalCommands,
-    mockCurrentProcessFreshDoctor,
-    mockPackageInstallStatus,
-    mockPackageInstallAtCaseDir,
-    mockOwnedGitService,
-    primeNpmChannelTag,
-    primeServiceCommand,
-    profileStateDir,
-    gatewayFixturePid,
-    readPackageVersion,
-    spawn,
-    serviceLoaded,
-    serviceStop,
-    serviceStart,
-    serviceRestart,
-    mockGetSelfAndAncestorPidsSync,
-    pluginAvailabilityPreflight,
-    candidateValidation,
-    nodeVersionSatisfiesEngine,
-    databasePreflightMocks,
-    readConfigFileSnapshot,
-    replaceConfigFile,
-    fetchNpmPackageTargetStatus,
-    resolveGatewayInstallEntrypoint,
-    listUpdateRuns,
-    updateGitCheckout,
-    defaultRuntime,
-    ExitError,
-    updateCommand,
-    invokeUpdateCli,
-    packageInstallCommandCall,
-    doctorCommandCall,
-    freshRestartCalls,
-    lastWriteJsonCall,
-    getErrorOutput,
-    getTriageFailures,
-    expectNoSideEffects,
+    ...fixture,
+    ...mocks,
+    ...modules,
+    ...assertions,
+    makeTempDir: (prefix) => fixture.tempDirs.make(prefix),
   });
 });

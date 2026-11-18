@@ -29,16 +29,12 @@ const RUN_NODE_PACKAGE_SOURCE_ROOTS = [
 /** Source roots whose changes require the root dev build pipeline. */
 export const runNodeSourceRoots = [
   "src",
+  "ui/src/i18n/.i18n",
   ...RUN_NODE_PACKAGE_SOURCE_ROOTS,
   BUNDLED_PLUGIN_ROOT_DIR,
 ];
-/** Root build inputs whose changes invalidate the dev build. */
-export const runNodeConfigFiles = [
-  "tsconfig.json",
-  "package.json",
-  "tsdown.config.ts",
-  "release-compatibility.mjs",
-];
+/** Root config files whose changes invalidate the dev build. */
+export const runNodeConfigFiles = ["tsconfig.json", "package.json", "tsdown.config.ts"];
 /** Combined watch list used by the run-node wrapper. */
 export const runNodeWatchedPaths = [...runNodeSourceRoots, ...runNodeConfigFiles];
 /** Plugin metadata files that require a runtime restart even without source edits. */
@@ -82,6 +78,9 @@ const isRelevantRunNodePath = (
     ignoredRunNodeRepoPathPatterns.some((pattern) => pattern.test(normalizedPath))
   ) {
     return false;
+  }
+  if (/^ui\/src\/i18n\/\.i18n\/[^/]+\.tm\.jsonl$/u.test(normalizedPath)) {
+    return true;
   }
   if (runNodeConfigFiles.includes(normalizedPath)) {
     return true;

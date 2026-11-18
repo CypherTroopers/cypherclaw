@@ -31,7 +31,6 @@ import {
   SPLIT_CHANGELOG_EVIDENCE_REUSE_POLICY,
   MAX_RELEASE_ARTIFACT_BYTES,
   normalizeReleaseCoveragePolicy,
-  normalizeReleaseTelegramWaiver,
   readReleaseJobListing,
   releaseCompositeJobsSha256,
   releaseChildSpec,
@@ -44,7 +43,6 @@ import {
   validateRetiredReleaseRetryFields,
   validateReleaseChildRunProvenance,
   validateReleaseStateArtifact,
-  validateReleaseTelegramWaiverBinding,
 } from "./full-release-validation-policy.mjs";
 import { inspectActionsArtifactZip } from "./lib/actions-artifact-archive.mjs";
 import { compareAscii, sortJsonValueKeys } from "./lib/canonical-json.mjs";
@@ -67,6 +65,10 @@ import {
   validateTrustedProducerIdentity,
 } from "./lib/release-evidence-identity.mjs";
 import { resolveReleasePublishInputs } from "./lib/release-publish-inputs.mjs";
+import {
+  evaluateReleaseChildPolicy,
+  validateReleaseWaiverAggregates,
+} from "./lib/release-validation-waivers.mjs";
 import {
   revalidateQualificationAdmissionAuthority,
   verifyQualificationAdmission,
@@ -722,7 +724,6 @@ export function requiredChildKeysForRerunGroup(
   }
   if (
     rerunGroup === "all" &&
-    !validationInputs.telegramWaiver &&
     ((typeof validationInputs.npmTelegramPackageSpec === "string" &&
       validationInputs.npmTelegramPackageSpec.length > 0) ||
       (typeof validationInputs.releasePackageSpec === "string" &&
@@ -1236,12 +1237,6 @@ export function validateParentManifest(value, expected) {
         );
   const publishInputs =
     value.publishInputs === undefined ? undefined : resolveReleasePublishInputs(value);
-  normalizeReleaseTelegramWaiver({
-    ...validationInputs,
-    candidateVersion: candidateBinding?.package.version,
-    releaseProfile,
-    rerunGroup: value.rerunGroup,
-  });
   if (validationInputs?.coveragePolicy !== undefined && value.version !== 4) {
     throw new Error("release coverage policy requires a version 4 manifest");
   }
@@ -1270,7 +1265,7 @@ export function validateParentManifest(value, expected) {
   const childEvidence = normalizeManifestChildEvidence(value.childEvidence);
   if (validationInputs?.laneWaiver || value.publishInputs?.stableSoakWaiver) {
     throw new Error(
-      "Waived release evidence is no longer accepted; rerun Full Release Validation without waivers.",
+      "Runtime waiver inputs are no longer accepted; run Full Release Validation under checked-in release-tooling policy.",
     );
   }
   const advisoryJobs = validateReleaseManifestAdvisoryJobs(value);
@@ -2129,11 +2124,23 @@ export function createReleaseEvidenceClient(repository = DEFAULT_REPO) {
     revalidateQualificationAdmissionAuthority(options) {
       return revalidateQualificationAdmissionAuthority(options);
     },
-    getArtifact(artifactId) {
+    getArtifact(artifactId, { freshlyUploaded = false } = {}) {
       if (!/^[1-9][0-9]{0,19}$/u.test(String(artifactId))) {
         throw new Error("invalid publication artifact ID");
       }
-      return githubRestJson(`actions/artifacts/${artifactId}`, normalizedRepository);
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return githubRestJson(`actions/artifacts/${artifactId}`, normalizedRepository);
+        } catch (error) {
+          // Upload finalization can precede REST visibility. Only the uploader
+          // opts into this bounded wait; ordinary missing evidence fails closed.
+          const diagnostic = `${error?.message ?? ""}\n${error?.stderr ?? ""}`;
+          if (!freshlyUploaded || attempt >= 3 || !/HTTP 404\b/u.test(diagnostic)) {
+            throw error;
+          }
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_000 * 2 ** attempt);
+        }
+      }
     },
     getRef(fullRef) {
       const refPath = String(fullRef)
@@ -2314,6 +2321,7 @@ async function validateStrictChildRun({
   }
   let jobs;
   let composite;
+  let rawJobs;
   if (plannedChild && childEvidence) {
     if (childEvidence.effectiveRunAttempt > effectiveRunAttempt) {
       throw new Error(`manifest child composite evidence mismatch: ${child.name}`);
@@ -2343,6 +2351,11 @@ async function validateStrictChildRun({
               triggering_actor: { login: childEvidence.triggeringActor },
             },
     });
+    rawJobs = evidence.jobs.map((job) =>
+      attempts
+        .find((attempt) => attempt.runAttempt === job.acceptedRunAttempt)
+        .jobs.find((raw) => raw.name === job.name),
+    );
     if (
       JSON.stringify(sortReleaseJsonValueKeys(childEvidence)) !==
       JSON.stringify(sortReleaseJsonValueKeys(evidence))
@@ -2374,15 +2387,22 @@ async function validateStrictChildRun({
     runId,
     status: run.status,
   };
+  const targetVersion = parentEvidence.manifest.validationInputs?.targetVersion;
+  const policy = evaluateReleaseChildPolicy({ child: policyChild, targetVersion });
   if (
     run.repository?.full_name !== repository ||
     run.head_sha !== (plannedChild?.workflowSha ?? parentEvidence.manifest.workflowSha) ||
-    !terminalPolicyPass(policyChild)
+    !terminalPolicyPass(policyChild, targetVersion)
   ) {
     throw new Error(`manifest child run does not pass release policy: ${child.name}`);
   }
+  await validateReleaseWaiverAggregates({
+    policy,
+    jobs: rawJobs ?? jobs,
+    getJobLog: (id) => client.getJobLog(id),
+  });
   if (child.requiredJobs) {
-    validateQualificationJobs(jobs, child.requiredJobs, child.name);
+    validateQualificationJobs(jobs, child.requiredJobs, child.name, policy.waivedJobNames);
   }
   if (child.manifestKey === "productPerformance") {
     // The authenticated composite selects the newest executed attempt per job,
@@ -2401,7 +2421,7 @@ async function validateStrictChildRun({
     headBranch: run.head_branch,
     parentJobId: String(parentJob.id),
     path: workflowPath(run),
-    policyPassed: true,
+    waivers: policy.waivers,
     role: child.manifestKey,
     ...(composite
       ? {
@@ -2953,8 +2973,14 @@ export async function validateReleaseRunEvidence(
         workflowSha: rootEvidence.manifest.workflowSha,
       })
     : undefined;
-  validateReleaseTelegramWaiverBinding(executionPlan, rootEvidence.manifest.validationInputs);
   validateReleaseCoveragePolicyBinding(executionPlan, rootEvidence.manifest.validationInputs);
+  if (
+    executionPlan &&
+    Object.hasOwn(executionPlan, "targetVersion") &&
+    executionPlan.targetVersion !== (rootEvidence.manifest.validationInputs?.targetVersion ?? "")
+  ) {
+    throw new Error("release manifest target version differs from its immutable plan");
+  }
   const plannedByKey = new Map(
     (executionPlan?.children ?? []).map((plannedChild) => [plannedChild.key, plannedChild]),
   );
@@ -3085,6 +3111,18 @@ export async function validateReleaseRunEvidence(
     }
     return result.value;
   });
+  const waivers = children.flatMap((child) =>
+    child.waivers.map((waiver) => ({
+      ...waiver,
+      runId: child.runId,
+      runAttempt: child.runAttempt,
+    })),
+  );
+  if (
+    !isDeepStrictEqual(rootEvidence.manifestJson.waivers ?? [], sortReleaseJsonValueKeys(waivers))
+  ) {
+    throw new Error("release manifest waivers differ from checked-in release tooling policy");
+  }
   if (remainingExpectedRunAttempts?.size) {
     throw new Error(
       `expected run attempts contain unvalidated run IDs: ${[...remainingExpectedRunAttempts.keys()].join(", ")}`,
@@ -3104,8 +3142,8 @@ export async function validateReleaseRunEvidence(
   );
   const evidence = sortReleaseJsonValueKeys({
     children,
+    waivers,
     conclusions: {
-      allRequiredSucceeded: children.every((child) => child.policyPassed),
       children: childConclusions,
       current: current.conclusion,
       root: root.conclusion,
@@ -3152,11 +3190,12 @@ export async function validateReleaseRunEvidence(
 }
 
 // Normalize only after the owner has authenticated the complete evidence graph.
+// Recovery retains its original admission here, never in the aggregate source field.
 function qualificationFacts(evidence) {
   const admission = evidence.qualificationAdmission ?? null;
   const manifest = evidence.current.manifest;
-  /** @type {"direct" | "historical"} */
-  const kind = admission ? "direct" : "historical";
+  /** @type {"direct" | "recovery" | "historical"} */
+  const kind = admission ? (manifest.receiptRecovery ? "recovery" : "direct") : "historical";
   return {
     kind,
     candidateSha: evidence.current.targetSha,

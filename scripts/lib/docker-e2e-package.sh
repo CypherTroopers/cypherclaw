@@ -350,8 +350,6 @@ docker_e2e_harness_mount_args() {
   local windows_helpers="${DOCKER_E2E_WINDOWS_HELPERS_PATH:-$harness_root/scripts/windows-cmd-helpers.mjs}"
   DOCKER_E2E_HARNESS_ARGS=(
     -v "$harness_root/scripts/e2e:/app/scripts/e2e:ro"
-    -v "$harness_root/release-compatibility.mjs:/app/release-compatibility.mjs:ro"
-    -v "$harness_root/release-compatibility.mjs:/tmp/openclaw-release-harness/release-compatibility.mjs:ro"
     -v "$harness_root/scripts/docker/verify-fs-safe-native.mjs:/app/scripts/docker/verify-fs-safe-native.mjs:ro"
     -v "$harness_root/scripts/lib:/app/scripts/lib:ro"
     -v "$harness_root/packages/gateway-client/src:/app/packages/gateway-client/src:ro"
@@ -360,6 +358,7 @@ docker_e2e_harness_mount_args() {
     -v "$harness_root/packages/normalization-core/package.json:/app/packages/normalization-core/package.json:ro"
     -v "$harness_root/packages/normalization-core/src:/app/packages/normalization-core/src:ro"
     -v "$harness_root/tsconfig.json:/app/tsconfig.json:ro"
+    -v "$harness_root/standalone-runtime-profile.mjs:/app/standalone-runtime-profile.mjs:ro"
     -v "$harness_root/test/e2e/qa-lab:/app/test/e2e/qa-lab:ro"
     -v "$harness_root/test/helpers:/app/test/helpers:ro"
     -v "$harness_root/scripts/prepublish-plugin-registry-artifact.mjs:/app/scripts/prepublish-plugin-registry-artifact.mjs:ro"

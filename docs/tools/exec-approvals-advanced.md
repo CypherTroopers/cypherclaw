@@ -85,12 +85,7 @@ Shell chaining (`&&`, `||`, `;`) is allowed when every top-level segment
 satisfies the allowlist (including safe bins or skill auto-allow). Redirections
 remain unsupported in allowlist mode. Command substitution (`$()` / backticks) is
 rejected during allowlist parsing, including inside double quotes; use single
-quotes if you need literal `$()` text. Standalone variable assignments whose
-value uses arithmetic (`$((...))`) or braced (`${...}`) expansion, or whose name
-or compound-array value has a subscript, are also rejected because bash can evaluate
-them recursively; plain `x=$HOME` and unkeyed arrays are still allowed. Leading environment assignments
-(`NAME=value cmd` and `NAME+=value cmd`) are never satisfied by the allowlist
-alone.
+quotes if you need literal `$()` text.
 
 On macOS companion-app approvals, raw shell text containing shell control or
 expansion syntax (`&&`, `||`, `;`, `|`, `` ` ``, `$`, `<`, `>`, `(`, `)`) is

@@ -193,7 +193,7 @@ Report CypherClaw bugs and feature requests in [this fork's issue tracker](https
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for maintainers and contribution guidelines; AI-assisted PRs are welcome.
 
-The upstream [Discord](https://discord.gg/clawd) and [plugin SDK documentation](https://docs.openclaw.ai/plugins/building-plugins) describe OpenClaw. Report issues specific to this fork in the CypherClaw issue tracker rather than the upstream project.
+The upstream [Discord](https://discord.gg/clawd) and [plugin SDK documentation](https://docs.openclaw.ai/plugins/building-plugins) describe OpenClaw. Report issues specific to this fork in the CypherClaw issue tracker rather than the upstream project. Report vulnerabilities through [SECURITY.md](SECURITY.md).
 
 OpenClaw was built for **Molty**, a space lobster AI assistant, by Peter Steinberger and the community. Explore the [project lore](https://docs.openclaw.ai/start/lore), [soul.md](https://soul.md), [Peter's site](https://steipete.me), [Star History](https://www.star-history.com/#openclaw/openclaw&type=date&legend=top-left), and [@openclaw](https://x.com/openclaw).
 

@@ -9,8 +9,8 @@ This file owns the fork's source provenance and intake procedure. Update the ups
 | Source                  | Pin                                                                          |
 | ----------------------- | ---------------------------------------------------------------------------- |
 | Official repository     | `https://github.com/openclaw/openclaw.git`                                   |
-| Official stable release | [`v2026.10.33`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.33) |
-| Official peeled commit  | `5196fbbf89838939b0c2e29c09b8829afbc0d415`                                   |
+| Official stable release | [`v2026.11.5`](https://github.com/openclaw/openclaw/releases/tag/v2026.11.5) |
+| Official peeled commit  | `e13cf15ece9bbd969b7362927c315362c90c97ff`                                   |
 | Fork repository         | `https://github.com/CypherTroopers/cypherclaw.git`                           |
 
 ### Initial stable migration
@@ -90,6 +90,18 @@ Shared state migrates from schema **20** to **22** and agent databases from **25
 
 This source intake does not publish a release or activate a live Gateway.
 
+
+
+### November 2026.11.5 intake
+
+The `v2026.11.5` intake reapplies the reviewed fork delta through `82bb176031eb7140018b7d1047a2cca924404931`, relative to official `v2026.10.33` commit `5196fbbf89838939b0c2e29c09b8829afbc0d415`, onto official `e13cf15ece9bbd969b7362927c315362c90c97ff`. Official `v2026.10.33` is not an ancestor of this November stable tag, so the candidate rebuilds from the new stable commit and retains both histories as merge parents.
+
+Shared state migrates from schema **22** to **36** and agent databases from **27** to **38** through the official migration and backup owners. Preserve a verified pre-upgrade backup before activating this source against existing state. Official 11.5 publishes Node floors `>=24.16.0 <25 || >=26.1.0`, but this fork retains admission floors **24.22.1** / **26.12.1** (`package.json` engines and `node-version.mjs`) so CypherClaw installers keep provisioning private Node **24.22.1**.
+
+Upstream 11.5 retires `src/state/openclaw-state-worker-runtime.ts` in favor of `stateWorkerRegistry` loaders in `openclaw-state.worker.ts`. Cypher transfer writes register as `cypherTransferOperations` on that registry; reads remain dedicated `cypherTransfers.get` / `cypherTransfers.list` commands handled in `openclaw-state-read-handlers.ts`. Cypher node controls, wallet generation, ColossusX tabs, branding assets, and the packaged fork's GitHub Releases update identity remain part of the fork.
+
+This source intake does not publish a release or activate a live Gateway.
+
 ## Prepare the next stable intake
 
 Start with a clean checkout of the reviewed fork branch and verify `origin` is the CypherTroopers repository. Confirm the selected official release is published, is not a draft or prerelease, and belongs to the regular stable channel. Record its full peeled commit from the official tag. Moving official `main` and `release/*` branch tips are not intake targets.
@@ -97,7 +109,7 @@ Start with a clean checkout of the reviewed fork branch and verify `origin` is t
 Fetch only the selected tag into a private reference. Replace the example tag with the release selected for this intake:
 
 ```sh
-cypherclaw_tag=v2026.10.33
+cypherclaw_tag=v2026.11.5
 git fetch --no-tags --no-write-fetch-head https://github.com/openclaw/openclaw.git \
   "refs/tags/${cypherclaw_tag}:refs/cypherclaw/upstream/${cypherclaw_tag}"
 git rev-parse "refs/cypherclaw/upstream/${cypherclaw_tag}^{commit}"

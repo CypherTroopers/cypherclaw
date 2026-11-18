@@ -261,6 +261,11 @@ groups, so a crash between groups leaves a valid transcript prefix.
 tool topology; a structurally destructive rewrite suppresses the whole group
 instead of persisting a false replay.
 
+Ephemeral helper turns, including setup inference probes, use the caller-owned
+in-memory session manager. The journal retains the same hooks, event identity,
+and complete tool groups without creating durable session state. Ordinary
+persistent attempts still require an exact runtime session target.
+
 Explicitly detached one-shot turns never look up or retain SDK session bindings.
 They create their own native session and delete only that fresh history after
 accepted tool work and background compaction settle, including on failure or

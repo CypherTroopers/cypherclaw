@@ -40,7 +40,6 @@ const excludedHandles = new Set([
   "clawsweeper",
   "claude",
   "codex",
-  "copilot",
   "hugin-bot",
   "roboclaw-bot",
   "tideclaw-bot",
@@ -111,9 +110,6 @@ Options:
                         Unqualified names prefer origin/<ref>, then fall back to a local ref.
   --seed-ref <ref>      Use an existing release section as editorial input.
   --shipped-ref <tag>   Exclude PRs already recorded by this shipped tag; repeatable.
-  --allow-unavailable-closing-reference <number>
-                        Explicitly acknowledge a NOT_FOUND historical closing issue; repeatable.
-                        Does not waive PR, provenance, subject, or rendered reference checks.
   --release-provenance <sha -> #PR[, #PR]>
                         Supply an exact provenance marker; repeatable.
   --regular-stable-version <version>
@@ -129,7 +125,6 @@ export function parseArgs(argv) {
   const options = {
     releaseTags: [],
     releaseProvenance: [],
-    allowedUnavailableClosingReferences: [],
     checkGithub: false,
     help: false,
     json: false,
@@ -159,7 +154,6 @@ export function parseArgs(argv) {
     ["--release-tag", "releaseTags"],
     ["--release-provenance", "releaseProvenance"],
     ["--shipped-ref", "shippedRefs"],
-    ["--allow-unavailable-closing-reference", "allowedUnavailableClosingReferences"],
     ["--github-snapshot", "githubSnapshotPath"],
     ["--main-ref", "mainRef"],
     ["--release-branch", "releaseBranch"],
@@ -213,14 +207,6 @@ export function parseArgs(argv) {
   if (options.noGithubSnapshot && options.refreshGithubSnapshot) {
     fail("--no-github-snapshot cannot be combined with --refresh-github-snapshot");
   }
-  options.allowedUnavailableClosingReferences = options.allowedUnavailableClosingReferences.map(
-    (value) => {
-      if (!/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value))) {
-        fail("--allow-unavailable-closing-reference requires a positive issue number");
-      }
-      return Number(value);
-    },
-  );
   const uniqueShippedRefs = new Set(options.shippedRefs);
   if (uniqueShippedRefs.size !== options.shippedRefs.length) {
     fail("--shipped-ref values must be unique");
@@ -1161,39 +1147,33 @@ export function canonicalPullRequests(
   return [...new Set(pullRequests)].toSorted((left, right) => left - right);
 }
 
-function canonicalMainCommits(base, mainRef) {
+function canonicalMainCommits(base, mainRef, filters = []) {
   if (!mainRef) {
     return [];
   }
   const mainCommit = /** @type {string} */ (gitCommit(mainRef, true));
   const mainBase = git(["merge-base", base, mainCommit]);
-  const hashes = git(["rev-list", "--reverse", `${mainBase}..${mainCommit}`])
-    .split("\n")
-    .filter(Boolean);
+  const output = git([
+    "log",
+    "--reverse",
+    "--format=%H%x1f%s%x1f%an%x1f%ae%x1f%B%x1e",
+    ...filters,
+    `${mainBase}..${mainCommit}`,
+  ]);
   const commits = [];
-  // Long-lived release branches can exceed the subprocess buffer even with a small delta.
-  // Preserve every canonical commit and its order, but bound each body read.
-  for (let offset = 0; offset < hashes.length; offset += 32) {
-    const output = git([
-      "log",
-      "--no-walk=unsorted",
-      "--format=%H%x1f%s%x1f%an%x1f%ae%x1f%B%x1e",
-      ...hashes.slice(offset, offset + 32),
-    ]);
-    for (const record of output.split("\x1e")) {
-      if (!record) {
-        continue;
-      }
-      const [rawHash, subject, authorName, authorEmail, ...bodyParts] = record.split("\x1f");
-      const hash = rawHash.trim();
-      commits.push({
-        authorEmail,
-        authorName,
-        body: bodyParts.join("\x1f"),
-        hash,
-        subject,
-      });
+  for (const record of output.split("\x1e")) {
+    if (!record) {
+      continue;
     }
+    const [rawHash, subject, authorName, authorEmail, ...bodyParts] = record.split("\x1f");
+    const hash = rawHash.trim();
+    commits.push({
+      authorEmail,
+      authorName,
+      body: bodyParts.join("\x1f"),
+      hash,
+      subject,
+    });
   }
   return commits;
 }
@@ -1792,20 +1772,15 @@ export function classifyUnavailableContextualReferences({
   activeCommits,
   protectedReferences,
   highestResolved,
-  allowedClosingReferences = new Set(),
 }) {
   const required = new Set(protectedReferences);
-  const closing = new Set();
   const bodyCommits = new Map();
   for (const commit of activeCommits) {
-    for (const number of referencesIn(commit.subject)) {
+    for (const number of [
+      ...referencesIn(commit.subject),
+      ...closingReferencesIn(`${commit.subject}\n${commit.body}`),
+    ]) {
       required.add(number);
-    }
-    for (const number of closingReferencesIn(`${commit.subject}\n${commit.body}`)) {
-      closing.add(number);
-      if (!allowedClosingReferences.has(number)) {
-        required.add(number);
-      }
     }
     for (const number of referencesIn(commit.body)) {
       const commits = bodyCommits.get(number) ?? new Set();
@@ -1825,7 +1800,6 @@ export function classifyUnavailableContextualReferences({
       unavailable.push({
         number,
         commits: [...bodyCommits.get(number)].toSorted((a, b) => (a === b ? 0 : a < b ? -1 : 1)),
-        ...(closing.has(number) ? { acknowledged: true } : {}),
       });
     } else {
       stillUnresolved.push(number);
@@ -1948,6 +1922,72 @@ export function recoverUnavailablePullRequests({
   return recovered;
 }
 
+function canonicalSourceCommit(hash) {
+  const [subject, authorName, authorEmail, ...body] = git([
+    "show",
+    "-s",
+    "--format=%s%x1f%an%x1f%ae%x1f%B",
+    hash,
+  ]).split("\x1f");
+  return {
+    hash,
+    subject: subject.replace(/^\[[^\]]+\]\s*/, ""),
+    authorName,
+    authorEmail,
+    body: body.join("\x1f"),
+    changedPaths: changedPathsForCommit(hash),
+  };
+}
+
+function hasCanonicalMainSource(node, mainCommit, resolveNodes) {
+  const source = canonicalSourceCommit(node.mergeCommit.oid);
+  const subjectPattern = normalizedCommitSubject(source.subject)
+    .replace(/[.*+?^$()|[\]\\]/g, "\\$&")
+    .replace(/\s+/g, "[[:space:]]+");
+  const candidates = new Map(
+    canonicalMainCommits(source.hash, mainCommit, [
+      "--extended-regexp",
+      "--regexp-ignore-case",
+      "--grep=" + source.hash,
+      "--grep=" + subjectPattern,
+    ]).map((candidate) => [
+      candidate.hash,
+      {
+        ...candidate,
+        subject: candidate.subject.replace(/^\[[^\]]+\]\s*/, ""),
+        changedPaths: changedPathsForCommit(candidate.hash),
+      },
+    ]),
+  );
+  for (const hash of cherryPickOrigins(source.body)) {
+    if (gitIsAncestor(hash, mainCommit)) {
+      const candidate = canonicalSourceCommit(hash);
+      // Squash bodies can retain unrelated constituent cherry-pick trailers.
+      if (pathsOverlap(source.changedPaths, candidate.changedPaths)) {
+        candidates.set(hash, candidate);
+      }
+    }
+  }
+  const origins = backportPullRequestOrigins(source.body);
+  const namedSources = origins.length > 0 ? resolveNodes(origins) : new Map();
+  for (const [number, origin] of namedSources) {
+    if (
+      origin?.baseRefName === "main" &&
+      origin.mergedAt &&
+      origin.mergeCommit?.oid &&
+      gitIsAncestor(origin.mergeCommit.oid, mainCommit)
+    ) {
+      const candidate = canonicalSourceCommit(origin.mergeCommit.oid);
+      candidates.set(candidate.hash, { ...candidate, pullRequests: [number] });
+    }
+  }
+  const mainCandidates = [...candidates.values()];
+  return (
+    mainCandidates.some((candidate) => cherryPickOrigins(candidate.body).includes(source.hash)) ||
+    canonicalMainCommitMatches(source, mainCandidates).length > 0
+  );
+}
+
 export function validateReleaseProvenanceOverrides(
   provenanceOverrides,
   nodes,
@@ -1955,8 +1995,8 @@ export function validateReleaseProvenanceOverrides(
   isMainAncestor = gitIsAncestor,
   resolveNodes = (numbers) => resolveReferences(numbers).nodes,
 ) {
-  // Shipped-ref subtraction removes already-released PRs from the release
-  // inventory, but markers naming them still need the same main validation.
+  // Subtraction does not excuse source validation. A merged release-only
+  // original is valid only until the corresponding main forward-port exists.
   const missing = [...new Set([...provenanceOverrides.values()].flat())].filter(
     (number) => !nodes.has(number),
   );
@@ -1964,15 +2004,18 @@ export function validateReleaseProvenanceOverrides(
   for (const [commit, pullRequests] of provenanceOverrides) {
     for (const number of pullRequests) {
       const node = nodes.get(number) ?? markerNodes.get(number);
-      // Markers may name current-main forward-ports, but never release-only or unmerged PRs.
-      if (
-        node?.__typename !== "PullRequest" ||
-        node.baseRefName !== "main" ||
-        !node.mergedAt ||
-        !node.mergeCommit?.oid ||
-        !isMainAncestor(node.mergeCommit.oid, mainCommit)
-      ) {
-        fail(`release provenance marker for ${commit} references non-main PR #${number}`);
+      const merged = node?.__typename === "PullRequest" && node.mergedAt && node.mergeCommit?.oid;
+      const onMain =
+        merged && node.baseRefName === "main" && isMainAncestor(node.mergeCommit.oid, mainCommit);
+      const releaseOnly =
+        merged &&
+        node.baseRefName?.startsWith("release/") &&
+        !isMainAncestor(node.mergeCommit.oid, mainCommit) &&
+        !hasCanonicalMainSource(node, mainCommit, resolveNodes);
+      if (!onMain && !releaseOnly) {
+        fail(
+          "release provenance marker for " + commit + " references invalid source PR #" + number,
+        );
       }
     }
   }
@@ -2115,7 +2158,6 @@ function thanksFor(node, coauthorHandles) {
     handles.push(node.author.login);
   }
   addHandles(handles, node.recordedThanks ?? []);
-  addHandles(handles, node.acknowledgedReporters ?? []);
   addHandles(handles, coauthorHandles);
   return handles;
 }
@@ -2969,7 +3011,6 @@ function main() {
       ...[...source.provenanceOverrides.values()].flat(),
     ]),
     highestResolved,
-    allowedClosingReferences: new Set(options.allowedUnavailableClosingReferences),
   });
   source.unavailableReferences = unavailable;
   const unavailableNumbers = new Set(unavailable.map((reference) => reference.number));
@@ -3030,26 +3071,6 @@ function main() {
         .map((number) => `#${number}`)
         .join(", ")}`,
     );
-  }
-  // A missing issue cannot supply author data. Preserve only explicit reporter
-  // credit in the original PR merge message, never in a release carrier.
-  for (const node of nodes.values()) {
-    if (node.__typename !== "PullRequest") {
-      continue;
-    }
-    const message = node.mergeCommit?.message ?? "";
-    const reporters = [
-      ...message.matchAll(/(?:fixes|closes|resolves) #([0-9]+), reported by @([a-z0-9-]+)\b/gi),
-    ]
-      .filter((match) =>
-        unavailable.some((ref) => ref.acknowledged && ref.number === Number(match[1])),
-      )
-      .map((match) => match[2]);
-    // The original merge is the historical credit source; a deleted reporter
-    // account must not erase that credit after the closing issue is acknowledged.
-    if (reporters.length > 0) {
-      node.acknowledgedReporters = reporters.filter(isEligibleHandle);
-    }
   }
   const contributorHandles = [
     ...source.activeCommits.flatMap((commit) => commit.coauthors),

@@ -1,4 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "CypherClaw-Tauri"
+  "productName": "CypherClaw-Tauri",
+  "bundle": {
+    "macOS": {
+      "minimumSystemVersion": "26.2"
+    }
+  }
 }

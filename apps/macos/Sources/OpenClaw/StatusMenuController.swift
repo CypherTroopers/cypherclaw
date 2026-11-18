@@ -103,7 +103,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
                 self.observeVoiceChanges()
             }
         }
-        self.hotkey.setEnabled(voiceWakeSupported && enabled)
+        self.hotkey.setEnabled(enabled)
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -237,7 +237,6 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             isPaused: self.state.isPaused,
             connection: connection,
             quickChatEnabled: self.state.quickChatEnabled,
-            voiceWakeSupported: voiceWakeSupported,
             debugEnabled: self.state.debugPaneEnabled,
             updateReady: self.updater.isAvailable && self.updater.updateStatus.isUpdateReady,
             hasUsage: self.summaries.hasUsage,
@@ -319,7 +318,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
                 if modeChanged, self.state.connectionMode == mode,
                    AppLaunchRuntimePlan.current.allowsAutomaticPresentation
                 {
-                    CLIInstallPrompter.shared.checkAndPromptIfNeeded(reason: "connection-mode")
+                    CLIInstallPrompter.shared.checkAndPromptIfNeeded()
                 }
             }
             if modeChanged {

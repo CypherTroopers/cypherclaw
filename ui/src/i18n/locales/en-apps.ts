@@ -26,6 +26,7 @@ const enApps = {
     ctaBrowseClawHub: "Browse ClawHub",
     linkDiscord: "OpenClaw community (upstream)",
     linkDocs: "OpenClaw docs (upstream)",
+    linkSupport: "Support",
     cards: {
       ios: {
         title: "iPhone · OpenClaw (upstream)",

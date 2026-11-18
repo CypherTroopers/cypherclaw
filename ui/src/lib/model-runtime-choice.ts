@@ -4,7 +4,7 @@ export function isSessionRuntimePinned(runtime: GatewaySessionRow["agentRuntime"
   return runtime?.source === "session-key" || runtime?.source === "session";
 }
 
-/** The Gateway's implicit routing is not a user choice and must not be pinned. */
+/** The Gateway's own (implicit) routing is not a user choice; a new session must not pin it. */
 export function selectableRuntimeId(
   runtime: ModelCatalogEntry["agentRuntime"] | undefined,
 ): string | undefined {

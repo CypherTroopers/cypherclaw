@@ -86,23 +86,11 @@ describe("authenticated publication eligibility", () => {
     const manifest = JSON.parse(manifestJson);
     const client = {
       ...f.client,
-      validateChildReuse: () => {
-        throw new Error("unexpected child reuse");
-      },
-      getRunAttempt: () => {
-        throw new Error("unexpected run attempt");
-      },
-      getArtifact: () => {
-        throw new Error("unexpected artifact lookup");
-      },
-      loadExecutionPlanEvidence: () => {
-        throw new Error("unexpected execution plan lookup");
-      },
       getJobLog: async (id: number) => f.client.getJobLog(id),
       getParentJobs: async (id: string) => f.client.getParentJobs(id),
-      getRunAttemptJobs: async (id: string) => f.client.getRunAttemptJobs(id),
       getRun: async (id: string) => f.client.getRun(id),
       getRunView: (id: string) => f.client.getRunView(id),
+      getRunAttemptJobs: async (id: string) => f.client.getRunAttemptJobs(id),
       loadManifest: () => ({ artifact: f.artifact, manifest }),
     };
     const options = {

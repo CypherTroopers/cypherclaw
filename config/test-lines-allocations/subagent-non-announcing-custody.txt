@@ -1,2 +1,2 @@
-# Non-announcing completion custody and pending wake/yield retention regression.
-14
+# Real registration and acknowledged cleanup must release non-announcing child custody.
+9
