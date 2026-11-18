@@ -94,6 +94,7 @@ let package = Package(
             name: "OpenClawNativeStateTests",
             dependencies: ["OpenClawNativeState"],
             path: "Tests/OpenClawNativeStateTests",
+            resources: [.copy("Fixtures")],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),
                 .enableExperimentalFeature("SwiftTesting"),

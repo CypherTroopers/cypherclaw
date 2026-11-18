@@ -1,2 +1,3 @@
-103
-# Rejected Node/QuickJS cells settle despite held siblings; queued input resumes. Tool heartbeats do not reset progress; actual yielded progress does. Budgets unchanged.
+# Failed-cell settlement in Node/QuickJS, bounded silent-model progress, and queued-input recovery.
+# Exact release-adapted regression growth for #196435; optional upstream allocation benchmark omitted.
+211

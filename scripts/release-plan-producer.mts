@@ -370,8 +370,7 @@ function captureQualificationIdentity(
   api("actions/runs/" + runId + "/attempts/" + runAttempt + "/jobs?per_page=100");
   api("actions/artifacts/" + artifactId + "/zip", true);
   if (params.candidateSha !== params.toolingSha) {
-    // Independent Q must be a main ancestor. Retain the exact observation for
-    // the verified child; P still owns descriptor, tuple, and authority validation.
+    // Independent Q must be a main ancestor; retain the observation for P.
     verifyRemoteTooling(
       { ...params, toolingFullRef: "refs/heads/main" },
       (args) => String(capture(args)),

@@ -1,3 +1,2 @@
-835
-# PR #196480 release-specific streamed-export owner, equivalence, backpressure, restart,
-# one-permit, retained SDK, and per-page incognito authority regressions.
+738
+# PR #196480: paged session memory export regressions (20k stress, equivalence fingerprint, one-permit indexing, per-page incognito revocation).

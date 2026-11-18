@@ -1,6 +1,8 @@
 import type { TranslationMap } from "../lib/types.ts";
 import { en } from "./en.ts";
 
+const shared = en.aboutPage;
+
 const enAbout = {
   aboutPage: {
     productName: "CypherClaw",
@@ -11,6 +13,7 @@ const enAbout = {
       "CypherClaw is an independent fork of OpenClaw and is not affiliated with or endorsed by the OpenClaw Foundation.",
     linkWebsite: "OpenClaw website (upstream)",
     linkDocs: "OpenClaw docs (upstream)",
+    linkSupport: "Support",
     linkGitHub: "CypherClaw on GitHub",
     linkUpstreamGitHub: "OpenClaw on GitHub (upstream)",
     linkDiscord: "OpenClaw Discord (upstream)",
@@ -19,17 +22,17 @@ const enAbout = {
     license: "© 2026 OpenClaw Foundation — MIT License.",
     artifactTitle: "Control UI",
     artifactSubtitle: "Identity embedded when this browser artifact was built.",
-    artifactDetails: en.aboutPage.artifactDetails,
+    artifactDetails: shared.artifactDetails,
     version: "Version",
-    commit: en.aboutPage.commit,
+    commit: shared.commit,
     branch: "Branch",
-    built: en.aboutPage.built,
-    unavailable: en.aboutPage.unavailable,
-    copyCommit: en.aboutPage.copyCommit,
+    built: shared.built,
+    unavailable: shared.unavailable,
+    copyCommit: shared.copyCommit,
     copyingCommit: "Copying commit hash",
-    copiedCommit: en.aboutPage.copiedCommit,
+    copiedCommit: shared.copiedCommit,
     copyCommitFailed: "Could not copy commit hash",
-    gateway: en.aboutPage.gateway,
+    gateway: shared.gateway,
     gatewayVersion: "Connected Gateway version",
     gatewayVersionHint:
       "Reported by the active Gateway connection; separate from this Control UI build.",
@@ -37,6 +40,8 @@ const enAbout = {
 } satisfies TranslationMap;
 
 export const registerAboutEnglish = Object.assign(
-  () => Object.assign(en.aboutPage, enAbout.aboutPage),
+  () => {
+    Object.assign(en.aboutPage, enAbout.aboutPage);
+  },
   { catalog: enAbout },
 );

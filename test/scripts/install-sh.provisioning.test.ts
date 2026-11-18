@@ -21,6 +21,7 @@ describe.each(["npm", "git"])("%s Node provisioning", (installMethod) => {
       const installer = join(home, "install.sh");
       writeFileSync(installer, readStandaloneInstaller(process.cwd(), "install.sh"));
       mkdirSync(join(home, "state"));
+      mkdirSync(join(home, "checkout", ".git"), { recursive: true });
       const result = spawnSync(
         "/bin/bash",
         [
@@ -29,10 +30,14 @@ describe.each(["npm", "git"])("%s Node provisioning", (installMethod) => {
           "-c",
           `source "$1"
         INSTALL_METHOD=${installMethod}; NO_ONBOARD=1; NO_PROMPT=1; VERBOSE=${verbose}; GUM=""
+        GIT_DIR="$HOME/checkout"; GIT_DIR_EXPLICIT=1
         bootstrap_gum_temp() { :; }; print_installer_banner() { :; }; print_gum_status() { :; }
         detect_os_or_die() { OS=macos; }; detect_openclaw_checkout() { return 1; }
         show_install_plan() { :; }; check_existing_openclaw() { return 1; }
+        validate_git_checkout() { return 0; }; resolve_git_openclaw_ref() { printf 'main\\n'; }
+        git() { if [[ "$*" == *status* ]]; then printf ' M package.json\\n'; else return 0; fi; }
         load_nvm_for_node_detection() { NVM_DETECTED=0; }
+        resolve_node_package_engine() { :; }
         use_supported_nvm_node() { return 1; }; promote_supported_node_binary() { return 1; }
         node() { if [[ "$1" == -v ]]; then printf 'v20.0.0\\n'; else return 91; fi; }
         command() {

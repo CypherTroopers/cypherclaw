@@ -1,2 +1,2 @@
-# Real file-backed WAL checkpoint and successor-cursor regressions, minus retired probe assertions.
-29
+# Real file-backed WAL checkpoint and successor-cursor regressions, minus retired probe fixtures.
+18

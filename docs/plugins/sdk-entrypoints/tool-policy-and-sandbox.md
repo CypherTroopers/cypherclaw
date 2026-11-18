@@ -7,7 +7,8 @@ read_when:
   - You are parsing a sandbox bind specification
 ---
 
-Shared policy and sandbox parsing primitives for plugins. Part of the
+The synchronous policy and sandbox parsing primitives that
+`openclaw/plugin-sdk/agent-harness-runtime` exposes to plugins. Part of the
 [Plugin entry points](/plugins/sdk-entrypoints) reference.
 
 ## Tool policy vocabulary

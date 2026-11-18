@@ -1,4 +1,4 @@
-import path from "node:path";
+import { resolveOpenClawCliInvocation } from "../../../cli-invocation.mjs";
 import {
   UPDATE_PARENT_RUNS_POST_ACTIVATION_INSPECTIONS_ENV,
   UPDATE_POST_ACTIVATION_INSPECTIONS_REPORT_MODE,
@@ -8,11 +8,21 @@ import { resolveGatewayInstallEntrypoint } from "../../daemon/gateway-entrypoint
 import { readCypherClawDistribution } from "../../infra/cypherclaw-distribution.js";
 import { resolveInstallWorkTimeoutMs } from "../../infra/install-mode-options.js";
 import { runGlobalPackageUpdateSteps } from "../../infra/package-update-steps.js";
+import type {
+  PackageActivationOptions,
+  PackageUpdateTransaction,
+} from "../../infra/package-update-swap-contract.js";
 import { PackageUpdateActivationError } from "../../infra/package-update-swap-contract.js";
 import { deferPackageStateVerification } from "../../infra/package-update-verification-step.js";
 import { runtimeProcessEntrypoints } from "../../infra/runtime-process-entrypoints.js";
 import {
+  resolveRuntimeWorkerArgv,
+  resolveRuntimeWorkerUrl,
+} from "../../infra/runtime-worker-url.js";
+import type { UpdateDatabaseBackup } from "../../infra/update-database-backup.js";
+import {
   getUpdateDoctorConfigFailureReason,
+  type UpdateDoctorConfigChange,
 } from "../../infra/update-doctor-config.js";
 import { createDoctorServiceInspectionBudget } from "../../infra/update-doctor-deadline.js";
 import {
@@ -27,24 +37,23 @@ import {
   resolveGlobalInstallSpec,
   resolveGlobalInstallTarget,
   verifyPackageUpdateRecovery,
+  type ResolvedGlobalInstallTarget,
 } from "../../infra/update-global.js";
 import type { UpdateRecoveryBaselineRef } from "../../infra/update-recovery-baseline-capture.js";
 import type { UpdateRequester } from "../../infra/update-requester-authority.js";
 import type { UpdateRecoveryFence } from "../../infra/update-run-recovery.js";
-import {
-  normalizeFallbackFailureReason,
-  reportUpdateStepCompletion,
-} from "../../infra/update-runner-command.js";
+import { normalizeFallbackFailureReason } from "../../infra/update-runner-command.js";
 import {
   buildUpdateDoctorEnv,
   resolveUpdateDoctorExecutionPolicy,
 } from "../../infra/update-runner-doctor.js";
-import type { UpdateRunResult } from "../../infra/update-runner-types.js";
+import type { UpdateRunResult, UpdateStepProgress } from "../../infra/update-runner-types.js";
 import type { UpdateStepResult } from "../../infra/update-step-result.js";
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { runCommandWithTimeout } from "../../process/exec.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { CLI_NAME } from "../cli-name.js";
+import { createUpdateDoctorProgress } from "./progress.js";
 import {
   DEFAULT_PACKAGE_NAME,
   readPackageName,
@@ -54,19 +63,47 @@ import {
   runUpdateStep,
   UpdatePreMutationError,
 } from "./shared.js";
+import { readUpdateTargetCliOptions } from "./update-command-cli-options.js";
 import {
   createUpdateConfigSnapshot,
   captureUpdateConfigSnapshot,
   type UpdateConfigSnapshot,
 } from "./update-command-config-snapshot.js";
+import { observeUpdateParentDatabaseWrites } from "./update-command-database-receipts.js";
 import { withUpdateDoctorChild } from "./update-command-doctor-child.js";
 import { createPackageUpdateDoctorCompletion } from "./update-command-doctor-completion.js";
 import { readPackageUpdateIdentity } from "./update-command-package-identity.js";
-import type {
-  PackageDoctorOptions,
-  PackageInstallUpdateParams,
-} from "./update-command-package.types.js";
 import { resolveUpdateTargetEnv } from "./update-command-service-env.js";
+
+type PackageDoctorContext = {
+  runId: string;
+  executorFence: UpdateRecoveryFence;
+  requester?: Readonly<UpdateRequester>;
+  inputHash: string;
+  changes: UpdateDoctorConfigChange[];
+  databaseBackup?: UpdateDatabaseBackup;
+  originalRecoveryCapture?: UpdateRecoveryBaselineRef;
+  assertCurrent: () => void;
+  assertBoundChildCurrent: () => void;
+  onStateHandoff?: () => void;
+};
+
+type PackageDoctorOptions = {
+  root: string;
+  fullIntegrityCheck?: boolean;
+  restart?: boolean;
+  timeoutMs?: number;
+  /** Null leaves forward work unbounded; omission retains the caller's timeout. */
+  workTimeoutMs?: number | null;
+  progress: UpdateStepProgress;
+  assertCurrent?: () => void;
+  results?: UpdateStepResult[];
+  managedServiceEnv?: NodeJS.ProcessEnv;
+  invocationCwd?: string;
+  nodeRunner?: string;
+  onConfigSnapshot?: (snapshot: UpdateConfigSnapshot) => void;
+  getDoctorContext?: () => PackageDoctorContext | undefined;
+};
 
 export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
   const doctorTimeoutMs = resolveInstallWorkTimeoutMs(params.workTimeoutMs, params.timeoutMs);
@@ -92,26 +129,53 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
   await createUpdateConfigSnapshot(doctorEnv);
   const candidateHostVersion = await readPackageVersion(params.root);
   const doctorResultPath = createUpdatePostInstallDoctorResultPath();
-  const sectionTiming = createUpdateDoctorSectionTiming();
+  const sectionTiming = createUpdateDoctorSectionTiming(process.env, createUpdateDoctorProgress());
   // Service ownership stays with the finalizer while the retained package
   // transaction protects this migration and the later restart verification.
   const doctorPolicy = resolveUpdateDoctorExecutionPolicy({
     targetVersion: candidateHostVersion,
-    allowGatewayServiceRepair: false,
   });
-  const doctorArgv = [
-    params.nodeRunner ?? resolveNodeRunner(),
-    ...(context
-      ? [
-          path.join(
-            params.root,
-            "dist",
-            runtimeProcessEntrypoints.updateMigratedFinalize.distWorkerPath,
-          ),
-          "--doctor",
-        ]
-      : [entryPath, "doctor", "--non-interactive", ...(doctorPolicy.fix ? ["--fix"] : [])]),
-  ];
+  let doctorArgv: string[];
+  if (context) {
+    const workerRuntime = params.nodeRunner ?? resolveNodeRunner();
+    doctorArgv = [
+      workerRuntime,
+      ...resolveRuntimeWorkerArgv(
+        resolveRuntimeWorkerUrl({
+          ...runtimeProcessEntrypoints.updateMigratedFinalize,
+          root: params.root,
+        }),
+        workerRuntime,
+      ),
+      "--doctor",
+    ];
+  } else {
+    const fullIntegrityCheck =
+      params.fullIntegrityCheck &&
+      (
+        await readUpdateTargetCliOptions(
+          {
+            nodeRunner: params.nodeRunner ?? resolveNodeRunner(),
+            entryPath,
+            command: "doctor",
+          },
+          { cwd: params.root, baseEnv: doctorEnv, timeoutMs: params.timeoutMs },
+        )
+      ).has("--full-integrity-check");
+    // Older candidates already check fully and reject the new option.
+    const invocation = resolveOpenClawCliInvocation({
+      execPath: params.nodeRunner ?? resolveNodeRunner(),
+      entryPath,
+      execArgv: [],
+      args: [
+        "doctor",
+        "--non-interactive",
+        ...(doctorPolicy.fix ? ["--fix"] : []),
+        ...(fullIntegrityCheck ? ["--full-integrity-check"] : []),
+      ],
+    });
+    doctorArgv = [invocation.command, ...invocation.args];
+  }
   const doctorProgressInfo = {
     name: `${CLI_NAME} doctor`,
     command: doctorArgv.join(" "),
@@ -171,6 +235,13 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
     });
   let outcome: { step: UpdateStepResult } | { error: unknown };
   try {
+    if (context?.databaseBackup) {
+      await observeUpdateParentDatabaseWrites(context.databaseBackup, {
+        env: doctorEnv,
+        root: params.root,
+        assertCurrent,
+      });
+    }
     outcome = {
       step: context
         ? await withUpdateDoctorChild(
@@ -186,7 +257,11 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
               input: {
                 configInputHash: context.inputHash,
                 repair: doctorPolicy.fix,
-                databaseGenerations: context.databaseBackup?.sourceGenerations,
+                fullIntegrityCheck: params.fullIntegrityCheck,
+                databaseGenerations:
+                  context.databaseBackup?.migration?.to ??
+                  context.databaseBackup?.sourceGenerations,
+                databasePluginOwners: context.databaseBackup?.pluginOwners,
                 originalRecoveryCapture: context.originalRecoveryCapture,
                 get serviceInspectionDeadlineAtMs() {
                   const budget = remaining();
@@ -294,6 +369,26 @@ export async function prepareGitPackageExposure(
     },
   };
 }
+
+export type PackageInstallUpdateParams = Omit<PackageDoctorOptions, "results"> & {
+  reapplyLocalOverrides?: boolean;
+  requirePackageReplacement?: boolean;
+  installKind: "git" | "package" | "unknown";
+  tag: string;
+  installSpec?: string;
+  timeoutMs: number;
+  startedAt: number;
+  honorPackageRoot?: boolean;
+  resolveLifecycleNodeRunner?: () => string | undefined;
+  installEnv?: NodeJS.ProcessEnv;
+  installTarget?: ResolvedGlobalInstallTarget;
+  beforeVerifyCandidate?: (root: string) => Promise<void>;
+  validateCandidate: (root: string) => Promise<UpdateStepResult[]>;
+  beforeActivate: () => Promise<void>;
+  reserveInstallSlot?: (root: string) => void;
+  onTransaction: (transaction: PackageUpdateTransaction) => void | Promise<void>;
+  getActivation?: () => PackageActivationOptions | undefined;
+};
 
 /** Retain one staged target while its runtime initializes a fresh profile. */
 export async function stagePackageInstallUpdate(

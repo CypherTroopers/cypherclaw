@@ -152,10 +152,10 @@ it.each([false, true])(
         targetVersion: forkSelected ? "2026.9.4" : "2026.9.2",
       }),
     );
-    // 2026.10.33 is an extended-stable release, so non-fork package updates resolve
-    // that channel instead of the ordinary npm stable tag.
-    expect(updateCheck.resolveNpmChannelTag).toHaveBeenCalledTimes(0);
-    expect(updateCheck.resolveExtendedStablePackage).toHaveBeenCalledTimes(forkSelected ? 0 : 1);
+    // 2026.11.5 is a regular stable release, so non-fork package updates resolve
+    // the ordinary npm stable tag rather than the extended-stable channel.
+    expect(updateCheck.resolveNpmChannelTag).toHaveBeenCalledTimes(forkSelected ? 0 : 1);
+    expect(updateCheck.resolveExtendedStablePackage).toHaveBeenCalledTimes(0);
     expect(fetchRelease).toHaveBeenCalledTimes(forkSelected ? 2 : 0);
   },
 );

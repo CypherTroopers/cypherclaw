@@ -73,35 +73,18 @@ later. This is recommended bookkeeping, not another release gate.
 
 ## Shared release boundaries
 
-Resolve Release Decision ownership from the actual qualification route. This
-branch's admitted route checks out P's qualification verifier and uses its state
-and summary scripts; Q=C still owns the frozen workflow closure and declared
-coverage. Without admission, the workflow uses its own decision scripts. Do not
-infer decision ownership from Q=C or silently substitute newer main tooling.
-Apply only exceptions supported by the actually admitted P and Q's coverage
-contract. Selecting or admitting P remains a separate prequalification step;
-this documentation update selects no P and grants no exception.
-
-Carry explicit channel/contact restrictions and each recorded grant's original
-version/job/attempt scope through candidate changes and handoffs. A failed-job
-grant requires terminal evidence; it never permits skipping that job. A not-run
-exemption needs its own supported Q coverage contract. Preserve raw failures,
-original producer identities and measurements; re-evaluation is not a new test
-run or measurement.
-
-FRV must conclude **success** under the actually admitted decision policy. Every
-selected validation lane must pass unless an exact supported policy grant applies
-to its terminal failure; an operator instruction or publisher override is not
-such a grant. Required lanes include Windows
+FRV must conclude **success** under pinned P's
+[checked-in release-tooling policy](../../../docs/reference/full-release-validation/evidence.md#release-tooling-waivers).
+Only exact failed live-provider or Telegram leaves may be waived, without
+skipping tests or changing C/Q. All other required lanes must succeed: Windows
 and macOS Node and other normal CI jobs, install smoke, survivor
 lanes, `update-first-hop-compat*`, pack/npm qualification, package integrity,
 and Linux/Windows/macOS Gateway checks, including Windows packaged
 install/upgrade checks in Release Checks. A cancelled run still blocks. Preserve
 first failures and classify each one as below before recovery. Stable
 publication requires stable/full evidence, soak, and blocking performance.
-Beta-profile evidence cannot authorize stable publication. Hard gates and soak
-remain mandatory; any performance exception must be explicitly supported by
-the admitted policy and match the grant's exact scope. All nine Gateway install/upgrade
+Beta-profile evidence cannot authorize stable publication. None of those hard
+gates, soak, or performance can be waived. All nine Gateway install/upgrade
 combinations across Linux, Windows, and macOS are required for all-group
 qualification. Preserve identity, provenance, complete evidence, and existing
 publication approvals.
@@ -114,9 +97,9 @@ that is not a regression (for example the 2026.9.6 "Assign to…" bug). A real
 blocker is a regression in shipped bytes or behavior, or an update/install/
 publish defect; fix it on the release branch. Rerun a flake on
 the same Release SHA with at most two recorded reruns by default, and file a
-fix-in-parallel issue or PR on `main` with the evidence. Never re-cut, change
-P, or start a new FRV solely to waive a flake. An unwaived selected flake that remains red
-blocks publication.
+fix-in-parallel issue or PR on `main` with the evidence. Never re-cut for a flake.
+A deliberate tooling-code waiver requires FRV validation under the new pinned P,
+not a publisher override. An unwaived flake that remains red blocks publication.
 Main-only failures and infrastructure
 failures (runner outages, GitHub ghost jobs, hosted-runner offload) count as
 flakes for the release.
@@ -199,12 +182,19 @@ matching record, and root index may use `split-changelog-release-v1`
 to reuse product proof while qualifying new publication bytes. Any other
 source delta, rename, or deletion returns to the Code SHA loop. Historical
 root-only receipts retain `changelog-only-release-v1`.
-New qualification freezes **Q=C**: the entire qualification workflow closure,
-including the aggregate Release Decision, belongs to the candidate. Keep
-independently trusted **P** (admission, verifier, and publisher) separate.
-A qualification harness or aggregate-decision repair requires a new C/Q and
-newly bound evidence; P-only or infrastructure repairs can preserve the candidate.
-Missing qualification contracts need a deliberate backport, never future-main fallback.
+New test qualification defaults to **Q=C**. An explicit reviewed main-ancestor
+**Q** may instead be admitted through the candidate route while **C** retains
+source, package bytes, version, and baselines. Keep independently trusted **P**
+(admission, aggregate decision, verifier, and publisher) separate. A Q repair
+requires a new request, admission, and successful parent, not a new C unless
+product source changes. Missing contracts need a deliberate Q repair or candidate
+backport, never a moving-main fallback. Follow the
+[qualification-tooling recovery procedure](../../../docs/reference/full-release-validation/dispatch.md#recover-qualification-tooling-without-changing-the-candidate)
+and the CI skill's [C ≠ Q decision and command guide](../release-openclaw-ci/SKILL.md#repair-release-tooling-without-changing-the-product-c--q).
+Use new Q for workflow/harness/collector repairs, P for admission/verifier/publisher
+repairs, and new C only for changed product bytes. Reuse the explicitly qualified
+parent through the checklist's `--full-release-validation-run-id` and `--skip-dispatch`;
+its `--workflow-sha` still selects P, and its fresh qualification defaults to Q=C.
 
 Once a candidate is cut, its base is the operator's decision. Never re-cut
 (re-base the candidate on newer `main`) unless Peter explicitly asks for it in
@@ -219,14 +209,16 @@ Explicit operator-approved additions follow the
 record the changed scope and requalify the new candidate, never silently reuse
 invalidated proof. A manager's opportunity notification is not that approval.
 
-Release process improvements made during a release land on both branches.
+Release process improvements normally land on both branches, except independent
+qualification-only repairs as described below.
 Workflow, release-script, release-test, `RELEASING.md`, and release-skill changes
 normally merge to `main` first, then get cherry-picked (`-x`) directly onto the
 canonical release branch for the next candidate or patch, without a backport PR.
 Urgent release-first repairs follow [the new-fix route](#backports-and-new-fixes).
-A qualification repair needed for this release
-must land before freezing a new C/Q; never silently swap the harness for an
-already qualified candidate. Where `main`-only CI infrastructure is missing on the branch,
+A qualification-only repair can instead land
+in a reviewed independent Q and be newly admitted against unchanged C; no
+release-branch cherry-pick is required solely to update tooling. Never silently
+swap the harness or relabel an already qualified candidate's evidence. Where `main`-only CI infrastructure is missing on the branch,
 keep the branch's expression form and port only the logic. Product code on the
 release branch stays blocker-only per the rule above.
 
@@ -235,9 +227,10 @@ retrospective PR described below is the required open closeout deliverable, not
 an unresolved repair. List every PR created during the release (`gh pr list --author
 @me --state open` plus any PR bound to the session) and land or explicitly close
 each repair PR with a reason; confirm its fix is on `main` and, when it is release
-tooling, on the release branch. Also remove the release's temporary worktrees,
+tooling, on the release branch when the selected Q=C route requires it. Also
+remove the release's temporary worktrees,
 abandoned local cut branches, and stale `scripts/pr` worktrees. Then write the
-[retrospective](references/retrospective.md) and open its `openclaw/tideclaw`
+[retrospective](references/retrospective.md) and open its `openclaw/maintainers`
 PR with the issue-ledger update; keep a findings notes file from the start of the
 release so it can be written from evidence.
 

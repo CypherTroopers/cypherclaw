@@ -1,2 +1,4 @@
-# Sandbox-written setup, sibling, and claim markers cannot block global readiness; preserve local/Doctor gates and trusted attestations.
-72
+# Sandbox-copy readiness regression: a sandbox-written setup file or sibling attestation in the
+# sandbox root must not refuse the whole Gateway, plus genuine-legacy fixtures gaining their
+# state-dir attestation. Exact net growth for the sandbox-copy readiness fix.
+35

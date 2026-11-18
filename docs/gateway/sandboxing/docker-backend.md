@@ -10,7 +10,7 @@ The default local backend: its restricted defaults, GPU and Docker-out-of-Docker
 
 The Docker backend runs tools locally through the `docker` CLI. Its selection and error behavior are unchanged; it does not check or fall back to Podman.
 
-Defaults: `network: "none"` (no egress), `readOnlyRoot: true`, `capDrop: ["ALL"]`, image `openclaw-sandbox:bookworm-slim`.
+Defaults: `network: "none"` (no egress), `readOnlyRoot: true`, `capDrop: ["ALL"]`, image `openclaw-sandbox:trixie-slim`.
 
 This explicit configuration keeps the agent workspace read-only and preserves
 the default restricted runtime posture:
@@ -25,7 +25,7 @@ the default restricted runtime posture:
         scope: "session",
         workspaceAccess: "ro",
         docker: {
-          image: "openclaw-sandbox:bookworm-slim",
+          image: "openclaw-sandbox:trixie-slim",
           readOnlyRoot: true,
           tmpfs: ["/tmp", "/var/tmp", "/run"],
           network: "none",
@@ -42,18 +42,6 @@ OpenClaw also creates Docker sandbox containers with an init process and
 mounted read-only at `/agent`; write operations to the agent workspace are
 rejected, while the configured tmpfs paths remain writable.
 
-Writable workspaces protect managed skill directories with read-only bind mounts,
-including on first launch when those directories do not exist yet. Writable
-ancestors of nested skill mounts are pinned in place so a sandboxed process
-cannot rename an ancestor to bypass that protection. Other workspace files
-remain writable.
-
-After a Gateway restart, a running container may be replaced automatically when
-the only mount changes add these protections, its root filesystem is read-only,
-and all existing mounts still match. Containers with image volumes, incomplete
-setup, changed user binds, or use in the current Gateway process retain their
-normal explicit-recreation requirement.
-
 File tools require a host-backed bind mount. A tmpfs or image volume can hide
 files below a workspace bind; file tools report those paths as container-only
 instead of reading the hidden host files. Use `exec` to access that storage.
@@ -68,6 +56,17 @@ Other tmpfs options, such as size, mode, and uid, keep the normal configuration
 change behavior: a hot container stays running with a recreation notice, while
 a stopped or expired container is replaced. Recreate explicitly to apply those
 options immediately.
+
+After a Gateway restart, Docker and Podman tool containers can be replaced on
+their first use when an upgrade adds Gateway-managed read-only skill or resource
+mounts. Every existing mount must still match; replaced sources do not qualify. The
+old container must have a read-only root, no image volumes, and no retained
+persistent-exec custody; its last successful use must predate this Gateway
+process. Workspace and user bind sources and access modes must still match.
+Workspace files remain on the host, but replacement discards temporary container
+state and untracked background processes. Writable roots, user mount changes,
+restricted dispatch requiring current config, and hot browser containers still
+require explicit recreation.
 
 To expose host GPUs, set `agents.defaults.sandbox.docker.gpus` (or the per-agent override) to a value like `"all"` or `"device=GPU-uuid"`. This is passed to the selected container engine's Docker-compatible `--gpus` flag and requires compatible host GPU setup. Podman requires version 5.0 or newer for this option.
 

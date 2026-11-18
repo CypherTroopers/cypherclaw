@@ -54,11 +54,12 @@ run_test() {
     tests+=(-only-testing:OpenClawTests/IOSMediaArtifactLoaderTests -only-testing:OpenClawTests/OpenClawTypographyTests)
   fi
   local test_action=test
+  local project_args=(-project "$tree/apps/ios/OpenClaw.xcodeproj")
   if [[ "$stage" == after && "${IOS_TEST_BUILD_PREPARED:-false}" == true ]]; then
     test_action=test-without-building
   fi
   # Keep Actions log backpressure outside the simulator, retaining complete logs and xcresults.
-  xcodebuild -project "$tree/apps/ios/OpenClaw.xcodeproj" -scheme "$scheme" \
+  xcodebuild "${project_args[@]}" -scheme "$scheme" \
     -configuration Debug -destination "platform=iOS Simulator,id=$simulator" \
     -testLanguage en -testRegion US -parallel-testing-enabled NO \
     -resultBundlePath "$result" "${tests[@]}" "$test_action" > "$log" 2>&1 || status=$?
