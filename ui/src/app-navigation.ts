@@ -383,7 +383,7 @@ export function formatDocumentTitle(options: {
     ? options.context
     : `${options.context} — ${brandName}`;
   if (options.gatewayDisconnected) {
-    return `(${t("connection.disconnectedTitle")}) ${base}`;
+    return `(Disconnected) ${base}`;
   }
   if (options.attentionCount && options.attentionCount > 0) {
     return `(${options.attentionCount}) ${base}`;

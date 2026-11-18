@@ -132,6 +132,12 @@ it.each([false, true])(
       ...(await prepare(opts)),
       servicePlan: { rootRedirect: { root: selectedRoot, previousRoot: fixture.root } },
     }));
+    vi.spyOn(updateCheck, "resolveExtendedStablePackage").mockResolvedValue({
+      status: "resolved",
+      selector: "extended-stable",
+      version: "2026.9.2",
+      packageSpec: "openclaw@2026.9.2",
+    });
     const fetchRelease = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url.endsWith("/releases/latest")) {
@@ -146,7 +152,10 @@ it.each([false, true])(
         targetVersion: forkSelected ? "2026.9.4" : "2026.9.2",
       }),
     );
-    expect(updateCheck.resolveNpmChannelTag).toHaveBeenCalledTimes(forkSelected ? 0 : 1);
+    // 2026.10.33 is an extended-stable release, so non-fork package updates resolve
+    // that channel instead of the ordinary npm stable tag.
+    expect(updateCheck.resolveNpmChannelTag).toHaveBeenCalledTimes(0);
+    expect(updateCheck.resolveExtendedStablePackage).toHaveBeenCalledTimes(forkSelected ? 0 : 1);
     expect(fetchRelease).toHaveBeenCalledTimes(forkSelected ? 2 : 0);
   },
 );

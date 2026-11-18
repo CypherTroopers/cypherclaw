@@ -86,7 +86,7 @@ Validation used Node **24.22.1** and `pnpm install --frozen-lockfile`. `pnpm exe
 
 The `v2026.10.33` intake reapplies the reviewed fork delta through `6f3deaeba478f7c2c7f6b715370bef5f337639e6`, relative to official `v2026.10.7` commit `157d8c2bc3ea2fa183afdc11088e69690bf8e64e`, onto official `5196fbbf89838939b0c2e29c09b8829afbc0d415`. Official `v2026.10.7` is not an ancestor of this extended-stable tag, so the candidate rebuilds from the new stable commit and retains both histories as merge parents.
 
-Shared state migrates from schema **20** to **22** and agent databases from **25** to **27** through the official migration and backup owners. Preserve a verified pre-upgrade backup before activating this source against existing state. Node engines follow the official `>=24.16.0 <25 || >=26.1.0` floor while CypherClaw installers continue to provision private Node **24.22.1**. Cypher node controls, wallet generation, ColossusX tabs, branding assets, and the packaged fork's GitHub Releases update identity remain part of the fork.
+Shared state migrates from schema **20** to **22** and agent databases from **25** to **27** through the official migration and backup owners. Preserve a verified pre-upgrade backup before activating this source against existing state. Official 10.33 loosens the published Node floor, but this fork retains admission floors **24.22.1** / **26.12.1** (`package.json` engines and `node-version.mjs`) so CypherClaw installers keep provisioning private Node **24.22.1**. Cypher node controls, wallet generation, ColossusX tabs, branding assets, and the packaged fork's GitHub Releases update identity remain part of the fork.
 
 This source intake does not publish a release or activate a live Gateway.
 

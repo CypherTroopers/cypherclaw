@@ -5,8 +5,8 @@ const NODE_RELEASE_VERSION_RE =
   /^v?((?:0|[1-9]\d*))\.((?:0|[1-9]\d*))\.((?:0|[1-9]\d*))(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
 
 const NODE_RELEASE_FLOORS = [
-  { major: 24, minor: 16, patch: 0 },
-  { major: 26, minor: 1, patch: 0 },
+  { major: 24, minor: 22, patch: 1 },
+  { major: 26, minor: 12, patch: 1 },
 ];
 // These security patches are strongly recommended, not runtime admission floors.
 const NODE_SECURITY_RELEASE_FLOORS = [
