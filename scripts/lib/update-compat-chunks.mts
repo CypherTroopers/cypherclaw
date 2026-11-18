@@ -558,6 +558,25 @@ const PUBLISHED_CLEANUP_OWNERS = new Map([
   ["runtime-cleanup-BP1bw1d2.mjs", "runtime-cleanup-wqb3qv85.mjs"],
 ]);
 
+// CypherClaw inventory still records these 2026.9.3–2026.10.2 hashed exports after the
+// proc-safe migration left only retainWindowsProcessJobUntilExit in the live graph.
+// Map them to that retained export so bridges can re-export the old names.
+const COMPATIBILITY_ORIGIN_ALIASES = new Map<string, UpdateCompatibilityOrigin>([
+  [
+    "src/process/supervisor/service-child-windows-job-native.ts:bindWindowsProcessJobToOwner",
+    {
+      module: "src/process/supervisor/service-child-windows-job-native.ts",
+      symbol: "retainWindowsProcessJobUntilExit",
+    },
+  ],
+  [
+    "src/process/supervisor/service-child-windows-job-native.ts:createWindowsJobBindings",
+    {
+      module: "src/process/supervisor/service-child-windows-job-native.ts",
+      symbol: "retainWindowsProcessJobUntilExit",
+    },
+  ],
+]);
 
 export function listUpdateCompatibilityChunkPaths(
   inventory: UpdateCompatibilityInventory,
@@ -582,6 +601,10 @@ function currentOrigin(
   sourceDir: string,
   graph: ModuleGraph,
 ): UpdateCompatibilityOrigin {
+  const alias = COMPATIBILITY_ORIGIN_ALIASES.get(`${origin.module}:${origin.symbol}`);
+  if (alias) {
+    return currentOrigin(alias, sourceDir, graph);
+  }
   const file = path.join(sourceDir, origin.module);
   if (!fs.existsSync(file)) {
     return origin;
