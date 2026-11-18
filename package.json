@@ -498,7 +498,6 @@
     "!dist/plugin-sdk/path-existence-runtime.d.ts",
     "!dist/plugin-sdk/provider-auth-markers.d.ts",
     "!dist/plugin-sdk/terminal-safe-text.d.ts",
-    "release-compatibility.mjs",
     "cypher/colossusX_linux.sh",
     "cypher/colossusX_mac.sh",
     "cypher/colossusX_windows.ps1",
