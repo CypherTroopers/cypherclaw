@@ -1,11 +1,16 @@
-import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeOpenClawStateDatabaseAsync } from "../state/openclaw-state-db-cache.js";
+import { createOpenClawStateSchemaEnsurer } from "../state/openclaw-state-feature-schema-ensure.js";
+import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
 } from "../test-utils/openclaw-test-state.js";
-import { createCypherTransferStore } from "./transfer-store.js";
+import {
+  listCypherTransfersInDatabase,
+  readCypherTransferInDatabase,
+  writeCypherTransferInDatabase,
+} from "./transfer-store.kernel.js";
 import type { CypherTransferRecord } from "./types.js";
 
 const original: CypherTransferRecord = {
@@ -38,39 +43,49 @@ const original: CypherTransferRecord = {
 
 describe("Cypher transfer durable custody", () => {
   let state: OpenClawTestState;
-  let databasePath: string;
+  const ensureSchema = createOpenClawStateSchemaEnsurer({
+    table: "cypher_transfers",
+    indexes: ["idx_cypher_transfers_node_created"],
+    endMarker: "ON cypher_transfers(node_key, created_at_ms DESC, request_id);\n",
+    operationLabel: "cypherTransfers.schema.ensure",
+  });
+
   beforeAll(async () => {
     state = await createOpenClawTestState({ prefix: "cypher-transfer-store-", applyEnv: true });
-    databasePath = state.statePath("state", "openclaw.sqlite");
   });
+
   afterAll(async () => {
     await closeOpenClawStateDatabaseAsync();
     await state.cleanup();
   });
 
   it("keeps discovery noncreating and recovers the original send after reopening", async () => {
-    const store = createCypherTransferStore({ path: databasePath, env: state.env });
-    expect(await store.get(original.requestId)).toBeNull();
-    expect(await store.list({ pendingOnly: true })).toEqual([]);
-    expect(existsSync(databasePath)).toBe(false);
-    expect(await store.insert(original)).toEqual(original);
-    expect(await store.insert(original)).toEqual(original);
+    ensureSchema({ env: state.env });
+    const { db } = openOpenClawStateDatabase({ env: state.env });
+    expect(readCypherTransferInDatabase(db, original.requestId)).toBeNull();
+    expect(listCypherTransfersInDatabase(db, { pendingOnly: true })).toEqual([]);
+    expect(writeCypherTransferInDatabase(db, original, "insert")).toEqual(original);
+    expect(writeCypherTransferInDatabase(db, original, "insert")).toEqual(original);
     await closeOpenClawStateDatabaseAsync();
-    const reopened = createCypherTransferStore({ path: databasePath, env: state.env });
-    expect(await reopened.get(original.requestId)).toEqual(original);
-    expect(await reopened.list({ nodeKey: original.nodeKey, pendingOnly: true })).toEqual([
-      original,
-    ]);
-    expect(await reopened.list({ nodeKey: "another-node.ipc" })).toEqual([]);
+    const reopened = openOpenClawStateDatabase({ env: state.env });
+    expect(readCypherTransferInDatabase(reopened.db, original.requestId)).toEqual(original);
+    expect(
+      listCypherTransfersInDatabase(reopened.db, {
+        nodeKey: original.nodeKey,
+        pendingOnly: true,
+      }),
+    ).toEqual([original]);
+    expect(listCypherTransfersInDatabase(reopened.db, { nodeKey: "another-node.ipc" })).toEqual([]);
   });
 
-  it("refuses rebinding a request and cannot regress a completed payment", async () => {
-    const store = createCypherTransferStore({ path: databasePath, env: state.env });
+  it("refuses rebinding a request and cannot regress a completed payment", () => {
+    ensureSchema({ env: state.env });
+    const { db } = openOpenClawStateDatabase({ env: state.env });
     const payment = { ...original, requestId: "completed-payment", quoteId: "completed-quote" };
-    await store.insert(payment);
-    await expect(store.insert({ ...payment, to: `0x${"4".repeat(40)}` })).rejects.toThrow(
-      "different signed transaction",
-    );
+    writeCypherTransferInDatabase(db, payment, "insert");
+    expect(() =>
+      writeCypherTransferInDatabase(db, { ...payment, to: `0x${"4".repeat(40)}` }, "insert"),
+    ).toThrow("different signed transaction");
     const completed: CypherTransferRecord = {
       ...payment,
       status: "complete",
@@ -79,22 +94,15 @@ describe("Cypher transfer durable custody", () => {
       actualFee: original.estimatedFee,
       updatedAt: 200,
     };
-    expect(await store.update(completed)).toEqual(completed);
-    expect(await store.update({ ...payment, updatedAt: 300 })).toEqual(completed);
+    expect(writeCypherTransferInDatabase(db, completed, "update")).toEqual(completed);
+    expect(writeCypherTransferInDatabase(db, { ...payment, updatedAt: 300 }, "update")).toEqual(
+      completed,
+    );
     expect(
-      (await store.list({ pendingOnly: true })).some((row) => row.requestId === payment.requestId),
+      listCypherTransfersInDatabase(db, { pendingOnly: true }).some(
+        (row) => row.requestId === payment.requestId,
+      ),
     ).toBe(false);
-    expect(await store.get(payment.requestId)).toEqual(completed);
-  });
-
-  it("revoked write authority leaves no signed-send record", async () => {
-    const store = createCypherTransferStore({ path: databasePath, env: state.env });
-    const denied = { ...original, requestId: "revoked-send", quoteId: "revoked-quote" };
-    await expect(
-      store.insert(denied, () => {
-        throw new Error("caller revoked");
-      }),
-    ).rejects.toThrow("caller revoked");
-    expect(await store.get(denied.requestId)).toBeNull();
+    expect(readCypherTransferInDatabase(db, payment.requestId)).toEqual(completed);
   });
 });

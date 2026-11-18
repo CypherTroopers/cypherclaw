@@ -83,6 +83,18 @@
       "file": "fragment-sandbox_persistent_execs.postgres.sql"
     },
     {
+      "id": "cypher_transfers",
+      "tables": [
+        "cypher_transfers"
+      ],
+      "indexes": [
+        "idx_cypher_transfers_node_created"
+      ],
+      "dependencies": [],
+      "activation": "first-use",
+      "file": "fragment-cypher_transfers.postgres.sql"
+    },
+    {
       "id": "user_background_images",
       "tables": [
         "user_background_images"

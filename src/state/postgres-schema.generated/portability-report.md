@@ -13,11 +13,11 @@
 
 | Database | Object        | Total | Translated | Reported |
 | -------- | ------------- | ----: | ---------: | -------: |
-| state    | table         |   135 |        135 |        0 |
-| state    | column        |  1413 |       1411 |        2 |
-| state    | index         |   290 |        290 |        0 |
+| state    | table         |   136 |        136 |        0 |
+| state    | column        |  1436 |       1434 |        2 |
+| state    | index         |   292 |        292 |        0 |
 | state    | foreignKey    |    33 |         33 |        0 |
-| state    | check         |   299 |        299 |        0 |
+| state    | check         |   301 |        301 |        0 |
 | state    | trigger       |     0 |          0 |        0 |
 | state    | virtualTable  |     0 |          0 |        0 |
 | state    | internalTable |     1 |          0 |        1 |
@@ -37,6 +37,7 @@
 - capture_events.id: rowid alias becomes identity; rowid reuse semantics differ: PostgreSQL sequences are nontransactional and explicit values do not advance them.
 - config_revision_keys.id: rowid alias becomes identity; rowid reuse semantics differ: PostgreSQL sequences are nontransactional and explicit values do not advance them.
 - cron_job_runtime_authorities.recovery_required: 0/1 boolean candidate retained as bigint.
+- cypher_transfers.finality_supported: 0/1 boolean candidate retained as bigint.
 - macos_port_guardian_records.pid: rowid alias becomes identity; rowid reuse semantics differ: PostgreSQL sequences are nontransactional and explicit values do not advance them.
 - managed_outgoing_image_records.cleanup_pending: 0/1 boolean candidate retained as bigint.
 - meeting_transcript_utterances.final: 0/1 boolean candidate retained as bigint.
