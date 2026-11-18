@@ -1,4 +1,3 @@
-import type { LitElement } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   CypherStatus,
@@ -7,10 +6,14 @@ import type {
   CypherTransferRecord,
 } from "../../../../src/cypher/types.ts";
 import type { ApplicationContext } from "../../app/context.ts";
+import "../../lib/toast-host.tsx";
 import { createApplicationGateway } from "../../test-helpers/application-context.ts";
 import { createTestGatewayClient } from "../../test-helpers/gateway-client.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
-import "./cypher-page.ts";
+import { cleanupSolid, mountSolid } from "../../test-helpers/mount-solid.ts";
+import { createSolidApplicationContextProvider } from "../../test-helpers/solid-application-context.tsx";
+import { flush, waitForSolid } from "../../test-helpers/solid-settle.ts";
+import { CypherPage } from "./cypher-page.tsx";
 
 const signer = "0x1111111111111111111111111111111111111111";
 const secondWallet = "0x2222222222222222222222222222222222222222";
@@ -102,8 +105,6 @@ const transfer: CypherTransferRecord = {
   createdAt: 1,
   updatedAt: 2,
 };
-type TestPage = LitElement & { context: ApplicationContext };
-
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: Error) => void;
@@ -114,12 +115,12 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-async function settle(page: TestPage): Promise<void> {
-  for (let turn = 0; turn < 6; turn += 1) {
-    await page.updateComplete;
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 8; turn += 1) {
+    flush();
     await Promise.resolve();
   }
-  await page.updateComplete;
+  flush();
 }
 
 async function mount(
@@ -155,33 +156,50 @@ async function mount(
     lastError: null,
     lastErrorCode: null,
   });
-  const page = document.createElement("openclaw-cypher-page") as TestPage;
-  page.context = { gateway: source.gateway } as ApplicationContext;
-  document.body.append(document.createElement("openclaw-toast-host"), page);
-  await settle(page);
+  document.body.append(document.createElement("openclaw-toast-host"));
+  const provider = createSolidApplicationContextProvider({
+    gateway: source.gateway,
+  } as ApplicationContext);
+  mountSolid(() => <CypherPage />, { wrapper: provider.wrapper });
+  await settle();
+  const page = document.querySelector("openclaw-cypher-page");
+  if (!page) {
+    throw new Error("Missing ColossusX page");
+  }
   return { page, request, requestOptions, source, client, hello };
 }
 
-function button(page: TestPage, action: string): HTMLButtonElement {
-  return page.querySelector<HTMLButtonElement>(`[data-cypher-action="${action}"]`)!;
+function button(page: ParentNode, action: string): HTMLButtonElement {
+  const found = page.querySelector<HTMLButtonElement>(`[data-cypher-action="${action}"]`);
+  if (!found) {
+    throw new Error(`Missing ColossusX action ${action}`);
+  }
+  return found;
 }
 
-function input(page: TestPage, id: string): HTMLInputElement {
-  return page.querySelector<HTMLInputElement>(`#${id}`)!;
+function input(page: ParentNode, id: string): HTMLInputElement {
+  const found = page.querySelector<HTMLInputElement>(`#${id}`);
+  if (!found) {
+    throw new Error(`Missing ColossusX field ${id}`);
+  }
+  return found;
 }
 
-async function selectTab(page: TestPage, tab: string): Promise<void> {
-  page
-    .querySelector(`#cypher-tab-${tab}`)!
-    .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  await settle(page);
+async function selectTab(page: ParentNode, tab: string): Promise<void> {
+  const target = page.querySelector(`#cypher-tab-${tab}`);
+  if (!target) {
+    throw new Error(`Missing ColossusX tab ${tab}`);
+  }
+  target.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await settle();
 }
-function changeInput(page: TestPage, id: string, value: string): void {
+function changeInput(page: ParentNode, id: string, value: string): void {
   const field = input(page, id);
   field.value = value;
   field.dispatchEvent(new Event("input", { bubbles: true }));
 }
 afterEach(() => {
+  cleanupSolid();
   document.body.replaceChildren();
 });
 
@@ -242,7 +260,7 @@ describe("Cypher page", () => {
     expect(requestOptions.get("cypher.stop")).toEqual(
       expect.objectContaining({ timeoutMs: 35_000 }),
     );
-    await settle(page);
+    await settle();
   });
 
   it("clears all password fields before dispatch and keeps failed actions out of node logs", async () => {
@@ -259,7 +277,7 @@ describe("Cypher page", () => {
     expect(input(page, "cypher-account-password").value).toBe("");
     expect(input(page, "cypher-mining-password").value).toBe("");
     action.reject(new Error("Synthetic account failure"));
-    await vi.waitFor(() => {
+    await waitForSolid(() => {
       expect(page.querySelector('[role="alert"]')?.textContent).toContain(
         "Synthetic account failure",
       );
@@ -289,6 +307,7 @@ describe("Cypher page", () => {
     }
     expect(request.mock.calls.map(([method]) => method)).toEqual([
       "cypher.status",
+      "wallet.generator.status",
       "cypher.wallets.list",
       "cypher.transfers.list",
     ]);
@@ -304,9 +323,9 @@ describe("Cypher page", () => {
     button(page, "mining-start").click();
     source.publish({ ...source.gateway.snapshot, phase: "offline" });
     source.publish({ ...source.gateway.snapshot, phase: "connected" });
-    await settle(page);
+    await settle();
     action.resolve({ ...status, node: { ...status.node!, mining: true } });
-    await settle(page);
+    await settle();
     expect(button(page, "mining-start").disabled).toBe(false);
     expect(button(page, "mining-stop").disabled).toBe(true);
     expect(input(page, "cypher-mining-password").value).toBe("");
@@ -333,7 +352,7 @@ describe("Cypher page", () => {
       password: "fixture-only-password",
     });
     expect(input(page, "cypher-reward-password").value).toBe("");
-    await settle(page);
+    await settle();
     expect(page.textContent).toContain("Registered recipient B");
     expect(page.textContent).toContain(recipient);
     expect(page.textContent).toContain(signer);
@@ -374,7 +393,7 @@ describe("Cypher page", () => {
     );
     wallet.value = secondWallet;
     wallet.dispatchEvent(new Event("change", { bubbles: true }));
-    await settle(page);
+    await settle();
     input(page, "cypher-account-password").value = "fixture-only-password";
     input(page, "cypher-mining-password").value = "another-fixture-password";
     button(page, "unlock").click();
@@ -385,7 +404,7 @@ describe("Cypher page", () => {
     });
     expect(input(page, "cypher-account-password").value).toBe("");
     expect(input(page, "cypher-mining-password").value).toBe("");
-    await settle(page);
+    await settle();
     expect(wallet.value).toBe(secondWallet);
     expect(request.mock.calls.some(([method]) => method === "cypher.accounts.select")).toBe(false);
     expect(page.querySelector<HTMLSelectElement>("#cypher-account")?.value).toBe(signer);
@@ -424,22 +443,22 @@ describe("Cypher page", () => {
     expect([...wallet.options].map((option) => option.value)).toEqual(accounts);
     wallet.value = secondWallet;
     wallet.dispatchEvent(new Event("change", { bubbles: true }));
-    await settle(page);
+    await settle();
     reads.wallets = { ...firstPage, offset: 25, wallets: [wallets.wallets[1]!] };
     button(page, "wallet-next").click();
-    await settle(page);
+    await settle();
     expect(request).toHaveBeenCalledWith("cypher.wallets.list", { offset: 25, limit: 25 });
     expect(wallet.value).toBe(secondWallet);
     expect(page.textContent).toContain("0.000000000000000001");
     reads.wallets = firstPage;
     button(page, "wallet-previous").click();
-    await settle(page);
+    await settle();
     expect(wallet.value).toBe(secondWallet);
     await selectTab(page, "send");
     expect(page.querySelector<HTMLSelectElement>("#cypher-send-wallet")?.value).toBe(secondWallet);
     await selectTab(page, "wallets");
     button(page, "lock").click();
-    await settle(page);
+    await settle();
     expect(request).toHaveBeenCalledWith("cypher.accounts.lock", { address: secondWallet });
     expect(request.mock.calls.some(([method]) => method === "cypher.accounts.select")).toBe(false);
     expect(page.querySelector<HTMLSelectElement>("#cypher-account")?.value).toBe(signer);
@@ -464,9 +483,9 @@ describe("Cypher page", () => {
     sender.dispatchEvent(new Event("change", { bubbles: true }));
     changeInput(page, "cypher-send-recipient", signer);
     changeInput(page, "cypher-send-amount", "0.000000000000000001");
-    await settle(page);
+    await settle();
     button(page, "prepare").click();
-    await settle(page);
+    await settle();
     expect(request).toHaveBeenCalledWith("cypher.transfers.prepare", {
       from: secondWallet,
       to: signer,
@@ -479,7 +498,7 @@ describe("Cypher page", () => {
     const confirm = input(page, "cypher-send-confirm");
     confirm.checked = true;
     confirm.dispatchEvent(new Event("change", { bubbles: true }));
-    await settle(page);
+    await settle();
     input(page, "cypher-send-password").value = "fixture-only-password";
     button(page, "send").click();
     expect(input(page, "cypher-send-password").value).toBe("");
@@ -496,24 +515,27 @@ describe("Cypher page", () => {
       quoteId: quote.quoteId,
       password: "fixture-only-password",
     });
-    await page.updateComplete;
+    await settle();
     expect(button(page, "send").disabled).toBe(true);
     reads.transfers = [{ ...transfer, requestId: sendParams.requestId }];
     send.resolve(reads.transfers[0]);
-    await settle(page);
+    await settle();
     const row = page.querySelector(`[data-cypher-transfer="${sendParams.requestId}"]`)!;
     expect(row.textContent).toContain("Included · awaiting finality");
     expect(row.textContent).not.toContain("Complete");
     reads.transfers = [{ ...reads.transfers[0]!, status: "complete" }];
     button(page, "refresh").click();
-    await settle(page);
+    await settle();
     expect(
       page.querySelector(`[data-cypher-transfer="${sendParams.requestId}"]`)?.textContent,
     ).toContain("Complete");
-    await (document.querySelector("openclaw-toast-host") as LitElement).updateComplete;
-    expect(document.querySelector("openclaw-toast-host")?.textContent).toContain(
-      "Transfer complete: 0.000000000000000001 CLX.",
-    );
+    await document.querySelector("openclaw-toast-host")?.updateComplete;
+    await vi.dynamicImportSettled();
+    await waitForSolid(() => {
+      expect(document.querySelector("openclaw-toast-host")?.textContent).toContain(
+        "Transfer complete: 0.000000000000000001 CLX.",
+      );
+    });
     expect(
       request.mock.calls.filter(([method]) => method === "cypher.transfers.send"),
     ).toHaveLength(1);
@@ -560,16 +582,16 @@ describe("Cypher page", () => {
       sender.dispatchEvent(new Event("change", { bubbles: true }));
       changeInput(page, "cypher-send-recipient", signer);
       changeInput(page, "cypher-send-amount", quote.amount);
-      await settle(page);
+      await settle();
       button(page, "prepare").click();
-      await settle(page);
+      await settle();
       const confirm = input(page, "cypher-send-confirm");
       confirm.checked = true;
       confirm.dispatchEvent(new Event("change", { bubbles: true }));
-      await settle(page);
+      await settle();
       input(page, "cypher-send-password").value = "fixture-only-password";
       button(page, "send").click();
-      await settle(page);
+      await settle();
       expect(page.textContent).toContain(message);
       expect(page.textContent).not.toContain("The transfer was submitted.");
       expect(page.querySelector("[data-cypher-transfer]")?.textContent).toContain(transfer.hash);
@@ -608,7 +630,7 @@ describe("Cypher page", () => {
     expect(page.querySelector("#cypher-panel-wallets a")).toBeNull();
     await selectTab(page, "explorer");
     changeInput(page, "cypher-explorer-query", signer);
-    await settle(page);
+    await settle();
     expect(page.querySelector("#cypher-panel-explorer a")).toBeNull();
     expect(page.querySelector("#cypher-panel-explorer")?.textContent).toContain(
       "chain ID and genesis must both match",

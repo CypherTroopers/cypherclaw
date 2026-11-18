@@ -1,15 +1,14 @@
-import type { LitElement } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WalletGeneratorStatus } from "../../../../src/wallet-generator/types.ts";
 import type { ApplicationContext } from "../../app/context.ts";
-import {
-  createApplicationContextProvider,
-  createApplicationGateway,
-} from "../../test-helpers/application-context.ts";
+import { CypherPage } from "../../pages/cypher/cypher-page.tsx";
+import { createApplicationGateway } from "../../test-helpers/application-context.ts";
 import { createTestGatewayClient } from "../../test-helpers/gateway-client.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
-import "../../pages/cypher/cypher-page.ts";
-import "./wallet-generator.ts";
+import { cleanupSolid, mountSolid } from "../../test-helpers/mount-solid.ts";
+import { createSolidApplicationContextProvider } from "../../test-helpers/solid-application-context.tsx";
+import { flush } from "../../test-helpers/solid-settle.ts";
+import { WalletGenerator } from "./wallet-generator.tsx";
 
 const status: WalletGeneratorStatus = {
   platform: "linux",
@@ -37,10 +36,12 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-async function settle(element: LitElement): Promise<void> {
-  await element.updateComplete;
+async function settle(): Promise<void> {
+  flush();
   await Promise.resolve();
-  await element.updateComplete;
+  flush();
+  await Promise.resolve();
+  flush();
 }
 
 async function mount(
@@ -75,19 +76,24 @@ async function mount(
     lastError: null,
     lastErrorCode: null,
   });
-  const provider = createApplicationContextProvider({
+  const provider = createSolidApplicationContextProvider({
     gateway: source.gateway,
   } as ApplicationContext);
-  const host = document.createElement(
-    options.inCypherPage ? "openclaw-cypher-page" : "openclaw-wallet-generator",
-  ) as LitElement;
-  provider.append(host);
-  document.body.append(provider);
-  await settle(host);
-  const element = options.inCypherPage
-    ? host.querySelector<LitElement>("openclaw-wallet-generator")!
-    : host;
-  await settle(element);
+  const view = mountSolid(() => (options.inCypherPage ? <CypherPage /> : <WalletGenerator />), {
+    wrapper: provider.wrapper,
+  });
+  await settle();
+  const host = options.inCypherPage
+    ? view.container.querySelector("openclaw-cypher-page")
+    : view.container.querySelector("openclaw-wallet-generator");
+  if (!host) {
+    throw new Error("Missing wallet generator host");
+  }
+  const element = options.inCypherPage ? host.querySelector("openclaw-wallet-generator") : host;
+  if (!element) {
+    throw new Error("Missing wallet generator");
+  }
+  await settle();
   const completeRequest = async (method = "wallet.generator.generate") => {
     const index = clientRequest.mock.calls.findLastIndex(([called]) => called === method);
     const completion = clientRequest.mock.results[index];
@@ -96,17 +102,23 @@ async function mount(
     }
     // Await the public RPC promise, including the test client's async wrapper, before rendering.
     await Promise.allSettled([completion.value]);
-    await element.updateComplete;
+    await Promise.resolve();
+    flush();
   };
   await completeRequest("wallet.generator.status");
   return { element, host, request, source, provider, nodeRequest, completeRequest };
 }
 
-function button(element: LitElement, action: string): HTMLButtonElement {
-  return element.querySelector<HTMLButtonElement>(`[data-wallet-action="${action}"]`)!;
+function button(element: ParentNode, action: string): HTMLButtonElement {
+  const found = element.querySelector<HTMLButtonElement>(`[data-wallet-action="${action}"]`);
+  if (!found) {
+    throw new Error(`Missing wallet action ${action}`);
+  }
+  return found;
 }
 
 afterEach(() => {
+  cleanupSolid();
   document.body.replaceChildren();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(document, "execCommand");
@@ -125,7 +137,7 @@ describe("Wallet generator", () => {
     expect(button(element, "generate").disabled).toBe(false);
     button(element, "generate").click();
     button(element, "generate").click();
-    await settle(element);
+    await settle();
     expect(button(element, "generate").disabled).toBe(true);
     expect(
       request.mock.calls.filter(([method]) => method === "wallet.generator.generate"),
@@ -137,21 +149,21 @@ describe("Wallet generator", () => {
     expect(button(element, "generate").disabled).toBe(true);
     expect(host.querySelector('[role="log"]')?.textContent).not.toContain(wallet.address);
     button(element, "reveal").click();
-    await settle(element);
+    await settle();
     expect(element.querySelector('[data-wallet-value="privateKey"]')?.textContent).toBe(
       wallet.privateKey,
     );
     button(element, "reveal").click();
-    await settle(element);
+    await settle();
     expect(element.textContent).not.toContain(wallet.privateKey);
     button(element, "clear").click();
-    await settle(element);
+    await settle();
     expect(element.querySelector("[data-wallet-value]")).toBeNull();
     expect(button(element, "generate").disabled).toBe(false);
     button(element, "generate").click();
     await completeRequest();
     button(element, "reveal").click();
-    await settle(element);
+    await settle();
     expect(element.querySelector('[data-wallet-value="privateKey"]')?.textContent).toBe(
       wallet.privateKey,
     );
@@ -165,11 +177,11 @@ describe("Wallet generator", () => {
     await completeRequest();
     expect(writeText).not.toHaveBeenCalled();
     button(element, "copy-address").click();
-    await settle(element);
+    await settle();
     expect(writeText).toHaveBeenLastCalledWith(wallet.address);
     expect(element.textContent).toContain("Wallet address copied.");
     button(element, "copy-privateKey").click();
-    await settle(element);
+    await settle();
     expect(writeText).toHaveBeenLastCalledWith(wallet.privateKey);
     expect(element.textContent).toContain("Private key copied.");
     expect(element.textContent).not.toContain(wallet.privateKey);
@@ -202,7 +214,7 @@ describe("Wallet generator", () => {
     button(element, "copy-privateKey").click();
     button(element, "clear").click();
     copying.reject(new Error("Clipboard denied"));
-    await settle(element);
+    await settle();
     expect(element.querySelector("[data-wallet-value]")).toBeNull();
     expect(element.textContent).not.toContain("Private key copied.");
     expect(execCommand).not.toHaveBeenCalled();
@@ -231,7 +243,7 @@ describe("Wallet generator", () => {
       button(element, "generate").click();
       await completeRequest();
       button(element, "reveal").click();
-      await settle(element);
+      await settle();
       expect(element.textContent).toContain(wallet.privateKey);
       switch (reason) {
         case "disconnect":
@@ -255,7 +267,7 @@ describe("Wallet generator", () => {
           });
           break;
       }
-      await settle(element);
+      await settle();
       expect(element.textContent).not.toContain(wallet.privateKey);
       expect(element.textContent).not.toContain(wallet.address);
     },

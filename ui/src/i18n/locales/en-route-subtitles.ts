@@ -20,6 +20,7 @@ const enRouteSubtitles = {
     systems: "Machines and desktops.",
     usage: "API usage and costs.",
     cron: "Scheduled tasks and recurring agent runs.",
+    cypher: "Manage the ColossusX node on this Gateway.",
     skills: "Manage your agent skills",
     plugins: "Extend your Claw with tools",
     skillWorkshop: "Skills your agent learned, recent changes, and undo.",

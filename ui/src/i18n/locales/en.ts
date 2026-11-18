@@ -1043,6 +1043,7 @@ const startupEnglish = {
     systems: "Systems",
     usage: "Usage",
     cron: "Automations",
+    cypher: "ColossusX",
     skills: "Skills",
     plugins: "Plugins",
     skillWorkshop: "Skill workshop",
