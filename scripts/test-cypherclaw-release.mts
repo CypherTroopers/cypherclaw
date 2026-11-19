@@ -11,7 +11,7 @@ import {
 } from "./cypherclaw-release-validation.mjs";
 import type { LaneState } from "./lib/cross-os-release-checks/config.ts";
 import {
-  waitForInstalledGateway,
+  ensureManagedGatewayReady,
   waitForInstalledGatewayToStop,
 } from "./lib/cross-os-release-checks/installed.ts";
 import {
@@ -112,6 +112,16 @@ const inherited = new Set([
 for (const [key, value] of Object.entries(process.env)) {
   if (inherited.has(key.toUpperCase())) {
     env[key] = value;
+  }
+}
+if (process.platform === "win32" || process.platform === "darwin") {
+  // Match cross-OS release checks: published updaters see canonical scratch paths
+  // (darwin /var → /private/var) while the runner keeps its physical temp dirs.
+  for (const key of Object.keys(env)) {
+    const value = env[key];
+    if (["TEMP", "TMP", "TMPDIR"].includes(key.toUpperCase()) && value) {
+      env[key] = fs.realpathSync.native(value);
+    }
   }
 }
 Object.assign(env, {
@@ -257,7 +267,8 @@ async function probe(prefix: string, token: string) {
 }
 async function serving(prefix: string, release: Release, token: string, port: number) {
   const build = installedIdentity(prefix, release);
-  await waitForInstalledGateway({
+  // LaunchAgent can miss the first settle window on darwin; retry start once like cross-OS.
+  await ensureManagedGatewayReady({
     lane,
     cliPath: launcher(prefix),
     env,
