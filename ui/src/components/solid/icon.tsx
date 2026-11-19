@@ -1,5 +1,6 @@
 import { dynamic, type JSX } from "@solidjs/web";
 import { For } from "solid-js";
+import { CypherClawMark } from "../cypherclaw-logo.tsx";
 import { brandIconData, type BrandIconName } from "../icon-data-brand.ts";
 import { keyboardIconData, type KeyboardIconSymbol } from "../icon-data-tools.ts";
 import { strokeIconData, type IconData, type IconNode } from "../icon-data-types.ts";
@@ -70,7 +71,21 @@ function IconSvg(props: IconPresentation & { data: IconData }) {
 }
 
 export function Icon(props: IconPresentation & { name: IconName }) {
-  return <IconSvg {...props} data={iconData[props.name]} />;
+  // CypherClaw replaces the upstream claw/lobster glyphs with the fork mark.
+  // Keep the name read inside JSX so callers can swap icons reactively.
+  return (
+    <>
+      {props.name === "lobster" || props.name === "claw" ? (
+        <CypherClawMark
+          class={props.class}
+          style={props.style}
+          aria-label={props["aria-label"]}
+        />
+      ) : (
+        <IconSvg {...props} data={iconData[props.name]} />
+      )}
+    </>
+  );
 }
 
 export function KeyboardIcon(props: IconPresentation & { symbol: KeyboardIconSymbol }) {

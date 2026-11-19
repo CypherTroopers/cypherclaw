@@ -49,7 +49,7 @@ describe("Solid icons", () => {
     );
   });
 
-  it("renders gradient, brand, and keyboard shapes in the SVG namespace", () => {
+  it("renders CypherClaw mark, brand, and keyboard shapes in the SVG namespace", () => {
     const view = render(() => (
       <>
         <Icon name="lobster" />
@@ -59,17 +59,18 @@ describe("Solid icons", () => {
     ));
     const svgs = [...view.container.querySelectorAll("svg")];
     expect(svgs).toHaveLength(3);
-    expect(svgs[0]?.getAttribute("viewBox")).toBe("0 0 120 120");
-    expect(svgs[0]?.querySelector("linearGradient")?.getAttribute("id")).toBe("lob-g");
-    expect(svgs[0]?.querySelectorAll("stop")).toHaveLength(2);
-    expect(svgs[0]?.querySelector("path")?.getAttribute("fill")).toBe("url(#lob-g)");
+    expect(svgs[0]?.getAttribute("viewBox")).toBe("0 0 128 128");
+    expect(svgs[0]?.hasAttribute("data-cypherclaw-logo")).toBe(true);
+    expect(svgs[0]?.querySelector("image")?.getAttribute("href")).toBe("/cypherclaw-mark.png");
     expect(svgs[1]?.getAttribute("width")).toBe("16");
     expect(svgs[1]?.classList.contains("icon--filled")).toBe(true);
     expect(svgs[1]?.classList.contains("brand-icon")).toBe(true);
     expect(svgs[1]?.getAttribute("stroke")).toBe("none");
     expect(svgs[2]?.style.strokeWidth).toBe("2.3");
     expect(
-      [...view.container.querySelectorAll("*")].every((node) => node.namespaceURI === svgNamespace),
+      [...view.container.querySelectorAll("svg, image, path, circle, rect, stop, linearGradient, defs")].every(
+        (node) => node.namespaceURI === svgNamespace,
+      ),
     ).toBe(true);
   });
 
