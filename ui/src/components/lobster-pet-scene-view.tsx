@@ -1,6 +1,7 @@
 import { dynamic, type JSX } from "@solidjs/web";
 import { createMemo, Show } from "solid-js";
 import { isThemeCritterId } from "../../../packages/gateway-protocol/src/theme.ts";
+import { inferControlUiPublicAssetPath } from "../app/public-assets.ts";
 import { lobsterHonorific } from "./lobster-dex.ts";
 import { LobsterSvg } from "./lobster-pet-artwork.tsx";
 import type {
@@ -71,6 +72,7 @@ function Sprite(props: LobsterPetSceneProps & { twin: boolean }) {
         : args.look;
     const classes = [
       "lobster-pet",
+      "lobster-pet--cypherclaw",
       `lobster-pet--${args.mode}`,
       `lobster-pet--palette-${args.look.palette.id}`,
       twin ? "lobster-pet--twin" : "",
@@ -144,11 +146,13 @@ function Sprite(props: LobsterPetSceneProps & { twin: boolean }) {
         onContextMenu={(event) => props.onContextMenu(event)}
       >
         <div class="lobster-pet__body">
-          <LobsterSvg
-            look={visual().dressed}
-            grumpy={props.grumpy}
-            bindle={visual().bindle}
-            sailorCap={props.sailorDay}
+          <img
+            class="cypherclaw-resident-logo"
+            src={inferControlUiPublicAssetPath("cypherclaw-mascot.png")}
+            alt=""
+            width="512"
+            height="512"
+            draggable={false}
           />
           <Show when={props.entering && props.entrance === "balloon"}>
             <Balloon />

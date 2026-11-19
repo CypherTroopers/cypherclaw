@@ -57,7 +57,7 @@ defineSolidBridge<Props>(
                 <GatewayStatus {...props.gatewayStatus!} />
               </div>
             </Show>
-            <div class="topbar-brand" aria-label="OpenClaw">
+            <div class="topbar-brand" aria-label="CypherClaw">
               <img
                 class="topbar-brand__logo"
                 src={controlUiPublicAssetPath("apple-touch-icon.png", props.resourceBasePath)}
@@ -65,7 +65,7 @@ defineSolidBridge<Props>(
                 alt=""
                 aria-hidden="true"
               />
-              <span class="topbar-brand__title">OpenClaw</span>
+              <span class="topbar-brand__title">CypherClaw</span>
               <Show when={props.environment}>
                 {(environment) => (
                   <span class="control-ui-environment-pill">{environment().label}</span>
