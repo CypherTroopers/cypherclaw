@@ -273,7 +273,9 @@ jobs:
           - runner: ubuntu-24.04
             target: linux-x64
             timeout: 120
-          - runner: macos-15
+          # Default stays GitHub-hosted macos-15; override via repo var when a
+          # steadier mac pool is available (OpenClaw release checks use xcode-27).
+          - runner: ${{ vars.CYPHERCLAW_RELEASE_MACOS_RUNNER || 'macos-15' }}
             target: darwin-arm64
             timeout: 120
           - runner: windows-2025
